@@ -1,0 +1,1 @@
+"""ECONITH Quant :: bridge layer."""
