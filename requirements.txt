@@ -1,0 +1,25 @@
+# ECONITH :: backend_core
+# Pinned to current stable majors; refine as phases land.
+
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+
+# data connections
+httpx==0.28.1
+websockets==14.1          # required for LIVE Binance mode
+
+# storage
+sqlalchemy==2.0.36
+aiosqlite==0.20.0
+asyncpg==0.30.0
+redis==5.2.1
+
+# feature store (lazy-imported; Feature Store persistence needs pyarrow)
+pandas==2.2.3
+pyarrow==18.1.0
+
+# --- optional ML extras (auto-detected; heuristic fallback if absent) --------
+# scikit-learn==1.5.2     # GMM regime classifier (ai/regime/gmm.py)
+# hmmlearn==0.3.2         # HMM regime classifier (ai/regime/hmm.py)

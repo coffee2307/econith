@@ -1,0 +1,31 @@
+# ============================================================================
+#  ECONITH :: training toolbox  (install on the H200 / RunPod pod)
+#  `make setup-train`  ==  pip install -r requirements-train.txt
+# ----------------------------------------------------------------------------
+#  Economic analogy: this is the crate of specialised tools the factory workers
+#  need. The lightweight data tools (pandas/pyarrow) also run on your laptop so
+#  Phase A/B work anywhere; the heavy machinery (torch/sb3/ray) is meant for the
+#  H200 where the GPU muscle lives.
+# ============================================================================
+
+# --- data plane (also used locally by label.py / deploy.py) -----------------
+pandas==2.2.3
+pyarrow==18.1.0
+numpy==1.26.4
+PyYAML==6.0.2
+joblib==1.4.2
+
+# --- regime models (CPU) ----------------------------------------------------
+scikit-learn==1.5.2
+hmmlearn==0.3.2
+
+# --- deep RL + neural world model (GPU) -------------------------------------
+# On the H200 install the CUDA build of torch (RunPod images usually ship it);
+# this pin is the generic wheel and is overridden by the pod's CUDA torch.
+torch==2.4.1
+stable-baselines3==2.3.2
+gymnasium==0.29.1
+
+# --- parallel orchestration -------------------------------------------------
+ray[default]==2.35.0
+tqdm==4.66.5

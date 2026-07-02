@@ -1,0 +1,18 @@
+[project]
+name = "econith"
+version = "0.1.0"
+description = "ECONITH :: Unified AI Quant Research Platform & Financial World Simulator"
+requires-python = ">=3.11"
+readme = "README.md"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["econith_quant", "freqtrade", "dashboard"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

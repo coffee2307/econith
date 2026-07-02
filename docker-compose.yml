@@ -1,0 +1,91 @@
+# =============================================================================
+# ECONITH :: unified super-platform orchestration
+# Services:
+#   backend_core       -> Python / FastAPI (AI-001 Core Engine API)
+#   frontend_dashboard -> Node.js / Next.js (control dashboard, HTTPS)
+#   postgres / redis   -> backing stores for the Core Engine
+#
+# All services read secrets/config from the mounted ./.env file.
+#   cp .env.example .env   # then edit
+#   docker compose up --build
+# =============================================================================
+
+name: econith
+
+services:
+  backend_core:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: econith_backend_core
+    env_file: ./.env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config:/app/config:ro
+      - ./core:/app/core:ro
+      - ./infrastructure:/app/infrastructure:ro
+      - ./sentinel:/app/sentinel:ro
+      - ./main.py:/app/main.py:ro
+      - ./datasets:/app/datasets
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: unless-stopped
+    networks: [econith_net]
+
+  frontend_dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: econith_frontend_dashboard
+    env_file: ./.env
+    environment:
+      # Browser-side endpoints. The browser runs on the HOST, so it must reach
+      # the backend via localhost (NOT the docker service name).
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api/v1
+      NEXT_PUBLIC_WS_URL: ws://localhost:8000/api/v1/stream/metrics
+    # HTTP dev server: keeps the page same-scheme as the ws:// link so the
+    # live metrics socket is not blocked as mixed content. For HTTPS, switch to
+    # `npm run dev` + enable backend TLS (see README "Local HTTPS").
+    command: ["npm", "run", "dev:http"]
+    ports:
+      - "3000:3000"                  # http://localhost:3000
+    depends_on:
+      - backend_core
+    restart: unless-stopped
+    networks: [econith_net]
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: econith_postgres
+    environment:
+      POSTGRES_USER: econith
+      POSTGRES_PASSWORD: econith
+      POSTGRES_DB: econith
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U econith"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [econith_net]
+
+  redis:
+    image: redis:7-alpine
+    container_name: econith_redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    networks: [econith_net]
+
+networks:
+  econith_net:
+    driver: bridge
+
+volumes:
+  pgdata:
+  redisdata:

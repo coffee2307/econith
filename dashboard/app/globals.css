@@ -1,0 +1,185 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* NOTE: FontAwesome core CSS is imported in app/layout.tsx (a CSS `@import`
+   here would violate the rule that @import must precede all other rules). */
+
+:root {
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* Dark theme (default) */
+.dark {
+  --color-base: #0a0a0b;
+  --color-surface: #101012;
+  --color-elevated: #16161a;
+  --color-line: #26262b;
+  --color-ink: #ededef;
+  --color-muted: #9a9aa3;
+  --color-faint: #5c5c66;
+  color-scheme: dark;
+}
+
+/* Light theme */
+.light {
+  --color-base: #f8fafc;
+  --color-surface: #ffffff;
+  --color-elevated: #f1f5f9;
+  --color-line: #e2e8f0;
+  --color-ink: #0f172a;
+  --color-muted: #64748b;
+  --color-faint: #94a3b8;
+  color-scheme: light;
+}
+
+@layer base {
+  body {
+    @apply bg-base text-ink antialiased;
+  }
+  html:not(.app-viewport) body {
+    overflow-x: hidden;
+  }
+  .econith-grid {
+    background-color: var(--color-base);
+  }
+  /* Rigid viewport for ECONITH World / Quant — no document scroll */
+  html.world-viewport,
+  html.world-viewport body,
+  html.app-viewport,
+  html.app-viewport body {
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply border border-line bg-surface rounded-xl;
+  }
+  .panel-elevated {
+    @apply border border-line bg-elevated rounded-xl;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border px-5 py-2.5
+           text-sm font-medium transition-colors duration-150;
+  }
+  .btn-accent {
+    @apply btn border-accent bg-accent text-white hover:bg-blue-600 border-transparent;
+  }
+  .btn-world {
+    @apply btn border-world bg-world text-black hover:bg-emerald-400 border-transparent;
+  }
+  .btn-ghost {
+    @apply btn border-line bg-transparent text-ink hover:bg-elevated;
+  }
+
+  /* ECONITH Quant — NASA mission-control console */
+  .quant-console {
+    @apply relative min-h-0 font-mono;
+    background-image:
+      linear-gradient(rgba(59, 130, 246, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(59, 130, 246, 0.03) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+  .quant-frame {
+    @apply relative border border-line bg-surface backdrop-blur-sm;
+    box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.06);
+  }
+  .quant-frame::before,
+  .quant-frame::after {
+    content: "";
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border-color: rgba(59, 130, 246, 0.45);
+    pointer-events: none;
+  }
+  .quant-frame::before {
+    top: -1px;
+    left: -1px;
+    border-top: 2px solid;
+    border-left: 2px solid;
+  }
+  .quant-frame::after {
+    bottom: -1px;
+    right: -1px;
+    border-bottom: 2px solid;
+    border-right: 2px solid;
+  }
+  .quant-readout {
+    @apply rounded-lg border border-line bg-base px-3 py-2;
+    opacity: 0.98;
+  }
+  .quant-readout-label {
+    @apply text-[10px] uppercase tracking-[0.14em] text-faint leading-tight;
+  }
+  .quant-readout-value {
+    @apply mt-0.5 text-lg font-semibold tabular-nums tracking-tight text-ink;
+  }
+  .quant-ctrl-btn {
+    @apply inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border px-3 py-2 text-[11px] font-semibold uppercase tracking-wide transition-colors disabled:opacity-40;
+  }
+  html[data-locale="vi"] .quant-ctrl-btn {
+    @apply px-2.5 text-[10px] tracking-normal;
+  }
+  html[data-locale="vi"] .quant-readout-label {
+    @apply text-[9px] tracking-[0.08em];
+  }
+  html[data-locale="vi"] .quant-step-label {
+    @apply text-[10px] leading-snug;
+  }
+  .quant-pipeline-node {
+    @apply flex min-w-0 flex-1 flex-col items-center gap-1 rounded-lg border border-line bg-elevated px-2 py-2 text-center;
+  }
+  .quant-test-banner {
+    border-bottom: 1px solid rgba(245, 158, 11, 0.3);
+    background-color: rgba(245, 158, 11, 0.1);
+  }
+  .world-resize-handle {
+    @apply relative z-10 shrink-0 cursor-col-resize touch-none select-none;
+    background-color: var(--color-line);
+    opacity: 0.55;
+  }
+  .world-resize-handle:hover,
+  .world-resize-handle:active {
+    background-color: #10b981;
+    opacity: 0.85;
+  }
+  .world-resize-handle-h {
+    @apply relative z-10 shrink-0 cursor-row-resize touch-none select-none;
+    background-color: var(--color-line);
+    opacity: 0.55;
+  }
+  .world-resize-handle-h:hover,
+  .world-resize-handle-h:active {
+    background-color: #10b981;
+    opacity: 0.85;
+  }
+
+  /* ECONITH Quant — upper deck content-sized; terminal absorbs leftover viewport */
+  .quant-page-shell {
+    display: grid;
+    grid-template-rows: auto auto auto minmax(15rem, 1fr);
+    gap: 0.75rem;
+  }
+  @media (min-width: 640px) {
+    .quant-page-shell {
+      gap: 1rem;
+    }
+  }
+  .quant-upper-deck {
+    align-items: stretch;
+  }
+  .quant-terminal-dock {
+    min-height: 15rem;
+    height: 100%;
+    max-height: 100%;
+  }
+  .quant-terminal-scroll {
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+}

@@ -1,0 +1,36 @@
+# ECONITH :: root ignores
+
+# secrets / local env
+.env
+*.bak
+
+# local SSL certs
+certs/
+*.pem
+*.key
+*.crt
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# data / models (local artifacts)
+datasets/
+logs/
+models/
+checkpoints/
+*.sqlite
+*.parquet
+
+# node / next
+dashboard/node_modules/
+dashboard/.next/
+dashboard/out/
+
+# extraction artifact
+_plan_extracted.txt
