@@ -63,6 +63,29 @@ class Environment(BaseSettings):
     )
     redis_url: str = Field(default="redis://redis:6379/0", alias="REDIS_URL")
 
+    # --- Execution / capital ---------------------------------------------
+    # Single source of truth for the principal equity base. Bound natively into
+    # CockpitTelemetryHub, the Sentinel risk governor, and simulation runners so
+    # every read-model agrees on starting capital to the cent.
+    starting_capital: float = Field(default=100_000.0, alias="STARTING_CAPITAL")
+
+    # --- API security ----------------------------------------------------
+    # When enabled, sensitive mutating routes require an API key / bearer token.
+    api_auth_enabled: bool = Field(default=False, alias="API_AUTH_ENABLED")
+    # Comma-separated list of accepted API keys / bearer tokens.
+    api_keys: str = Field(default="", alias="API_KEYS")
+    # Rotating audit-trail sink for every operator state-mutation command.
+    audit_log_path: str = Field(default="logs/econith_audit.log", alias="AUDIT_LOG_PATH")
+    audit_log_max_bytes: int = Field(default=5_000_000, alias="AUDIT_LOG_MAX_BYTES")
+    audit_log_backups: int = Field(default=5, alias="AUDIT_LOG_BACKUPS")
+
+    @property
+    def api_key_set(self) -> frozenset[str]:
+        """Parsed, de-duplicated set of accepted API keys / bearer tokens."""
+        return frozenset(
+            tok.strip() for tok in self.api_keys.split(",") if tok.strip()
+        )
+
     @property
     def has_fred_credentials(self) -> bool:
         """True only if a real (non-placeholder) FRED API key is configured."""

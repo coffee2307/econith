@@ -45,6 +45,7 @@ from bridges.world_bridge import WorldBridge
 from config.database import dispose_database, init_database, is_fallback
 from config.environment import get_environment
 from config.settings import TIME_SPEED_MULTIPLIERS, get_settings
+from core.api import install_api_security
 from core.cockpit import CockpitTelemetryHub, build_cockpit_router
 from core.engine import get_engine
 from core.ingestion import MacroIngestionHub, MacroIngestionSettings
@@ -92,13 +93,15 @@ async def lifespan(app: FastAPI):
     recorder = StateRecorder(engine.bus)
     recorder.register()
 
-    sentinel = Sentinel(engine.bus)
+    sentinel = Sentinel(engine.bus, starting_capital=settings.starting_capital)
     sentinel.register()
 
     # --- Advanced read-models (CORE / cockpit / journalist) --------------
     macro_hub = MacroIngestionHub(engine.bus, MacroIngestionSettings.from_environment())
 
-    cockpit_hub = CockpitTelemetryHub(engine.bus)
+    cockpit_hub = CockpitTelemetryHub(
+        engine.bus, starting_capital=settings.starting_capital
+    )
     cockpit_hub.register()
 
     journalist = JournalistLLM(engine.bus)
@@ -216,6 +219,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Guarded API security: gate sensitive mutating routes + audit-trail every
+# operator state-mutation command (no-op auth when API_AUTH_ENABLED is false).
+install_api_security(app, settings)
 
 
 # --- typed request bodies ----------------------------------------------------

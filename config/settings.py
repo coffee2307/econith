@@ -2,6 +2,13 @@
 
 Application-wide static settings and the Time Engine speed contract.
 Combines the typed environment with constants defined by the master plan.
+
+This module is the single, centralized configuration surface: execution
+parameters (``starting_capital``), API security (``api_auth_enabled``,
+``api_keys``, protected route prefixes) and the audit-trail sink are all bound
+here from :class:`~config.environment.Environment` so every subsystem
+(CockpitTelemetryHub, Sentinel, simulation runners, the auth middleware) reads
+one coherent contract.
 """
 from __future__ import annotations
 
@@ -33,6 +40,56 @@ class Settings:
     )
 
     time_speed_multipliers: tuple[int, ...] = TIME_SPEED_MULTIPLIERS
+
+    # -- execution / capital --------------------------------------------------
+    @property
+    def starting_capital(self) -> float:
+        """Principal equity base shared by cockpit, sentinel and simulators."""
+        return self.env.starting_capital
+
+    # -- API security ---------------------------------------------------------
+    @property
+    def api_auth_enabled(self) -> bool:
+        return self.env.api_auth_enabled
+
+    @property
+    def api_keys(self) -> frozenset[str]:
+        return self.env.api_key_set
+
+    @property
+    def audit_log_path(self) -> str:
+        return self.env.audit_log_path
+
+    @property
+    def audit_log_max_bytes(self) -> int:
+        return self.env.audit_log_max_bytes
+
+    @property
+    def audit_log_backups(self) -> int:
+        return self.env.audit_log_backups
+
+    @property
+    def protected_path_prefixes(self) -> tuple[str, ...]:
+        """Sensitive mutating routes guarded by the auth middleware.
+
+        Every entry is a fully-qualified path prefix (``api_prefix`` applied).
+        A request whose path starts with any of these AND uses a mutating HTTP
+        method must present a valid API key / bearer token.
+        """
+        p = self.api_prefix
+        return (
+            f"{p}/mode",
+            f"{p}/world/tariff",
+            f"{p}/world/mutate",
+            f"{p}/world/scenario",
+            f"{p}/world/country",       # covers /world/country/{code}/mutate
+            f"{p}/sentinel/inject",
+            f"{p}/sentinel/reset",
+            f"{p}/time/speed",
+            f"{p}/time/pause",
+            f"{p}/time/resume",
+            f"{p}/order",               # execution-intent injection paths
+        )
 
 
 _settings: Settings | None = None

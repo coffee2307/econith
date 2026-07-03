@@ -1,14 +1,15 @@
-﻿# ECONITH — Quant + World Runtime Architecture
+﻿# ECONITH — Quant + World Production Runtime
 
 > Cập nhật: 03/07/2026 (UTC+7)  
-> Trạng thái hiện tại: backend ASGI boot được, dashboard Quant/World hoạt động, cockpit WS đã có, và 3 khoản nợ P0 đã được xử lý: **equity sync**, **mode-gated isolation**, **database failover**.
+> Trạng thái: backend ASGI ổn định, dashboard Quant/World hoạt động, cockpit WS live. Đã đóng các khoản nợ kiến trúc trọng yếu:
+> **equity sync**, **mode-gated isolation (consumer + producer + CCXT air-gap)**, **Postgres→SQLite failover**, **config centralization**, **API security + audit trail**, và **H200 async training harness**.
 
-ECONITH là hệ thống nghiên cứu định lượng kết hợp hai miền tách biệt:
+ECONITH là hệ thống nghiên cứu định lượng gồm hai miền tách biệt chủ quyền:
 
-- **ECONITH Quant**: ingest dữ liệu thị trường, tạo feature, chạy AI decision, route order intent, kiểm soát rủi ro bằng Sentinel, hiển thị cockpit trading dashboard.
-- **ECONITH World**: mô phỏng kinh tế-vĩ mô-địa chính trị bằng sovereign multi-agent graph để stress-test, tạo kịch bản và nghiên cứu hiệu ứng lan truyền.
+- **ECONITH Quant** — ingest dữ liệu thị trường, tạo feature, chạy AI decision, route order intent, kiểm soát rủi ro bằng Sentinel, hiển thị cockpit trading dashboard.
+- **ECONITH World** — mô phỏng kinh tế-vĩ mô-địa chính trị bằng sovereign multi-agent graph để stress-test và nghiên cứu hiệu ứng lan truyền.
 
-Mục tiêu của dự án là xây một vòng đời hoàn chỉnh:
+Vòng đời hoàn chỉnh:
 
 ```text
 live data -> feature -> signal -> risk gate -> execution/fill -> cockpit telemetry
@@ -19,108 +20,87 @@ live data -> feature -> signal -> risk gate -> execution/fill -> cockpit telemet
 
 ---
 
-## 1. Kiến trúc runtime hiện tại
+## 1. System Runtime Map
 
 ```text
 main.py (FastAPI ASGI lifespan)
   |
+  +-- API Security Layer              core/api/auth.py
+  |    +-- APIKeyAuthMiddleware        gate mutating routes (X-API-Key / Bearer)
+  |    +-- AuditTrailLogger            rotating JSON audit of operator commands
+  |
   +-- Core Engine
-  |    +-- EventBus                  core/event_bus.py
-  |    +-- TimeEngine                core/engine.py
-  |    +-- 5-phase TickPipeline       SNAPSHOT -> APPLY_EVENTS -> RESOLVE_CONFLICTS -> UPDATE_WORLD -> EMIT_SIGNALS
-  |    +-- QuantMode                 core/mode.py (REALITY | SIMULATION)
+  |    +-- EventBus                    core/event_bus.py (pub/sub + mode gate)
+  |    +-- TimeEngine                  core/engine.py
+  |    +-- 5-phase TickPipeline        SNAPSHOT -> APPLY_EVENTS -> RESOLVE_CONFLICTS -> UPDATE_WORLD -> EMIT_SIGNALS
+  |    +-- QuantMode                   core/mode.py (REALITY | SIMULATION)
   |
   +-- Market Data Plane
-  |    +-- BinanceWebSocketStreamer  infrastructure/websocket/streamer.py
-  |    +-- MarketDataPipeline        infrastructure/preprocessing/pipeline.py
-  |    +-- AlternativeDataProvider   infrastructure/alternative/provider.py
-  |    +-- MacroIngestionHub         core/ingestion/macro_hub.py
+  |    +-- BinanceWebSocketStreamer    infrastructure/websocket/streamer.py
+  |    +-- MarketDataPipeline          infrastructure/preprocessing/pipeline.py
+  |    +-- AlternativeDataProvider     infrastructure/alternative/provider.py
+  |    +-- MacroIngestionHub           core/ingestion/macro_hub.py
   |
   +-- Quant Brain
-  |    +-- Predictor                 ai/inference/predictor.py
-  |    +-- Regime + desk fusion       ai/regime/, ai/agents/
-  |    +-- AIBridge                  econith_quant/bridge/ai_bridge.py
-  |    +-- QuantExecutionBridge      bridges/quant_bridge.py
-  |    +-- CCXTBinanceBridge         quant/ccxt_bridge.py
+  |    +-- Predictor                   ai/inference/predictor.py
+  |    +-- Regime + desk fusion         ai/regime/, ai/agents/
+  |    +-- AIBridge                    econith_quant/bridge/ai_bridge.py
+  |    +-- QuantExecutionBridge        bridges/quant_bridge.py (DOMAIN_QUANT)
+  |    +-- CCXTBinanceBridge           quant/ccxt_bridge.py (live/synthetic + air-gap)
   |
   +-- Risk + Persistence
-  |    +-- Sentinel                  sentinel/manager.py
-  |    +-- CircuitBreaker            sentinel/circuit_breaker.py
-  |    +-- StateRecorder             infrastructure/storage/recorder.py
-  |    +-- DB failover               config/database.py
+  |    +-- Sentinel                    sentinel/manager.py (execution-truth equity)
+  |    +-- CircuitBreaker              sentinel/circuit_breaker.py
+  |    +-- StateRecorder               infrastructure/storage/recorder.py
+  |    +-- Database failover           config/database.py (Postgres -> SQLite)
   |
   +-- World Simulator
-  |    +-- WorldKernel               ai/simulator_engine/world_kernel.py
-  |    +-- SovereignWorldGraph       ai/simulator_engine/sovereign_graph.py
-  |    +-- WorldBridge               bridges/world_bridge.py
+  |    +-- WorldKernel                 ai/simulator_engine/world_kernel.py
+  |    +-- SovereignWorldGraph         ai/simulator_engine/sovereign_graph.py
+  |    +-- WorldBridge                 bridges/world_bridge.py
   |
   +-- User Interfaces
-       +-- MetricsHub                core/telemetry.py
-       +-- CockpitTelemetryHub       core/cockpit/ws.py
-       +-- JournalistLLM             ai/journalist/aggregator.py
-       +-- Next.js Dashboard         dashboard/
+       +-- MetricsHub                  core/telemetry.py
+       +-- CockpitTelemetryHub         core/cockpit/ws.py
+       +-- JournalistLLM               ai/journalist/aggregator.py
+       +-- Next.js Dashboard           dashboard/
 ```
 
----
-
-## 2. Hai thế giới vận hành: REALITY và SIMULATION
-
-`QUANT_MODE` là ranh giới chủ quyền dữ liệu:
-
-| Mode | Ý nghĩa | Data plane | Execution |
-|---|---|---|---|
-| `REALITY` | Chế độ mặc định an toàn | Dữ liệu thị trường thật / Binance / macro thật | Chỉ được dùng live/testnet nếu CCXT đã authenticated; `world.*` bị chặn khỏi domain Quant |
-| `SIMULATION` | Sandbox nghiên cứu | World simulator được phép tác động Quant | CCXT bị air-gap khỏi live socket; fill route sang synthetic simulation |
-
-### Invariant quan trọng
-
-Trong `REALITY`, Quant và World **không được trộn dữ liệu**. World có thể vẫn chạy để dashboard hiển thị, nhưng mọi event `world.*` hướng vào order-routing domain sẽ bị `EventBus` drop.
-
-Trong `SIMULATION`, Quant có thể ăn synthetic vectors của World, nhưng CCXT không được giữ live network/order socket.
+Cấu hình tập trung tại `config/settings.py` + `config/environment.py`: `STARTING_CAPITAL`, API auth, audit sink, DB DSN — tất cả bind một lần và chảy xuống mọi subsystem.
 
 ---
 
-## 3. Các P0 đã xử lý
+## 2. Operational Guardrails — cách cô lập REALITY / SIMULATION
 
-### 3.1 Equity sync: Sentinel và Cockpit dùng cùng execution truth
+`QUANT_MODE` là ranh giới chủ quyền dữ liệu. Việc cách ly được thực thi bằng **bốn tầng phòng vệ độc lập**:
 
-File chính: `sentinel/manager.py`, `core/cockpit/ws.py`
+| Tầng | Cơ chế | File |
+|---|---|---|
+| 1. Consumer gate | `EventBus` drop event `world.*` tới handler `DOMAIN_QUANT` khi `REALITY` | `core/event_bus.py` |
+| 2. Producer air-gap | `SovereignWorldGraph` không phát `world.micro_impact` khi không ở SIMULATION | `ai/simulator_engine/sovereign_graph.py` |
+| 3. Execution air-gap | `CCXTBinanceBridge` dispose live socket ngay khi rời `REALITY`; chỉ live khi authenticated | `quant/ccxt_bridge.py` |
+| 4. Anomaly gate | Inject anomaly bị từ chối ngoài SIMULATION | `main.py`, `core/mode.py` |
 
-Trước đây:
+### REALITY (mặc định an toàn)
 
-- Cockpit Fuel Gauge tính equity từ `quant.fill`.
-- Sentinel tự tính equity từ mock budget `$1,000,000` + price move.
-- Kết quả là hai panel hiển thị hai sổ vốn khác nhau.
+- Quant chỉ ăn dữ liệu thật (Binance WS + alt-data + macro thật).
+- Mọi `world.*` hướng vào order-routing bị chặn ở EventBus → không look-ahead bias.
+- World simulator vẫn chạy để dashboard hiển thị, nhưng không tác động vào brain.
+- CCXT chỉ route live khi có credential thật đã authenticated; nếu không → synthetic fill.
 
-Hiện tại:
+### SIMULATION (sandbox nghiên cứu)
 
-- Sentinel subscribe trực tiếp `quant.fill`.
-- Sentinel replay fill bằng cùng logic position/PnL với cockpit.
-- `md.ticker` chỉ dùng để mark-to-market open positions và đo latency.
-- Equity của Sentinel và Cockpit Fuel Gauge khớp 1:1.
+- Cho phép World tác động Quant qua `world.micro_impact` (coupling).
+- Cho phép inject anomaly để stress-test.
+- CCXT bị air-gap khỏi live socket; fill route sang synthetic.
 
-### 3.2 Mode-gated EventBus
+### Equity truth (Sentinel ↔ Cockpit)
 
-File chính: `core/event_bus.py`, `bridges/quant_bridge.py`, `quant/ccxt_bridge.py`
+Sentinel subscribe `quant.fill` và replay bằng đúng thuật toán position/PnL của Cockpit. `STARTING_CAPITAL` (mặc định `100000.0`) bind chung cho cả hai → equity của Sentinel và Cockpit Fuel Gauge khớp 1:1. `md.ticker` chỉ dùng mark-to-market + latency heartbeat.
 
-Đã thêm:
+### Database failover
 
-- `DOMAIN_QUANT` cho các handler thuộc order-routing/execution.
-- `EventBus.subscribe(..., domain=DOMAIN_QUANT)`.
-- Khi `QuantMode.REALITY`, event `world.*` bị drop trước khi tới handler domain Quant.
-- `CCXTBinanceBridge` có mode-change guard: rời `REALITY` là dispose live exchange session ngay.
-
-### 3.3 Database failover
-
-File chính: `config/database.py`, `main.py`
-
-Đã thêm:
-
-- `init_database()` probe database primary bằng `SELECT 1` với timeout.
-- Nếu Postgres lỗi/unreachable: log `CRITICAL` và failover sang `sqlite:///econith_fallback.db`.
-- `dispose_database()` chạy lúc ASGI shutdown.
-
-Thông điệp log kỳ vọng khi failover:
+`init_database()` probe primary DSN bằng `SELECT 1` (timeout 5s). Nếu Postgres unreachable → log `CRITICAL` và failover sang `sqlite+aiosqlite:///econith_fallback.db`. Không bao giờ silent-fail.
 
 ```text
 [DATABASE RUNTIME] Primary Postgres connection failed. Deploying local failover instance.
@@ -128,7 +108,45 @@ Thông điệp log kỳ vọng khi failover:
 
 ---
 
-## 4. EventBus topic contract
+## 3. API Security & Audit Trail
+
+Middleware `APIKeyAuthMiddleware` (`core/api/auth.py`) gate các route mutating nhạy cảm:
+
+```text
+/api/v1/mode
+/api/v1/world/tariff
+/api/v1/world/mutate
+/api/v1/world/scenario
+/api/v1/world/country/{code}/mutate
+/api/v1/sentinel/inject
+/api/v1/sentinel/reset
+/api/v1/time/{speed,pause,resume}
+/api/v1/order*
+```
+
+Bật auth qua `.env`:
+
+```env
+API_AUTH_ENABLED=true
+API_KEYS=key_alpha,key_bravo
+```
+
+Gọi kèm credential:
+
+```powershell
+curl -X POST http://127.0.0.1:8000/api/v1/mode `
+  -H "X-API-Key: key_alpha" -H "Content-Type: application/json" `
+  -d "{\"mode\":\"SIMULATION\"}"
+# hoặc: -H "Authorization: Bearer key_alpha"
+```
+
+- Route đọc (GET) và WebSocket stream **không** bị gate → dashboard chạy bình thường.
+- Mọi lệnh mutation ghi vào audit trail xoay vòng `logs/econith_audit.log` (JSON lines), key chỉ lưu fingerprint SHA-256, không lưu key thô.
+- `API_AUTH_ENABLED=false` (mặc định): route mở nhưng vẫn ghi audit (`ALLOW_AUTH_DISABLED`).
+
+---
+
+## 4. EventBus Topic Contract
 
 | Topic | Producer | Consumer chính |
 |---|---|---|
@@ -137,34 +155,23 @@ Thông điệp log kỳ vọng khi failover:
 | `indicator.obi`, `indicator.volume_delta` | `MarketDataPipeline` | `Predictor`, `MetricsHub` |
 | `alt.funding_rate`, `alt.open_interest`, `alt.liquidation` | `AlternativeDataProvider` | `Predictor`, `MetricsHub` |
 | `ai.signal` | `Predictor` | `AIBridge`, telemetry |
-| `order.intent` | AI/execution bridge | `QuantExecutionBridge` |
+| `order.intent` | AI/execution bridge | `QuantExecutionBridge` (DOMAIN_QUANT) |
 | `quant.fill` | `CCXTBinanceBridge` | `CockpitTelemetryHub`, `Sentinel`, `JournalistLLM` |
-| `sentinel.status` | `Sentinel` | `MetricsHub`, `StateRecorder`, dashboard |
-| `sentinel.emergency` | `Sentinel` | telemetry, event log |
+| `sentinel.status`, `sentinel.emergency` | `Sentinel` | telemetry, recorder, dashboard |
 | `core.macro.context` | `MacroIngestionHub` | cockpit, journalist |
 | `world.sovereign`, `world.macro` | World simulator | World dashboard, cockpit macro strip, journalist |
-| `journalist.news` | `JournalistLLM` | future news ticker |
+| `world.micro_impact` | `SovereignWorldGraph` | journalist, quant (chỉ SIMULATION) |
+| `journalist.news` | `JournalistLLM` | news ticker (đang phát triển) |
 
 ---
 
-## 5. Dashboard hiện tại
+## 5. Dashboard
 
-Frontend nằm trong `dashboard/`.
+Frontend tại `dashboard/` (Next.js / React).
 
-Đã có:
+Đã có: landing page animation, Quant Mission Control full-width, right-flank persistent System Event Log, Cockpit HUD (WS `/api/v1/stream/cockpit`) với PnL Altimeter / Margin Fuel Gauge / Flight Log / Allocation Radar, World simulator page.
 
-- Landing page nâng cấp animation/scroll effects.
-- Quant Mission Control full-width desktop layout.
-- Right-flank persistent System Event Log.
-- Cockpit HUD qua WS `/api/v1/stream/cockpit`.
-- Widgets cockpit:
-  - PnL Altimeter
-  - Margin Fuel Gauge
-  - Flight Log
-  - Allocation Radar
-- World simulator page.
-
-Các endpoint dashboard dùng:
+Endpoint dashboard dùng:
 
 ```text
 GET  /api/v1/health
@@ -176,9 +183,9 @@ GET  /api/v1/world/sovereign
 GET  /api/v1/world/chronology
 GET  /api/v1/macro/snapshot
 GET  /api/v1/journalist/news
-POST /api/v1/mode
-POST /api/v1/world/tariff
-POST /api/v1/world/mutate
+POST /api/v1/mode                 (protected khi bật auth)
+POST /api/v1/world/tariff         (protected)
+POST /api/v1/world/country/{code}/mutate  (protected)
 ```
 
 ---
@@ -194,13 +201,14 @@ econith/
 │   ├── regime/                       # regime classifier/switcher
 │   └── simulator_engine/             # World kernel + sovereign graph
 ├── bridges/
-│   ├── quant_bridge.py               # order.intent -> CCXT/synthetic fill
-│   └── world_bridge.py               # World API bridge
+│   ├── quant_bridge.py               # order.intent -> CCXT/synthetic (DOMAIN_QUANT)
+│   └── world_bridge.py
 ├── config/
 │   ├── database.py                   # async DB + Postgres->SQLite failover
-│   ├── environment.py                # env parsing
-│   └── settings.py                   # API/app settings
+│   ├── environment.py                # typed env (STARTING_CAPITAL, API auth...)
+│   └── settings.py                   # centralized settings surface
 ├── core/
+│   ├── api/auth.py                   # API key/bearer middleware + audit trail
 │   ├── cockpit/                      # cockpit schemas + WS router
 │   ├── ingestion/                    # macro ingestion hub/adapters
 │   ├── engine.py                     # deterministic 5-phase engine
@@ -208,66 +216,68 @@ econith/
 │   ├── mode.py                       # REALITY/SIMULATION singleton
 │   └── telemetry.py                  # dashboard read model
 ├── infrastructure/
-│   ├── alternative/                  # funding/OI/liquidation provider
-│   ├── daemon/                       # VPS telemetry daemon framework
-│   ├── preprocessing/                # OBI/volume-delta pipeline
-│   ├── storage/                      # SQLite recorder/store
-│   └── websocket/                    # Binance WS streamer
+│   ├── alternative/  daemon/  preprocessing/  storage/  websocket/
 ├── quant/
-│   ├── ccxt_bridge.py                # live/synthetic execution bridge
-│   ├── context_slicer.py             # desk context slicing
-│   └── payloads.py                   # execution payload contracts
+│   ├── ccxt_bridge.py                # live/synthetic execution + air-gap
+│   ├── context_slicer.py
+│   └── payloads.py
 ├── sentinel/
 │   ├── manager.py                    # execution-truth risk governor
 │   ├── circuit_breaker.py
 │   └── var.py
 ├── training/
-│   ├── collect.py
-│   ├── label.py
-│   ├── orchestrator.py
-│   ├── train_ppo.py
-│   ├── fit_regime.py
-│   ├── train_world.py
-│   ├── deploy.py
-│   └── h200/orchestrator.py
+│   ├── collect.py  label.py  orchestrator.py  deploy.py
+│   ├── train_ppo.py  fit_regime.py  train_world.py
+│   └── h200/orchestrator.py          # async dataloader + DDP + registry writeout
 ├── dashboard/
 └── main.py
 ```
 
 ---
 
-## 7. Khởi chạy nhanh
+## 7. Quick-Start Blueprint
 
-### Backend
+### 7.1 Backend — Development
 
 ```powershell
 cd f:\econith
+pip install -r requirements.txt
 python main.py
+# hoặc: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Hoặc:
+### 7.2 Backend — Production
 
-```powershell
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```bash
+# Production: tắt reload, nhiều worker, bật auth
+export APP_ENV=production
+export API_AUTH_ENABLED=true
+export API_KEYS=$(openssl rand -hex 24)
+export DATABASE_URL=postgresql://econith:econith@postgres:5432/econith
+
+uvicorn main:app \
+  --host 0.0.0.0 --port 8000 \
+  --workers 4 \
+  --no-server-header \
+  --proxy-headers --forwarded-allow-ips="*"
 ```
 
-### Dashboard
+> Lưu ý: mỗi uvicorn worker là một process độc lập với EventBus/engine riêng. Với kiến trúc single-engine hiện tại, dùng **1 worker** cho runtime giao dịch stateful; scale bằng nhiều instance sau load balancer chỉ khi đã tách state store dùng chung.
+
+### 7.3 Frontend — Development / Production
 
 ```powershell
 cd f:\econith\dashboard
 npm install
-npm run dev
+npm run dev          # dev
+# production:
+npm run build
+npm run start
 ```
 
-Mở:
+Mở: `http://localhost:3000`, `/quant`, `/world`.
 
-```text
-http://localhost:3000
-http://localhost:3000/quant
-http://localhost:3000/world
-```
-
-### Health check
+### 7.4 Health check
 
 ```powershell
 curl http://localhost:8000/api/v1/health
@@ -288,166 +298,177 @@ Kỳ vọng an toàn:
 
 ---
 
-## 8. Mode switching
-
-Chuyển sang sandbox simulation:
+## 8. Mode switching & World scenario
 
 ```powershell
+# Sang sandbox
 curl -X POST http://127.0.0.1:8000/api/v1/mode -H "Content-Type: application/json" -d "{\"mode\":\"SIMULATION\"}"
-```
-
-Quay về reality:
-
-```powershell
+# Về reality
 curl -X POST http://127.0.0.1:8000/api/v1/mode -H "Content-Type: application/json" -d "{\"mode\":\"REALITY\"}"
-```
 
-Trong `REALITY`, Quant không hiển thị World simulation day và không nhận `world.*` vào execution domain.
-
----
-
-## 9. World scenario API
-
-Inject tariff shock:
-
-```powershell
+# Tariff shock
 curl -X POST http://127.0.0.1:8000/api/v1/world/tariff -H "Content-Type: application/json" -d "{\"source\":\"USA\",\"target\":\"CHN\",\"value\":0.5}"
+
+# Mutate metric quốc gia
+curl -X POST http://127.0.0.1:8000/api/v1/world/country/VNM/mutate -H "Content-Type: application/json" -d "{\"group\":\"\",\"field\":\"inflation\",\"value\":0.04}"
 ```
 
-Mutate world metric:
-
-```powershell
-curl -X POST http://127.0.0.1:8000/api/v1/world/mutate -H "Content-Type: application/json" -d "{\"group\":\"\",\"field\":\"inflation\",\"value\":0.04}"
-```
+Khi bật auth, thêm `-H "X-API-Key: <key>"` cho mọi lệnh trên.
 
 ---
 
-## 10. Training pipeline
+## 9. Data Acquisition & RunPod H200 Training Blueprint
 
-Pipeline vẫn giữ vòng đời A→E:
-
-```text
-collect -> label -> train -> verify -> activate -> rollback
-```
-
-Lệnh chính:
+### Bước 1 — Harvest features (production data)
 
 ```powershell
+# Thu thập feature live từ Binance
 make data-collect
+# hoặc backfill lịch sử OHLCV
+make data-collect-backfill
+```
+
+Output: `datasets/features/features_XXXXX.parquet`.
+
+### Bước 2 — Label
+
+```powershell
 make data-label
-make setup-train
-make train-all
-make model-verify
-make model-deploy
 ```
 
-Artifacts chính:
+Sinh `datasets/processed/quant_labeled.parquet` + `quant_holdout.parquet` (split theo thời gian 80/20, có cột `reward` anti-greed).
 
-```text
-models/agents/trend_ppo.zip
-models/agents/mean_reversion_ppo.zip
-models/agents/scalper_ppo.zip
-models/regime/hmm_4state.pkl
-models/world/neural_reaction.pt
-models/registry/manifest.yaml
-models/registry/active.yaml
+### Bước 3 — Mount dataset lên RunPod H200
+
+```bash
+# Trên pod H200
+cd /workspace/econith
+pip install -r requirements.txt
+pip install -r requirements-train.txt   # torch, ray, pyarrow, pyyaml...
+
+# Đưa datasets vào (volume mount / rsync / s3)
+ls datasets/features/*.parquet
 ```
 
-RunPod/H200 framework nằm ở `training/h200/orchestrator.py`, hiện là khung orchestration cần nối tiếp vào dataset loader/checkpoint store thật.
+### Bước 4 — Multi-GPU training harness (`training/h200/orchestrator.py`)
+
+Harness gồm:
+
+- **`AsyncTensorLoader`** — async generator stream Parquet/SQLite → tensor batch (đọc IO trong worker thread, overlap compute).
+- **`PartitionedTrainer`** — huấn luyện từng `ComponentPartition` cô lập tham số (HRL Meta-Brain, PPO desks, Neural World), mixed precision BF16/FP8, GradScaler version-agnostic.
+- **DDP** — tự init `torch.distributed` khi chạy dưới `torchrun` (đọc `WORLD_SIZE`/`RANK`/`LOCAL_RANK`), wrap `DistributedDataParallel`.
+- **`RegistryWriter`** — ghi checkpoint + SHA-256 vào `models/registry/manifest.yaml` và promote `active.yaml` khi hoàn tất.
+
+Chạy đơn GPU:
+
+```bash
+python -m training.h200.orchestrator
+```
+
+Chạy multi-GPU (ví dụ 8× H200) qua torchrun:
+
+```bash
+torchrun --standalone --nproc_per_node=8 -m training.h200.orchestrator
+```
+
+Trong Python (điều khiển chi tiết):
+
+```python
+import asyncio
+from training.h200.orchestrator import (
+    H200Orchestrator, DataProcessingConfig, ComponentPartition,
+)
+
+cfg = DataProcessingConfig(
+    parquet_root="datasets/features",
+    batch_size=4096,
+    feature_columns=(
+        "obi", "volume_delta", "buy_volume", "sell_volume", "trade_count",
+        "funding_rate", "time_to_funding_s", "open_interest",
+        "oi_change_pct", "liquidation_notional",
+    ),
+    target_column="reward",
+)
+orch = H200Orchestrator(data_config=cfg)
+result = asyncio.run(orch.run_async(
+    partitions=[ComponentPartition.PPO_BTC, ComponentPartition.NEURAL_WORLD],
+    world_size=8,       # số GPU
+    activate=True,      # promote active.yaml sau khi train
+))
+print(result["partitions"])
+```
+
+Theo dõi epoch/step: mỗi 100 step log `loss` qua `MetricSink` (mặc định `ConsoleMetricSink`; có thể inject sink W&B/Prometheus). Env allocator H200 (HBM3e, NCCL NVLink, transformer-engine) tự apply qua `apply_hardware_env()`.
+
+> Không có GPU/torch? Harness tự degrade sang dry-run planner, vẫn ghi manifest/active để CI kiểm chứng.
+
+### Bước 5 — Verify + Deploy an toàn
+
+```powershell
+make model-verify     # đối chiếu SHA-256 từng checkpoint theo manifest
+make model-deploy     # activate.yaml + archive history rollback
+```
+
+Rollback:
+
+```powershell
+python training/deploy.py --rollback
+```
+
+### Bước 6 — Restart backend nạp model mới
+
+```powershell
+python main.py
+```
+
+Sau restart, `ai.signal` sẽ có `agent_brain=trained` / `regime_brain=trained` khi checkpoint hợp lệ.
 
 ---
 
-## 11. Những gì cần làm tiếp theo
+## 10. Roadmap tiếp theo
 
-### P0 — Stabilization trước khi thêm feature lớn
-
-1. **Viết test suite chính thức cho 3 invariant vừa sửa**
-   - `Sentinel` equity phải khớp cockpit sau `quant.fill`.
-   - `EventBus` phải drop `world.*` vào `DOMAIN_QUANT` trong `REALITY`.
-   - `config.database.init_database()` phải failover đúng khi Postgres unreachable.
-
-2. **Tách mode producer rõ hơn**
-   - `REALITY`: ưu tiên Binance/live market stream.
-   - `SIMULATION`: ưu tiên synthetic/world feed.
-   - Mục tiêu: không chỉ drop ở consumer mà còn giảm producer thừa.
-
-3. **Đồng bộ vốn khởi tạo qua config**
-   - Đưa `STARTING_CAPITAL` vào `.env` / settings.
-   - Dùng chung cho `CockpitTelemetryHub`, `Sentinel`, và simulation executor.
+### P0 — Stabilization
+1. Test suite chính thức cho: equity sync, mode-gate, DB failover, auth middleware.
+2. Tách producer theo mode triệt để hơn (throttle stream thừa).
 
 ### P1 — Production readiness
-
-4. **Auth cho API/dashboard**
-   - Bảo vệ `/mode`, `/world/mutate`, `/world/tariff`, order/control endpoints.
-   - Tối thiểu: API key middleware; tốt hơn: operator login/OAuth.
-
-5. **Rate limit + command guard**
-   - Chặn spam mutate/world scenario.
-   - Thêm audit trail cho mọi operator command.
-
-6. **Structured logging + observability**
-   - JSON logs.
-   - Prometheus metrics: tick latency, WS reconnects, fills, Sentinel freezes, DB failover.
-   - Grafana dashboard.
-
-7. **News ticker UI**
-   - Backend đã có `JournalistLLM` và `/journalist/news`.
-   - Cần widget cockpit hiển thị `journalist.news`.
-
-8. **LLM backend thật cho Journalist**
-   - Hiện deterministic template backend.
-   - Cần OpenAI/Anthropic/Ollama backend qua env.
+3. Observability: JSON logs, Prometheus metrics (tick latency, WS reconnect, fills, freeze, DB failover), Grafana.
+4. Rate limit + command guard trên các route mutating.
+5. News ticker UI đọc `journalist.news`.
+6. LLM backend thật cho Journalist (OpenAI/Anthropic/Ollama qua env).
 
 ### P2 — Quant capability
-
-9. **Multi-symbol portfolio**
-   - Mở rộng khỏi BTCUSDT.
-   - Portfolio-level VaR, exposure per desk, per-asset limits.
-
-10. **Backtesting harness**
-   - Reuse SIMULATION mode + historical feed.
-   - Báo cáo hit-rate, drawdown, turnover, profit factor, stability.
-
-11. **Paper trading campaign**
-   - Chạy Binance testnet/paper đủ dài.
-   - Lưu report trước khi nghĩ tới vốn thật.
-
-12. **Model governance**
-   - Gắn commit hash, dataset hash, training window, metrics vào `manifest.yaml`.
-   - Dashboard hiển thị active model version.
+7. Multi-symbol portfolio + portfolio-level VaR.
+8. Backtesting harness (SIMULATION + historical feed) với report hit-rate/drawdown/turnover.
+9. Paper trading campaign trên testnet đủ dài.
+10. Model governance: commit hash + dataset hash + metrics trong manifest.
 
 ### P3 — Scaling
-
-13. **H200 training pipeline thật**
-   - Nối `training/h200` với dataset registry, checkpoint store, distributed runner.
-
-14. **VPS daemon deployment**
-   - Thêm Docker/systemd service cho `infrastructure/daemon/vps_telemetry_daemon.py`.
-
-15. **Docker compose production bundle**
-   - Backend + dashboard + Postgres + Redis + Prometheus + Grafana.
+11. H200 pipeline nối dataset registry + checkpoint store thật.
+12. VPS daemon deploy (systemd/Docker service).
+13. Docker compose production: backend + dashboard + Postgres + Redis + Prometheus + Grafana.
 
 ---
 
-## 12. Security rules
+## 11. Security rules
 
 - Không commit `.env`.
-- Không chụp màn hình chứa API key/secret.
+- Không chụp/chia sẻ ảnh chứa API key/secret.
+- Bật `API_AUTH_ENABLED=true` + `API_KEYS` mạnh trước khi expose backend.
 - Dùng Binance testnet trước khi bật trade credential thật.
-- Nếu key nghi bị lộ: revoke ngay, tạo key mới, restart backend.
-- Không expose port backend public nếu chưa có auth.
+- Nếu nghi lộ key: revoke ngay, tạo key mới, restart backend.
+- Không expose port backend public nếu chưa có auth + TLS.
 
 ---
 
-## 13. Current engineering state
+## 12. Engineering state hiện tại
 
-Hệ thống hiện đã vượt qua giai đoạn "khung demo":
+- Runtime event-driven đầy đủ, deterministic 5-phase tick.
+- Quant/World mode sovereignty với 4 tầng cô lập.
+- Sentinel dùng execution-truth equity, khớp Cockpit 1:1.
+- CCXT live/synthetic execution có air-gap.
+- Database failover thay vì silent fail.
+- Config tập trung + API security + audit trail.
+- H200 async training harness DDP-ready, ghi registry tự động.
 
-- Có runtime event-driven đầy đủ.
-- Có Quant/World mode sovereignty.
-- Có cockpit UI và system event log persistent.
-- Có Sentinel dùng execution-truth equity.
-- Có CCXT live/synthetic execution bridge với air-gap.
-- Có database failover thay vì silent fail.
-
-Việc tiếp theo không phải thêm nhiều màn hình hơn, mà là **đóng test, bảo mật, quan sát hệ thống, rồi mới mở rộng multi-symbol và paper campaign**.
+Việc tiếp theo: **đóng test, quan sát hệ thống, rồi mở rộng multi-symbol và paper campaign** — không phải thêm màn hình.

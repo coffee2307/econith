@@ -33,6 +33,7 @@ from typing import Any
 
 from core.engine import TickContext, TickPhase, TickPipeline
 from core.event_bus import EventBus
+from core.mode import coupling_enabled
 
 logger = logging.getLogger("econith.world.sovereign_graph")
 
@@ -580,8 +581,16 @@ class SovereignWorldGraph:
             trade=self.trade_matrix.snapshot(),
             chronology=self.chronology.snapshot(),
         )
-        for fact in self._tick_facts:
-            await self._bus.publish("world.micro_impact", sim_day=ctx.sim_day, fact=fact)
+        # PRODUCER-SIDE AIR-GAP: ``world.micro_impact`` is the synthetic coupling
+        # vector that biases the Quant brain. It is emitted ONLY when World->Quant
+        # coupling is enabled (SIMULATION). In REALITY the feed is shut down at the
+        # source so the sovereign brain is never perturbed by simulated shocks --
+        # complementing the EventBus mode-gate (defence in depth).
+        if coupling_enabled():
+            for fact in self._tick_facts:
+                await self._bus.publish(
+                    "world.micro_impact", sim_day=ctx.sim_day, fact=fact
+                )
 
     # -- read model -----------------------------------------------------------
     def snapshot(self) -> dict[str, Any]:

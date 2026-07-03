@@ -8,25 +8,31 @@ Workflow:
                              macro sources; parallel feature extraction via Ray
                              (or a process pool fallback); build target labels;
                              dump normalized tensor cache blocks.
-    2. PARTITIONED TRAIN  -- isolate & segment jobs across separate networks to
+    2. ASYNC DATALOADER   -- stream Parquet/SQLite arrays into tensor batches via
+                             an async generator so training overlaps IO.
+    3. PARTITIONED TRAIN  -- isolate & segment jobs across separate networks to
                              prevent parameter pollution: the HRL Meta-Brain, the
                              per-desk PPO nets (BTC/ETH/High-Beta/Meme) and the
                              Neural World model each train as distinct partitions.
-    3. H200 ACCELERATION  -- mixed precision (BF16/FP16/FP8), DDP/DeepSpeed hooks,
-                             metric logging + model-registry state tracking.
+    4. H200 ACCELERATION  -- mixed precision (BF16/FP16/FP8), DDP init hooks,
+                             metric logging + model-registry checkpoint tracking.
 
-Every deep-learning dependency (torch, ray, deepspeed) is optional: the module
-imports lazily and degrades to a fully-typed dry-run planner so the pipeline is
-inspectable and CI-runnable on a CPU box without a GPU.
+Every deep-learning dependency (torch, ray, deepspeed, pandas, pyyaml) is
+optional: the module imports lazily and degrades to a fully-typed dry-run planner
+so the pipeline is inspectable and CI-runnable on a CPU box without a GPU.
 """
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import logging
+import os
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Optional, Protocol
 
 logger = logging.getLogger("econith.training.h200")
 
@@ -37,6 +43,10 @@ __all__ = [
     "ComponentPartition",
     "DataProcessingConfig",
     "TrainingPlan",
+    "TensorBatch",
+    "AsyncTensorLoader",
+    "RegistryWriter",
+    "ModelFactory",
     "DataProcessor",
     "PartitionedTrainer",
     "H200Orchestrator",
@@ -115,10 +125,19 @@ class DataProcessingConfig:
     parquet_root: Path = Path("./datasets/vps")
     macro_cache: Path = Path("./datasets/macro")
     tensor_cache: Path = Path("./datasets/tensor_cache")
+    sqlite_path: Optional[Path] = None            # optional alt source
+    sqlite_table: str = "features"
     num_workers: int = 16
     use_ray: bool = True
     label_horizon_ticks: int = 50
-    normalization: str = "zscore"           # zscore | minmax | robust
+    normalization: str = "zscore"                 # zscore | minmax | robust
+    feature_columns: tuple[str, ...] = (
+        "obi", "volume_delta", "buy_volume", "sell_volume", "trade_count",
+        "funding_rate", "time_to_funding_s", "open_interest", "oi_change_pct",
+        "liquidation_notional",
+    )
+    target_column: str = "reward"
+    batch_size: int = 4096
 
 
 @dataclass(slots=True)
@@ -178,7 +197,252 @@ class ConsoleMetricSink:
 
 
 # ---------------------------------------------------------------------------
-# Data processing phase
+# Model factory protocol + default regression head
+# ---------------------------------------------------------------------------
+class ModelFactory(Protocol):
+    """Builds a ``torch.nn.Module`` for a given partition + input dim."""
+
+    def __call__(self, partition: ComponentPartition, in_dim: int) -> Any: ...
+
+
+def _default_model_factory(partition: ComponentPartition, in_dim: int) -> Any:
+    """A small, robust MLP head so the harness is runnable end-to-end.
+
+    Partition-specific trainers (train_ppo / train_world) inject their own
+    architectures; this default lets the pipeline train + checkpoint on any host.
+    """
+    import torch.nn as nn
+
+    hidden = 256 if partition is ComponentPartition.NEURAL_WORLD else 128
+    return nn.Sequential(
+        nn.Linear(in_dim, hidden),
+        nn.GELU(),
+        nn.Linear(hidden, hidden),
+        nn.GELU(),
+        nn.Linear(hidden, 1),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Registry writer (manifest.yaml + active.yaml)
+# ---------------------------------------------------------------------------
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+class RegistryWriter:
+    """Writes checkpoints into the central model-registry schema.
+
+    Mirrors the contract consumed by ``training/deploy.py``:
+      * ``manifest.yaml`` : ``{version, generated_at, models: {name: {path, sha256, meta}}}``
+      * ``active.yaml``   : ``{version, activated_at, manifest, models: {name: {path, sha256}}}``
+    """
+
+    def __init__(self, registry_dir: Path = Path("./models/registry")) -> None:
+        self._dir = registry_dir
+        self._dir.mkdir(parents=True, exist_ok=True)
+        self._manifest_path = self._dir / "manifest.yaml"
+        self._active_path = self._dir / "active.yaml"
+
+    def _load(self, path: Path) -> dict[str, Any]:
+        if not path.exists():
+            return {}
+        try:
+            import yaml
+
+            return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except Exception:  # noqa: BLE001 - fall back to a fresh document
+            logger.warning("could not parse %s; starting a fresh registry doc", path)
+            return {}
+
+    def _dump(self, path: Path, doc: dict[str, Any]) -> None:
+        try:
+            import yaml
+
+            path.write_text(yaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+        except ImportError:
+            import json
+
+            path.write_text(json.dumps(doc, indent=2, default=str), encoding="utf-8")
+            logger.warning("pyyaml missing -- wrote JSON to %s", path)
+
+    def register(
+        self, partition: str, checkpoint: Path, meta: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Record a completed checkpoint into ``manifest.yaml`` (idempotent)."""
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        manifest = self._load(self._manifest_path)
+        manifest.setdefault("version", stamp)
+        manifest["generated_at"] = datetime.now(timezone.utc).isoformat()
+        models = manifest.setdefault("models", {})
+        entry = {
+            "path": str(checkpoint.as_posix()),
+            "sha256": _sha256(checkpoint) if checkpoint.exists() else None,
+            "meta": meta,
+        }
+        models[partition] = entry
+        self._dump(self._manifest_path, manifest)
+        logger.info("[registry] manifest updated: %s -> %s", partition, entry["path"])
+        return entry
+
+    def activate(self) -> Path:
+        """Promote the current manifest to ``active.yaml`` for production reads."""
+        manifest = self._load(self._manifest_path)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        active = {
+            "version": manifest.get("version", stamp),
+            "activated_at": datetime.now(timezone.utc).isoformat(),
+            "manifest": str(self._manifest_path.as_posix()),
+            "models": {
+                name: {"path": e.get("path"), "sha256": e.get("sha256")}
+                for name, e in manifest.get("models", {}).items()
+            },
+        }
+        self._dump(self._active_path, active)
+        logger.info("[registry] activated %d models -> %s",
+                    len(active["models"]), self._active_path)
+        return self._active_path
+
+
+# ---------------------------------------------------------------------------
+# Async tensor loader
+# ---------------------------------------------------------------------------
+@dataclass(slots=True)
+class TensorBatch:
+    """A single mini-batch: features ``x`` and targets ``y`` (torch or numpy)."""
+
+    x: Any
+    y: Any
+    rows: int
+
+
+class AsyncTensorLoader:
+    """Streams Parquet/SQLite feature arrays into tensor batches asynchronously.
+
+    Disk/Arrow reads run in a worker thread (via ``asyncio.to_thread``) so the
+    training loop can overlap compute with IO. Yields :class:`TensorBatch`.
+    """
+
+    def __init__(self, config: DataProcessingConfig) -> None:
+        self._cfg = config
+
+    def _discover(self) -> list[Path]:
+        root = self._cfg.parquet_root
+        if not root.exists():
+            return []
+        return sorted(root.rglob("*.parquet"))
+
+    async def iter_batches(
+        self, device: Optional[str] = None
+    ) -> AsyncGenerator[TensorBatch, None]:
+        """Async-generate normalized tensor batches from the configured source."""
+        shards = self._discover()
+        if shards:
+            async for batch in self._iter_parquet(shards, device):
+                yield batch
+        elif self._cfg.sqlite_path is not None:
+            async for batch in self._iter_sqlite(device):
+                yield batch
+        else:
+            logger.warning("AsyncTensorLoader found no data source; yielding nothing")
+
+    async def _iter_parquet(
+        self, shards: list[Path], device: Optional[str]
+    ) -> AsyncGenerator[TensorBatch, None]:
+        for shard in shards:
+            frame = await asyncio.to_thread(self._read_parquet, shard)
+            if frame is None:
+                continue
+            for batch in self._to_batches(frame, device):
+                yield batch
+
+    async def _iter_sqlite(
+        self, device: Optional[str]
+    ) -> AsyncGenerator[TensorBatch, None]:
+        frame = await asyncio.to_thread(self._read_sqlite)
+        if frame is None:
+            return
+        for batch in self._to_batches(frame, device):
+            yield batch
+
+    def _read_parquet(self, shard: Path) -> Optional[Any]:
+        try:
+            import pandas as pd
+
+            return pd.read_parquet(shard)
+        except Exception:  # noqa: BLE001 - a corrupt shard must not kill training
+            logger.warning("skipping unreadable parquet shard %s", shard)
+            return None
+
+    def _read_sqlite(self) -> Optional[Any]:
+        try:
+            import sqlite3
+
+            import pandas as pd
+
+            with sqlite3.connect(self._cfg.sqlite_path) as conn:  # type: ignore[arg-type]
+                return pd.read_sql_query(
+                    f"SELECT * FROM {self._cfg.sqlite_table}", conn
+                )
+        except Exception:  # noqa: BLE001
+            logger.warning("could not read sqlite source %s", self._cfg.sqlite_path)
+            return None
+
+    def _to_batches(self, frame: Any, device: Optional[str]):
+        cols = [c for c in self._cfg.feature_columns if c in frame.columns]
+        if not cols or self._cfg.target_column not in frame.columns:
+            logger.warning(
+                "frame missing feature/target columns (have %s)", list(frame.columns)
+            )
+            return
+        import numpy as np
+
+        feats = frame[cols].to_numpy(dtype="float32")
+        feats = self._normalize(feats, np)
+        target = frame[self._cfg.target_column].to_numpy(dtype="float32").reshape(-1, 1)
+        bs = max(1, self._cfg.batch_size)
+        torch = _try_import_torch()
+        for start in range(0, len(feats), bs):
+            xb = feats[start:start + bs]
+            yb = target[start:start + bs]
+            if torch is not None:
+                x = torch.from_numpy(xb)
+                y = torch.from_numpy(yb)
+                if device:
+                    x = x.to(device, non_blocking=True)
+                    y = y.to(device, non_blocking=True)
+                yield TensorBatch(x=x, y=y, rows=len(xb))
+            else:
+                yield TensorBatch(x=xb, y=yb, rows=len(xb))
+
+    def _normalize(self, arr: Any, np: Any) -> Any:
+        mode = self._cfg.normalization
+        if mode == "minmax":
+            lo = arr.min(axis=0, keepdims=True)
+            hi = arr.max(axis=0, keepdims=True)
+            return (arr - lo) / (np.abs(hi - lo) + 1e-8)
+        if mode == "robust":
+            med = np.median(arr, axis=0, keepdims=True)
+            iqr = (
+                np.percentile(arr, 75, axis=0, keepdims=True)
+                - np.percentile(arr, 25, axis=0, keepdims=True)
+            )
+            return (arr - med) / (np.abs(iqr) + 1e-8)
+        # default zscore
+        mean = arr.mean(axis=0, keepdims=True)
+        std = arr.std(axis=0, keepdims=True)
+        return (arr - mean) / (std + 1e-8)
+
+    def feature_dim(self) -> int:
+        return len([c for c in self._cfg.feature_columns])
+
+
+# ---------------------------------------------------------------------------
+# Data processing phase (parallel cache builder)
 # ---------------------------------------------------------------------------
 class DataProcessor:
     """Parallel feature-extraction & tensor-cache builder."""
@@ -263,7 +527,7 @@ def _json_dumps(obj: Any) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Partitioned trainer
+# Partitioned trainer (real DDP-capable loop + dry-run fallback)
 # ---------------------------------------------------------------------------
 class PartitionedTrainer:
     """Resolves + executes per-partition training with H200 acceleration."""
@@ -272,11 +536,15 @@ class PartitionedTrainer:
         self,
         hardware: H200HardwareProfile,
         checkpoint_root: Path = Path("./checkpoints"),
-        sink: MetricSink | None = None,
+        sink: Optional[MetricSink] = None,
+        registry: Optional[RegistryWriter] = None,
+        model_factory: Optional[ModelFactory] = None,
     ) -> None:
         self._hw = hardware
         self._root = checkpoint_root
         self._sink = sink or ConsoleMetricSink()
+        self._registry = registry or RegistryWriter()
+        self._model_factory = model_factory or _default_model_factory
         self._root.mkdir(parents=True, exist_ok=True)
 
     def plan(
@@ -307,40 +575,107 @@ class PartitionedTrainer:
             extra={"fp8_enabled": partition.default_precision is Precision.FP8},
         )
 
-    def train(self, plan: TrainingPlan) -> dict[str, Any]:
-        """Execute (or dry-run) a single partition's training."""
+    async def train(
+        self, plan: TrainingPlan, loader: Optional[AsyncTensorLoader] = None
+    ) -> dict[str, Any]:
+        """Execute (or dry-run) a single partition's training loop."""
         plan.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         torch = _try_import_torch()
         if torch is None:
             logger.warning("torch unavailable -- dry-run plan for %s", plan.partition.value)
+            ckpt = plan.checkpoint_dir / "DRY_RUN"
+            self._registry.register(
+                plan.partition.value, ckpt, {"status": "dry_run", **plan.to_dict()}
+            )
             self._sink.register_model(
-                plan.partition.value, str(plan.checkpoint_dir / "DRY_RUN"),
-                {"status": "dry_run", **plan.to_dict()},
+                plan.partition.value, str(ckpt), {"status": "dry_run", **plan.to_dict()}
             )
             return {"status": "dry_run", "plan": plan.to_dict()}
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        if loader is None:
+            logger.warning("no data loader for %s -- planning only", plan.partition.value)
+            return {"status": "ready_no_data", "plan": plan.to_dict()}
+
+        return await self._run_training_loop(plan, loader, torch)
+
+    async def _run_training_loop(
+        self, plan: TrainingPlan, loader: AsyncTensorLoader, torch: Any
+    ) -> dict[str, Any]:
+        rank, world_size, local_rank = _maybe_init_distributed(torch)
+        device = self._resolve_device(torch, local_rank)
         autocast_dtype = self._autocast_dtype(torch, plan.precision)
+
+        in_dim = loader.feature_dim()
+        model = self._model_factory(plan.partition, in_dim).to(device)
+        model = _wrap_ddp(torch, model, plan.strategy, local_rank)
+
+        optimizer = torch.optim.AdamW(model.parameters(), lr=plan.learning_rate)
+        loss_fn = torch.nn.MSELoss()
+        use_amp = plan.precision in (Precision.FP16, Precision.BF16, Precision.FP8) \
+            and device.startswith("cuda")
+        scaler = _make_grad_scaler(torch, enabled=plan.precision is Precision.FP16)
+
         logger.info(
-            "training %s on %s (%s, batch=%d)",
-            plan.partition.value, device, plan.precision.value, plan.effective_batch,
+            "training %s on %s (%s, batch=%d, world_size=%d)",
+            plan.partition.value, device, plan.precision.value,
+            plan.effective_batch, world_size,
         )
-        # Structural training seam: a concrete model/dataloader is injected by the
-        # partition-specific trainer modules (train_ppo / train_world). Here we
-        # emit the resolved, acceleration-ready context so those modules bind to a
-        # single canonical plan.
+
+        step = 0
+        last_loss = float("nan")
+        model.train()
+        optimizer.zero_grad(set_to_none=True)
+        async for batch in loader.iter_batches(device=device):
+            if step >= plan.max_steps:
+                break
+            with torch.autocast(
+                device_type="cuda" if device.startswith("cuda") else "cpu",
+                dtype=autocast_dtype, enabled=use_amp,
+            ):
+                pred = model(batch.x)
+                loss = loss_fn(pred, batch.y) / plan.grad_accum
+
+            if scaler.is_enabled():
+                scaler.scale(loss).backward()
+            else:
+                loss.backward()
+
+            if (step + 1) % plan.grad_accum == 0:
+                if scaler.is_enabled():
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
+
+            last_loss = float(loss.item()) * plan.grad_accum
+            if rank == 0 and step % 100 == 0:
+                self._sink.log(plan.partition.value, step, {"loss": last_loss})
+            step += 1
+
         ckpt = plan.checkpoint_dir / f"{plan.partition.value}-latest.pt"
-        self._sink.register_model(
-            plan.partition.value, str(ckpt),
-            {"device": device, "autocast": str(autocast_dtype), **plan.to_dict()},
-        )
-        return {
-            "status": "ready",
-            "device": device,
-            "autocast_dtype": str(autocast_dtype),
-            "checkpoint": str(ckpt),
-            "plan": plan.to_dict(),
+        result_meta = {
+            "device": device, "steps": step, "final_loss": round(last_loss, 6),
+            "world_size": world_size, "autocast": str(autocast_dtype), **plan.to_dict(),
         }
+        if rank == 0:
+            self._save_checkpoint(torch, model, ckpt)
+            self._registry.register(plan.partition.value, ckpt, result_meta)
+            self._sink.register_model(plan.partition.value, str(ckpt), result_meta)
+
+        _maybe_destroy_distributed(torch)
+        return {"status": "trained", "checkpoint": str(ckpt), **result_meta}
+
+    def _save_checkpoint(self, torch: Any, model: Any, ckpt: Path) -> None:
+        raw = model.module if hasattr(model, "module") else model
+        torch.save(raw.state_dict(), ckpt)
+        logger.info("checkpoint written -> %s", ckpt)
+
+    @staticmethod
+    def _resolve_device(torch: Any, local_rank: int) -> str:
+        if torch.cuda.is_available():
+            return f"cuda:{local_rank}"
+        return "cpu"
 
     @staticmethod
     def _autocast_dtype(torch: Any, precision: Precision) -> Any:
@@ -352,7 +687,52 @@ class PartitionedTrainer:
         }[precision]
 
 
-def _try_import_torch() -> Any | None:
+# ---------------------------------------------------------------------------
+# Distributed helpers (torchrun-compatible)
+# ---------------------------------------------------------------------------
+def _maybe_init_distributed(torch: Any) -> tuple[int, int, int]:
+    """Init ``torch.distributed`` when launched under torchrun; else single proc.
+
+    Returns ``(rank, world_size, local_rank)``.
+    """
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    if world_size <= 1:
+        return 0, 1, 0
+    if not torch.distributed.is_available():
+        logger.warning("torch.distributed unavailable -- forcing single process")
+        return 0, 1, 0
+    rank = int(os.environ.get("RANK", "0"))
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+    backend = "nccl" if torch.cuda.is_available() else "gloo"
+    if not torch.distributed.is_initialized():
+        torch.distributed.init_process_group(backend=backend)
+    if torch.cuda.is_available():
+        torch.cuda.set_device(local_rank)
+    logger.info("DDP initialised rank=%d/%d (backend=%s)", rank, world_size, backend)
+    return rank, world_size, local_rank
+
+
+def _wrap_ddp(torch: Any, model: Any, strategy: ParallelStrategy, local_rank: int) -> Any:
+    if strategy is ParallelStrategy.DDP and torch.distributed.is_initialized():
+        device_ids = [local_rank] if torch.cuda.is_available() else None
+        return torch.nn.parallel.DistributedDataParallel(model, device_ids=device_ids)
+    return model
+
+
+def _maybe_destroy_distributed(torch: Any) -> None:
+    if torch.distributed.is_available() and torch.distributed.is_initialized():
+        torch.distributed.destroy_process_group()
+
+
+def _make_grad_scaler(torch: Any, *, enabled: bool) -> Any:
+    """Version-agnostic AMP GradScaler (new ``torch.amp`` API, legacy fallback)."""
+    try:
+        return torch.amp.GradScaler("cuda", enabled=enabled)
+    except (AttributeError, TypeError):
+        return torch.cuda.amp.GradScaler(enabled=enabled)
+
+
+def _try_import_torch() -> Optional[Any]:
     try:
         import torch
 
@@ -369,37 +749,43 @@ class H200Orchestrator:
 
     def __init__(
         self,
-        data_config: DataProcessingConfig | None = None,
-        hardware: H200HardwareProfile | None = None,
-        sink: MetricSink | None = None,
+        data_config: Optional[DataProcessingConfig] = None,
+        hardware: Optional[H200HardwareProfile] = None,
+        sink: Optional[MetricSink] = None,
+        registry: Optional[RegistryWriter] = None,
     ) -> None:
         self._data_cfg = data_config or DataProcessingConfig()
         self._hw = hardware or H200HardwareProfile()
+        self._registry = registry or RegistryWriter()
         self._processor = DataProcessor(self._data_cfg)
-        self._trainer = PartitionedTrainer(self._hw, sink=sink)
+        self._loader = AsyncTensorLoader(self._data_cfg)
+        self._trainer = PartitionedTrainer(
+            self._hw, sink=sink, registry=self._registry
+        )
 
     def apply_hardware_env(self) -> dict[str, str]:
         """Export the H200 allocator/NCCL env flags into the process env."""
-        import os
-
         flags = self._hw.env_flags()
         os.environ.update(flags)
         logger.info("applied H200 env flags: %s", ", ".join(flags))
         return flags
 
-    def run(
+    async def run_async(
         self,
-        partitions: list[ComponentPartition] | None = None,
+        partitions: Optional[list[ComponentPartition]] = None,
         world_size: int = 1,
+        activate: bool = True,
     ) -> dict[str, Any]:
-        """Run data processing then train each requested partition in isolation."""
+        """Process data then train each requested partition in isolation (async)."""
         self.apply_hardware_env()
-        manifest = self._processor.process()
+        manifest = await asyncio.to_thread(self._processor.process)
         partitions = partitions or list(ComponentPartition)
         results: dict[str, Any] = {}
         for partition in partitions:
             plan = self._trainer.plan(partition, world_size=world_size)
-            results[partition.value] = self._trainer.train(plan)
+            results[partition.value] = await self._trainer.train(plan, self._loader)
+        if activate:
+            self._registry.activate()
         return {
             "hardware": self._hw.device_name,
             "usable_vram_gb": round(self._hw.usable_vram_gb(), 1),
@@ -407,9 +793,22 @@ class H200Orchestrator:
             "partitions": results,
         }
 
+    def run(
+        self,
+        partitions: Optional[list[ComponentPartition]] = None,
+        world_size: int = 1,
+        activate: bool = True,
+    ) -> dict[str, Any]:
+        """Synchronous entrypoint wrapping :meth:`run_async`."""
+        return asyncio.run(
+            self.run_async(partitions=partitions, world_size=world_size, activate=activate)
+        )
+
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s :: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s :: %(message)s"
+    )
     result = H200Orchestrator().run()
     logger.info("orchestration complete: %d partitions", len(result["partitions"]))
 
