@@ -1,5 +1,5 @@
 ``` output
-usage: freqtrade webserver [-h] [-v] [--no-color] [--logfile FILE] [-V]
+usage: econith webserver [-h] [-v] [--no-color] [--logfile FILE] [-V]
                            [-c PATH] [-d PATH] [--userdir PATH]
 
 options:

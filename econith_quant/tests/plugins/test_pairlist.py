@@ -10,21 +10,21 @@ import pandas as pd
 import pytest
 import time_machine
 
-from freqtrade.constants import AVAILABLE_PAIRLISTS
-from freqtrade.data.dataprovider import DataProvider
-from freqtrade.enums import CandleType, RunMode
-from freqtrade.exceptions import OperationalException
-from freqtrade.persistence import LocalTrade, Trade
-from freqtrade.plugins.pairlist.pairlist_helpers import dynamic_expand_pairlist, expand_pairlist
-from freqtrade.plugins.pairlistmanager import PairListManager
-from freqtrade.resolvers import PairListResolver
-from freqtrade.util import dt_now, dt_utc
+from econith.constants import AVAILABLE_PAIRLISTS
+from econith.data.dataprovider import DataProvider
+from econith.enums import CandleType, RunMode
+from econith.exceptions import OperationalException
+from econith.persistence import LocalTrade, Trade
+from econith.plugins.pairlist.pairlist_helpers import dynamic_expand_pairlist, expand_pairlist
+from econith.plugins.pairlistmanager import PairListManager
+from econith.resolvers import PairListResolver
+from econith.util import dt_now, dt_utc
 from tests.conftest import (
     EXMS,
     create_mock_trades_usdt,
     generate_test_data,
     get_patched_exchange,
-    get_patched_freqtradebot,
+    get_patched_econithbot,
     log_has,
     log_has_re,
     num_log_has,
@@ -140,10 +140,10 @@ def test_log_cached(mocker, static_pl_conf, markets, tickers):
         exchange_has=MagicMock(return_value=True),
         get_tickers=tickers,
     )
-    freqtrade = get_patched_freqtradebot(mocker, static_pl_conf)
+    econith = get_patched_econithbot(mocker, static_pl_conf)
     logmock = MagicMock()
     # Assign starting whitelist
-    pl = freqtrade.pairlists._pairlist_handlers[0]
+    pl = econith.pairlists._pairlist_handlers[0]
     pl.log_once("Hello world", logmock)
     assert logmock.call_count == 1
     pl.log_once("Hello world", logmock)
@@ -157,23 +157,23 @@ def test_log_cached(mocker, static_pl_conf, markets, tickers):
 
 
 def test_load_pairlist_noexist(mocker, markets, default_conf):
-    freqtrade = get_patched_freqtradebot(mocker, default_conf)
+    econith = get_patched_econithbot(mocker, default_conf)
     mocker.patch(f"{EXMS}.markets", PropertyMock(return_value=markets))
-    plm = PairListManager(freqtrade.exchange, default_conf, MagicMock())
+    plm = PairListManager(econith.exchange, default_conf, MagicMock())
     with pytest.raises(
         OperationalException,
         match=r"Impossible to load Pairlist 'NonexistingPairList'. "
         r"This class does not exist or contains Python code errors.",
     ):
         PairListResolver.load_pairlist(
-            "NonexistingPairList", freqtrade.exchange, plm, default_conf, {}, 1
+            "NonexistingPairList", econith.exchange, plm, default_conf, {}, 1
         )
 
 
 def test_load_pairlist_verify_multi(mocker, markets_static, default_conf):
-    freqtrade = get_patched_freqtradebot(mocker, default_conf)
+    econith = get_patched_econithbot(mocker, default_conf)
     mocker.patch(f"{EXMS}.markets", PropertyMock(return_value=markets_static))
-    plm = PairListManager(freqtrade.exchange, default_conf, MagicMock())
+    plm = PairListManager(econith.exchange, default_conf, MagicMock())
     # Call different versions one after the other, should always consider what was passed in
     # and have no side-effects (therefore the same check multiple times)
     assert plm.verify_whitelist(["ETH/BTC", "XRP/BTC"], print) == ["ETH/BTC", "XRP/BTC"]
@@ -185,34 +185,34 @@ def test_load_pairlist_verify_multi(mocker, markets_static, default_conf):
 
 
 def test_refresh_market_pair_not_in_whitelist(mocker, markets, static_pl_conf):
-    freqtrade = get_patched_freqtradebot(mocker, static_pl_conf)
+    econith = get_patched_econithbot(mocker, static_pl_conf)
 
     mocker.patch(f"{EXMS}.markets", PropertyMock(return_value=markets))
-    freqtrade.pairlists.refresh_pairlist()
+    econith.pairlists.refresh_pairlist()
     # List ordered by BaseVolume
     whitelist = ["ETH/BTC", "TKN/BTC"]
     # Ensure all except those in whitelist are removed
-    assert set(whitelist) == set(freqtrade.pairlists.whitelist)
+    assert set(whitelist) == set(econith.pairlists.whitelist)
     # Ensure config dict hasn't been changed
     assert (
         static_pl_conf["exchange"]["pair_whitelist"]
-        == freqtrade.config["exchange"]["pair_whitelist"]
+        == econith.config["exchange"]["pair_whitelist"]
     )
 
 
 def test_refresh_static_pairlist(mocker, markets, static_pl_conf):
-    freqtrade = get_patched_freqtradebot(mocker, static_pl_conf)
+    econith = get_patched_econithbot(mocker, static_pl_conf)
     mocker.patch.multiple(
         EXMS,
         exchange_has=MagicMock(return_value=True),
         markets=PropertyMock(return_value=markets),
     )
-    freqtrade.pairlists.refresh_pairlist()
+    econith.pairlists.refresh_pairlist()
     # List ordered by BaseVolume
     whitelist = ["ETH/BTC", "TKN/BTC"]
     # Ensure all except those in whitelist are removed
-    assert set(whitelist) == set(freqtrade.pairlists.whitelist)
-    assert static_pl_conf["exchange"]["pair_blacklist"] == freqtrade.pairlists.blacklist
+    assert set(whitelist) == set(econith.pairlists.whitelist)
+    assert static_pl_conf["exchange"]["pair_blacklist"] == econith.pairlists.blacklist
 
 
 @pytest.mark.parametrize(
@@ -231,58 +231,58 @@ def test_refresh_static_pairlist(mocker, markets, static_pl_conf):
 def test_refresh_static_pairlist_noexist(mocker, markets, static_pl_conf, pairs, expected, caplog):
     static_pl_conf["pairlists"][0]["allow_inactive"] = True
     static_pl_conf["exchange"]["pair_whitelist"] += pairs
-    freqtrade = get_patched_freqtradebot(mocker, static_pl_conf)
+    econith = get_patched_econithbot(mocker, static_pl_conf)
     mocker.patch.multiple(
         EXMS,
         exchange_has=MagicMock(return_value=True),
         markets=PropertyMock(return_value=markets),
     )
-    freqtrade.pairlists.refresh_pairlist()
+    econith.pairlists.refresh_pairlist()
 
     # Ensure all except those in whitelist are removed
-    assert set(expected) == set(freqtrade.pairlists.whitelist)
-    assert static_pl_conf["exchange"]["pair_blacklist"] == freqtrade.pairlists.blacklist
+    assert set(expected) == set(econith.pairlists.whitelist)
+    assert static_pl_conf["exchange"]["pair_blacklist"] == econith.pairlists.blacklist
     if not expected:
         assert log_has_re(r"Pair whitelist contains an invalid Wildcard: Wildcard error.*", caplog)
 
 
 def test_invalid_blacklist(mocker, markets, static_pl_conf, caplog):
     static_pl_conf["exchange"]["pair_blacklist"] = ["*/BTC"]
-    freqtrade = get_patched_freqtradebot(mocker, static_pl_conf)
+    econith = get_patched_econithbot(mocker, static_pl_conf)
     mocker.patch.multiple(
         EXMS,
         exchange_has=MagicMock(return_value=True),
         markets=PropertyMock(return_value=markets),
     )
-    freqtrade.pairlists.refresh_pairlist()
+    econith.pairlists.refresh_pairlist()
     whitelist = []
     # Ensure all except those in whitelist are removed
-    assert set(whitelist) == set(freqtrade.pairlists.whitelist)
-    assert static_pl_conf["exchange"]["pair_blacklist"] == freqtrade.pairlists.blacklist
+    assert set(whitelist) == set(econith.pairlists.whitelist)
+    assert static_pl_conf["exchange"]["pair_blacklist"] == econith.pairlists.blacklist
     log_has_re(r"Pair blacklist contains an invalid Wildcard.*", caplog)
 
 
 def test_remove_logs_for_pairs_already_in_blacklist(mocker, markets, static_pl_conf, caplog):
     logger = logging.getLogger(__name__)
-    freqtrade = get_patched_freqtradebot(mocker, static_pl_conf)
+    econith = get_patched_econithbot(mocker, static_pl_conf)
     mocker.patch.multiple(
         EXMS,
         exchange_has=MagicMock(return_value=True),
         markets=PropertyMock(return_value=markets),
     )
-    freqtrade.pairlists.refresh_pairlist()
+    econith.pairlists.refresh_pairlist()
     whitelist = ["ETH/BTC", "TKN/BTC"]
     caplog.clear()
     caplog.set_level(logging.INFO)
 
     # Ensure all except those in whitelist are removed.
-    assert set(whitelist) == set(freqtrade.pairlists.whitelist)
-    assert static_pl_conf["exchange"]["pair_blacklist"] == freqtrade.pairlists.blacklist
+    assert set(whitelist) == set(econith.pairlists.whitelist)
+    assert static_pl_conf["exchange"]["pair_blacklist"] == econith.pairlists.blacklist
     # Ensure that log message wasn't generated.
     assert not log_has("Pair BLK/BTC in your blacklist. Removing it from whitelist...", caplog)
 
     for _ in range(3):
-        new_whitelist = freqtrade.pairlists.verify_blacklist(
+        new_whitelist = econith.pairlists.verify_blacklist(
             [*whitelist, "BLK/BTC"], logger.warning
         )
         # Ensure that the pair is removed from the white list, and properly logged.
@@ -296,16 +296,16 @@ def test_refresh_pairlist_dynamic(mocker, shitcoinmarkets, tickers, whitelist_co
         get_tickers=tickers,
         exchange_has=MagicMock(return_value=True),
     )
-    freqtrade = get_patched_freqtradebot(mocker, whitelist_conf)
-    # Remock markets with shitcoinmarkets since get_patched_freqtradebot uses the markets fixture
+    econith = get_patched_econithbot(mocker, whitelist_conf)
+    # Remock markets with shitcoinmarkets since get_patched_econithbot uses the markets fixture
     mocker.patch.multiple(
         EXMS,
         markets=PropertyMock(return_value=shitcoinmarkets),
     )
     # argument: use the whitelist dynamically by exchange-volume
     whitelist = ["ETH/BTC", "TKN/BTC", "LTC/BTC", "XRP/BTC", "HOT/BTC"]
-    freqtrade.pairlists.refresh_pairlist()
-    assert whitelist == freqtrade.pairlists.whitelist
+    econith.pairlists.refresh_pairlist()
+    assert whitelist == econith.pairlists.whitelist
 
     whitelist_conf["pairlists"] = [{"method": "VolumePairList"}]
     with pytest.raises(
@@ -313,7 +313,7 @@ def test_refresh_pairlist_dynamic(mocker, shitcoinmarkets, tickers, whitelist_co
         match=r"`number_assets` not specified. Please check your configuration "
         r'for "pairlist.config.number_assets"',
     ):
-        PairListManager(freqtrade.exchange, whitelist_conf, MagicMock())
+        PairListManager(econith.exchange, whitelist_conf, MagicMock())
 
 
 def test_refresh_pairlist_dynamic_2(mocker, shitcoinmarkets, tickers, whitelist_conf_2):
@@ -325,26 +325,26 @@ def test_refresh_pairlist_dynamic_2(mocker, shitcoinmarkets, tickers, whitelist_
     )
     # Remove caching of ticker data to emulate changing volume by the time of second call
     mocker.patch.multiple(
-        "freqtrade.plugins.pairlistmanager.PairListManager",
+        "econith.plugins.pairlistmanager.PairListManager",
         _get_cached_tickers=MagicMock(return_value=tickers_dict),
     )
-    freqtrade = get_patched_freqtradebot(mocker, whitelist_conf_2)
-    # Remock markets with shitcoinmarkets since get_patched_freqtradebot uses the markets fixture
+    econith = get_patched_econithbot(mocker, whitelist_conf_2)
+    # Remock markets with shitcoinmarkets since get_patched_econithbot uses the markets fixture
     mocker.patch.multiple(
         EXMS,
         markets=PropertyMock(return_value=shitcoinmarkets),
     )
 
     whitelist = ["ETH/BTC", "TKN/BTC", "LTC/BTC", "XRP/BTC", "HOT/BTC"]
-    freqtrade.pairlists.refresh_pairlist()
-    assert whitelist == freqtrade.pairlists.whitelist
+    econith.pairlists.refresh_pairlist()
+    assert whitelist == econith.pairlists.whitelist
 
     # Delay to allow 0 TTL cache to expire...
     time.sleep(1)
     whitelist = ["FUEL/BTC", "ETH/BTC", "TKN/BTC", "LTC/BTC", "XRP/BTC"]
     tickers_dict["FUEL/BTC"]["quoteVolume"] = 10000.0
-    freqtrade.pairlists.refresh_pairlist()
-    assert whitelist == freqtrade.pairlists.whitelist
+    econith.pairlists.refresh_pairlist()
+    assert whitelist == econith.pairlists.whitelist
 
 
 def test_VolumePairList_refresh_empty(mocker, markets_empty, whitelist_conf):
@@ -352,13 +352,13 @@ def test_VolumePairList_refresh_empty(mocker, markets_empty, whitelist_conf):
         EXMS,
         exchange_has=MagicMock(return_value=True),
     )
-    freqtrade = get_patched_freqtradebot(mocker, whitelist_conf)
+    econith = get_patched_econithbot(mocker, whitelist_conf)
     mocker.patch(f"{EXMS}.markets", PropertyMock(return_value=markets_empty))
 
     # argument: use the whitelist dynamically by exchange-volume
     whitelist = []
     whitelist_conf["exchange"]["pair_whitelist"] = []
-    freqtrade.pairlists.refresh_pairlist()
+    econith.pairlists.refresh_pairlist()
     pairslist = whitelist_conf["exchange"]["pair_whitelist"]
 
     assert set(whitelist) == set(pairslist)
@@ -795,7 +795,7 @@ def test_VolumePairList_whitelist_gen(
 
     mocker.patch(f"{EXMS}.exchange_has", MagicMock(return_value=True))
 
-    freqtrade = get_patched_freqtradebot(mocker, whitelist_conf)
+    econith = get_patched_econithbot(mocker, whitelist_conf)
     mocker.patch.multiple(
         EXMS, get_tickers=tickers, markets=PropertyMock(return_value=shitcoinmarkets)
     )
@@ -806,7 +806,7 @@ def test_VolumePairList_whitelist_gen(
 
     # Provide for PerformanceFilter's dependency
     mocker.patch.multiple(
-        "freqtrade.persistence.Trade", get_overall_performance=MagicMock(return_value=[])
+        "econith.persistence.Trade", get_overall_performance=MagicMock(return_value=[])
     )
 
     # Set whitelist_result to None if pairlist is invalid and should produce exception
@@ -816,10 +816,10 @@ def test_VolumePairList_whitelist_gen(
             match=r"This Pairlist Handler should not be used at the first position "
             r"in the list of Pairlist Handlers.",
         ):
-            freqtrade.pairlists.refresh_pairlist()
+            econith.pairlists.refresh_pairlist()
     else:
-        freqtrade.pairlists.refresh_pairlist()
-        whitelist = freqtrade.pairlists.whitelist
+        econith.pairlists.refresh_pairlist()
+        whitelist = econith.pairlists.whitelist
 
         assert isinstance(whitelist, list)
 
@@ -1068,7 +1068,7 @@ def test_VolumePairList_range(
             r"of [0-9]+.*\. Please adjust refresh_period to at least [0-9]+ "
             r"and restart the bot\.",
         ):
-            freqtrade = get_patched_freqtradebot(mocker, whitelist_conf)
+            econith = get_patched_econithbot(mocker, whitelist_conf)
         return
     elif volumefilter_result == "lookback_days_and_period":
         with pytest.raises(
@@ -1076,21 +1076,21 @@ def test_VolumePairList_range(
             match=r"Ambiguous configuration: lookback_days and lookback_period both "
             r"set in pairlist config\..*",
         ):
-            freqtrade = get_patched_freqtradebot(mocker, whitelist_conf)
+            econith = get_patched_econithbot(mocker, whitelist_conf)
     elif volumefilter_result == "lookback_period_negative":
         with pytest.raises(
             OperationalException, match=r"VolumeFilter requires lookback_period to be >= 0"
         ):
-            freqtrade = get_patched_freqtradebot(mocker, whitelist_conf)
+            econith = get_patched_econithbot(mocker, whitelist_conf)
     elif volumefilter_result == "lookback_exceeds_exchange_request_size":
         with pytest.raises(
             OperationalException,
             match=r"VolumeFilter requires lookback_period to not exceed "
             r"exchange max request size \([0-9]+\)",
         ):
-            freqtrade = get_patched_freqtradebot(mocker, whitelist_conf)
+            econith = get_patched_econithbot(mocker, whitelist_conf)
     else:
-        freqtrade = get_patched_freqtradebot(mocker, whitelist_conf)
+        econith = get_patched_econithbot(mocker, whitelist_conf)
         mocker.patch.multiple(
             EXMS, get_tickers=tickers, markets=PropertyMock(return_value=shitcoinmarkets)
         )
@@ -1104,25 +1104,25 @@ def test_VolumePairList_range(
 
         ohclv_mock = mocker.patch(f"{EXMS}.refresh_latest_ohlcv", return_value=ohlcv_data)
 
-        freqtrade.pairlists.refresh_pairlist()
-        whitelist = freqtrade.pairlists.whitelist
+        econith.pairlists.refresh_pairlist()
+        whitelist = econith.pairlists.whitelist
         assert ohclv_mock.call_count == 1
 
         assert isinstance(whitelist, list)
         assert whitelist == volumefilter_result
         # Test caching
         ohclv_mock.reset_mock()
-        freqtrade.pairlists.refresh_pairlist()
+        econith.pairlists.refresh_pairlist()
         # in "filter" mode, caching is disabled.
         assert ohclv_mock.call_count == 0
-        whitelist = freqtrade.pairlists.whitelist
+        whitelist = econith.pairlists.whitelist
         assert whitelist == volumefilter_result
 
         time_machine.move_to(start_dt + timedelta(days=2))
         ohclv_mock.reset_mock()
-        freqtrade.pairlists.refresh_pairlist()
+        econith.pairlists.refresh_pairlist()
         assert ohclv_mock.call_count == 1
-        whitelist = freqtrade.pairlists.whitelist
+        whitelist = econith.pairlists.whitelist
         assert whitelist == volumefilter_result
 
 
@@ -1400,7 +1400,7 @@ def test_gen_pair_whitelist_not_supported(mocker, default_conf, tickers) -> None
     with pytest.raises(
         OperationalException, match=r"Exchange .* does not support dynamic whitelist.*"
     ):
-        get_patched_freqtradebot(mocker, default_conf)
+        get_patched_econithbot(mocker, default_conf)
 
 
 def test_pair_whitelist_not_supported_Spread(mocker, default_conf, tickers) -> None:
@@ -1415,12 +1415,12 @@ def test_pair_whitelist_not_supported_Spread(mocker, default_conf, tickers) -> N
     with pytest.raises(
         OperationalException, match=r"Exchange .* does not support fetchTickers, .*"
     ):
-        get_patched_freqtradebot(mocker, default_conf)
+        get_patched_econithbot(mocker, default_conf)
 
     mocker.patch(f"{EXMS}.exchange_has", MagicMock(return_value=True))
     mocker.patch(f"{EXMS}.get_option", MagicMock(return_value=False))
     with pytest.raises(OperationalException, match=r".*requires exchange to have bid/ask data"):
-        get_patched_freqtradebot(mocker, default_conf)
+        get_patched_econithbot(mocker, default_conf)
 
 
 @pytest.mark.parametrize("pairlist", TESTABLE_PAIRLISTS)
@@ -1429,12 +1429,12 @@ def test_pairlist_class(mocker, whitelist_conf, markets, pairlist):
     mocker.patch.multiple(
         EXMS, markets=PropertyMock(return_value=markets), exchange_has=MagicMock(return_value=True)
     )
-    freqtrade = get_patched_freqtradebot(mocker, whitelist_conf)
+    econith = get_patched_econithbot(mocker, whitelist_conf)
 
-    assert freqtrade.pairlists.name_list == [pairlist]
-    assert pairlist in str(freqtrade.pairlists.short_desc())
-    assert isinstance(freqtrade.pairlists.whitelist, list)
-    assert isinstance(freqtrade.pairlists.blacklist, list)
+    assert econith.pairlists.name_list == [pairlist]
+    assert pairlist in str(econith.pairlists.short_desc())
+    assert isinstance(econith.pairlists.whitelist, list)
+    assert isinstance(econith.pairlists.blacklist, list)
 
 
 @pytest.mark.parametrize("pairlist", TESTABLE_PAIRLISTS)
@@ -1464,11 +1464,11 @@ def test__whitelist_for_active_markets(
         exchange_has=MagicMock(return_value=True),
         get_tickers=tickers,
     )
-    freqtrade = get_patched_freqtradebot(mocker, whitelist_conf)
+    econith = get_patched_econithbot(mocker, whitelist_conf)
     caplog.clear()
 
     # Assign starting whitelist
-    pairlist_handler = freqtrade.pairlists._pairlist_handlers[0]
+    pairlist_handler = econith.pairlists._pairlist_handlers[0]
     new_whitelist = pairlist_handler._whitelist_for_active_markets(whitelist)
 
     assert set(new_whitelist) == set(["ETH/BTC", "TKN/BTC"])
@@ -1481,10 +1481,10 @@ def test__whitelist_for_active_markets_empty(mocker, whitelist_conf, pairlist, t
 
     mocker.patch(f"{EXMS}.exchange_has", return_value=True)
 
-    freqtrade = get_patched_freqtradebot(mocker, whitelist_conf)
+    econith = get_patched_econithbot(mocker, whitelist_conf)
     mocker.patch.multiple(EXMS, markets=PropertyMock(return_value=None), get_tickers=tickers)
     # Assign starting whitelist
-    pairlist_handler = freqtrade.pairlists._pairlist_handlers[0]
+    pairlist_handler = econith.pairlists._pairlist_handlers[0]
     with pytest.raises(OperationalException, match=r"Markets not loaded.*"):
         pairlist_handler._whitelist_for_active_markets(["ETH/BTC"])
 
@@ -1494,7 +1494,7 @@ def test_volumepairlist_invalid_sortvalue(mocker, whitelist_conf):
 
     mocker.patch(f"{EXMS}.exchange_has", MagicMock(return_value=True))
     with pytest.raises(OperationalException, match=r"key asdf not in .*"):
-        get_patched_freqtradebot(mocker, whitelist_conf)
+        get_patched_econithbot(mocker, whitelist_conf)
 
 
 def test_volumepairlist_caching(mocker, markets, whitelist_conf, tickers):
@@ -1504,14 +1504,14 @@ def test_volumepairlist_caching(mocker, markets, whitelist_conf, tickers):
         exchange_has=MagicMock(return_value=True),
         get_tickers=tickers,
     )
-    freqtrade = get_patched_freqtradebot(mocker, whitelist_conf)
-    assert len(freqtrade.pairlists._pairlist_handlers[0]._pair_cache) == 0
+    econith = get_patched_econithbot(mocker, whitelist_conf)
+    assert len(econith.pairlists._pairlist_handlers[0]._pair_cache) == 0
     assert tickers.call_count == 0
-    freqtrade.pairlists.refresh_pairlist()
+    econith.pairlists.refresh_pairlist()
     assert tickers.call_count == 1
 
-    assert len(freqtrade.pairlists._pairlist_handlers[0]._pair_cache) == 1
-    freqtrade.pairlists.refresh_pairlist()
+    assert len(econith.pairlists._pairlist_handlers[0]._pair_cache) == 1
+    econith.pairlists.refresh_pairlist()
     assert tickers.call_count == 1
 
 
@@ -1531,7 +1531,7 @@ def test_agefilter_min_days_listed_too_small(mocker, default_conf, markets, tick
     with pytest.raises(
         OperationalException, match=r"AgeFilter requires min_days_listed to be >= 1"
     ):
-        get_patched_freqtradebot(mocker, default_conf)
+        get_patched_econithbot(mocker, default_conf)
 
 
 def test_agefilter_max_days_lower_than_min_days(mocker, default_conf, markets, tickers):
@@ -1550,7 +1550,7 @@ def test_agefilter_max_days_lower_than_min_days(mocker, default_conf, markets, t
     with pytest.raises(
         OperationalException, match=r"AgeFilter max_days_listed <= min_days_listed not permitted"
     ):
-        get_patched_freqtradebot(mocker, default_conf)
+        get_patched_econithbot(mocker, default_conf)
 
 
 def test_agefilter_min_days_listed_too_large(mocker, default_conf, markets, tickers):
@@ -1571,7 +1571,7 @@ def test_agefilter_min_days_listed_too_large(mocker, default_conf, markets, tick
         match=r"AgeFilter requires min_days_listed to not exceed "
         r"exchange max request size \([0-9]+\)",
     ):
-        get_patched_freqtradebot(mocker, default_conf)
+        get_patched_econithbot(mocker, default_conf)
 
 
 def test_agefilter_caching(mocker, markets, whitelist_conf_agefilter, tickers, ohlcv_history):
@@ -1589,16 +1589,16 @@ def test_agefilter_caching(mocker, markets, whitelist_conf_agefilter, tickers, o
             refresh_latest_ohlcv=MagicMock(return_value=ohlcv_data),
         )
 
-        freqtrade = get_patched_freqtradebot(mocker, whitelist_conf_agefilter)
-        assert freqtrade.exchange.refresh_latest_ohlcv.call_count == 0
-        freqtrade.pairlists.refresh_pairlist()
-        assert len(freqtrade.pairlists.whitelist) == 3
-        assert freqtrade.exchange.refresh_latest_ohlcv.call_count > 0
+        econith = get_patched_econithbot(mocker, whitelist_conf_agefilter)
+        assert econith.exchange.refresh_latest_ohlcv.call_count == 0
+        econith.pairlists.refresh_pairlist()
+        assert len(econith.pairlists.whitelist) == 3
+        assert econith.exchange.refresh_latest_ohlcv.call_count > 0
 
-        freqtrade.pairlists.refresh_pairlist()
-        assert len(freqtrade.pairlists.whitelist) == 3
+        econith.pairlists.refresh_pairlist()
+        assert len(econith.pairlists.whitelist) == 3
         # Call to XRP/BTC cached
-        assert freqtrade.exchange.refresh_latest_ohlcv.call_count == 2
+        assert econith.exchange.refresh_latest_ohlcv.call_count == 2
 
         ohlcv_data = {
             ("ETH/BTC", "1d", CandleType.SPOT): ohlcv_history,
@@ -1607,16 +1607,16 @@ def test_agefilter_caching(mocker, markets, whitelist_conf_agefilter, tickers, o
             ("XRP/BTC", "1d", CandleType.SPOT): ohlcv_history.iloc[[0]],
         }
         mocker.patch(f"{EXMS}.refresh_latest_ohlcv", return_value=ohlcv_data)
-        freqtrade.pairlists.refresh_pairlist()
-        assert len(freqtrade.pairlists.whitelist) == 3
-        assert freqtrade.exchange.refresh_latest_ohlcv.call_count == 1
+        econith.pairlists.refresh_pairlist()
+        assert len(econith.pairlists.whitelist) == 3
+        assert econith.exchange.refresh_latest_ohlcv.call_count == 1
 
         # Move to next day
         t.move_to("2021-09-02 01:00:00 +00:00")
         mocker.patch(f"{EXMS}.refresh_latest_ohlcv", return_value=ohlcv_data)
-        freqtrade.pairlists.refresh_pairlist()
-        assert len(freqtrade.pairlists.whitelist) == 3
-        assert freqtrade.exchange.refresh_latest_ohlcv.call_count == 1
+        econith.pairlists.refresh_pairlist()
+        assert len(econith.pairlists.whitelist) == 3
+        assert econith.exchange.refresh_latest_ohlcv.call_count == 1
 
         # Move another day with fresh mocks (now the pair is old enough)
         t.move_to("2021-09-03 01:00:00 +00:00")
@@ -1628,10 +1628,10 @@ def test_agefilter_caching(mocker, markets, whitelist_conf_agefilter, tickers, o
             ("XRP/BTC", "1d", CandleType.SPOT): ohlcv_history,
         }
         mocker.patch(f"{EXMS}.refresh_latest_ohlcv", return_value=ohlcv_data)
-        freqtrade.pairlists.refresh_pairlist()
-        assert len(freqtrade.pairlists.whitelist) == 4
+        econith.pairlists.refresh_pairlist()
+        assert len(econith.pairlists.whitelist) == 4
         # Called once (only for XRP/BTC)
-        assert freqtrade.exchange.refresh_latest_ohlcv.call_count == 1
+        assert econith.exchange.refresh_latest_ohlcv.call_count == 1
 
 
 def test_OffsetFilter_error(mocker, whitelist_conf) -> None:
@@ -1664,7 +1664,7 @@ def test_rangestabilityfilter_checks(mocker, default_conf, markets, tickers):
         match=r"RangeStabilityFilter requires lookback_days to not exceed "
         r"exchange max request size \([0-9]+\)",
     ):
-        get_patched_freqtradebot(mocker, default_conf)
+        get_patched_econithbot(mocker, default_conf)
 
     default_conf["pairlists"] = [
         {"method": "VolumePairList", "number_assets": 10},
@@ -1674,7 +1674,7 @@ def test_rangestabilityfilter_checks(mocker, default_conf, markets, tickers):
     with pytest.raises(
         OperationalException, match="RangeStabilityFilter requires lookback_days to be >= 1"
     ):
-        get_patched_freqtradebot(mocker, default_conf)
+        get_patched_econithbot(mocker, default_conf)
 
     default_conf["pairlists"] = [
         {"method": "VolumePairList", "number_assets": 10},
@@ -1685,7 +1685,7 @@ def test_rangestabilityfilter_checks(mocker, default_conf, markets, tickers):
         OperationalException,
         match=r"RangeStabilityFilter requires sort_direction to be either None\.*",
     ):
-        get_patched_freqtradebot(mocker, default_conf)
+        get_patched_econithbot(mocker, default_conf)
 
 
 @pytest.mark.parametrize(
@@ -1734,17 +1734,17 @@ def test_rangestabilityfilter_caching(
         refresh_latest_ohlcv=MagicMock(return_value=ohlcv_data),
     )
 
-    freqtrade = get_patched_freqtradebot(mocker, default_conf)
-    assert freqtrade.exchange.refresh_latest_ohlcv.call_count == 0
-    freqtrade.pairlists.refresh_pairlist()
-    assert len(freqtrade.pairlists.whitelist) == expected_length
-    assert freqtrade.exchange.refresh_latest_ohlcv.call_count > 0
+    econith = get_patched_econithbot(mocker, default_conf)
+    assert econith.exchange.refresh_latest_ohlcv.call_count == 0
+    econith.pairlists.refresh_pairlist()
+    assert len(econith.pairlists.whitelist) == expected_length
+    assert econith.exchange.refresh_latest_ohlcv.call_count > 0
 
-    previous_call_count = freqtrade.exchange.refresh_latest_ohlcv.call_count
-    freqtrade.pairlists.refresh_pairlist()
-    assert len(freqtrade.pairlists.whitelist) == expected_length
+    previous_call_count = econith.exchange.refresh_latest_ohlcv.call_count
+    econith.pairlists.refresh_pairlist()
+    assert len(econith.pairlists.whitelist) == expected_length
     # Should not have increased since first call.
-    assert freqtrade.exchange.refresh_latest_ohlcv.call_count == previous_call_count
+    assert econith.exchange.refresh_latest_ohlcv.call_count == previous_call_count
 
 
 def test_spreadfilter_invalid_data(mocker, default_conf, markets, tickers, caplog):
@@ -1760,7 +1760,7 @@ def test_spreadfilter_invalid_data(mocker, default_conf, markets, tickers, caplo
         get_tickers=tickers,
     )
 
-    ftbot = get_patched_freqtradebot(mocker, default_conf)
+    ftbot = get_patched_econithbot(mocker, default_conf)
     ftbot.pairlists.refresh_pairlist()
 
     assert len(ftbot.pairlists.whitelist) == 5
@@ -1895,12 +1895,12 @@ def test_pricefilter_desc(
     whitelist_conf["pairlists"] = [pairlistconfig]
 
     if desc_expected is not None:
-        freqtrade = get_patched_freqtradebot(mocker, whitelist_conf)
-        short_desc = str(freqtrade.pairlists.short_desc())
+        econith = get_patched_econithbot(mocker, whitelist_conf)
+        short_desc = str(econith.pairlists.short_desc())
         assert short_desc == desc_expected
     else:  # OperationalException expected
         with pytest.raises(OperationalException, match=exception_expected):
-            freqtrade = get_patched_freqtradebot(mocker, whitelist_conf)
+            econith = get_patched_econithbot(mocker, whitelist_conf)
 
 
 def test_pairlistmanager_no_pairlist(mocker, whitelist_conf):
@@ -1909,12 +1909,12 @@ def test_pairlistmanager_no_pairlist(mocker, whitelist_conf):
     whitelist_conf["pairlists"] = []
 
     with pytest.raises(OperationalException, match=r"\[\] should be non-empty"):
-        get_patched_freqtradebot(mocker, whitelist_conf)
+        get_patched_econithbot(mocker, whitelist_conf)
 
     del whitelist_conf["pairlists"]
 
     with pytest.raises(OperationalException, match=r"'pairlists' is a required property"):
-        get_patched_freqtradebot(mocker, whitelist_conf)
+        get_patched_econithbot(mocker, whitelist_conf)
 
 
 @pytest.mark.parametrize(
@@ -1998,18 +1998,18 @@ def test_performance_filter(
 
     mocker.patch(f"{EXMS}.exchange_has", MagicMock(return_value=True))
 
-    freqtrade = get_patched_freqtradebot(mocker, allowlist_conf)
+    econith = get_patched_econithbot(mocker, allowlist_conf)
     mocker.patch.multiple(EXMS, get_tickers=tickers, markets=PropertyMock(return_value=markets))
     mocker.patch.multiple(
         EXMS,
         get_historic_ohlcv=MagicMock(return_value=ohlcv_history_list),
     )
     mocker.patch.multiple(
-        "freqtrade.persistence.Trade",
+        "econith.persistence.Trade",
         get_overall_performance=MagicMock(return_value=overall_performance),
     )
-    freqtrade.pairlists.refresh_pairlist()
-    allowlist = freqtrade.pairlists.whitelist
+    econith.pairlists.refresh_pairlist()
+    allowlist = econith.pairlists.whitelist
     assert allowlist == allowlist_result
 
 
@@ -2127,7 +2127,7 @@ def test_ProducerPairlist_no_emc(mocker, whitelist_conf):
         OperationalException,
         match=r"ProducerPairList requires external_message_consumer to be enabled.",
     ):
-        get_patched_freqtradebot(mocker, whitelist_conf)
+        get_patched_econithbot(mocker, whitelist_conf)
 
 
 def test_ProducerPairlist(mocker, whitelist_conf, markets):
@@ -2396,7 +2396,7 @@ def test_MarketCapPairList_filter(
         exchange_has=MagicMock(return_value=True),
     )
     mocker.patch(
-        "freqtrade.plugins.pairlist.MarketCapPairList.FtCoinGeckoApi.get_coins_categories_list",
+        "econith.plugins.pairlist.MarketCapPairList.FtCoinGeckoApi.get_coins_categories_list",
         return_value=[
             {"category_id": "layer-1"},
             {"category_id": "protocol"},
@@ -2405,7 +2405,7 @@ def test_MarketCapPairList_filter(
     )
 
     gcm_mock = mocker.patch(
-        "freqtrade.plugins.pairlist.MarketCapPairList.FtCoinGeckoApi.get_coins_markets",
+        "econith.plugins.pairlist.MarketCapPairList.FtCoinGeckoApi.get_coins_markets",
         return_value=test_value,
     )
 
@@ -2452,7 +2452,7 @@ def test_MarketCapPairList_timing(mocker, default_conf_usdt, markets, time_machi
     )
 
     mocker.patch(
-        "freqtrade.plugins.pairlist.MarketCapPairList.FtCoinGeckoApi.get_coins_markets",
+        "econith.plugins.pairlist.MarketCapPairList.FtCoinGeckoApi.get_coins_markets",
         return_value=test_value,
     )
 
@@ -2509,7 +2509,7 @@ def test_MarketCapPairList_1000_K_fillup(mocker, default_conf_usdt, markets, tim
     )
 
     mocker.patch(
-        "freqtrade.plugins.pairlist.MarketCapPairList.FtCoinGeckoApi.get_coins_markets",
+        "econith.plugins.pairlist.MarketCapPairList.FtCoinGeckoApi.get_coins_markets",
         return_value=test_value,
     )
 
@@ -2539,7 +2539,7 @@ def test_MarketCapPairList_filter_special_no_pair_from_coingecko(
 
     # Simulate no pair returned from coingecko
     gcm_mock = mocker.patch(
-        "freqtrade.plugins.pairlist.MarketCapPairList.FtCoinGeckoApi.get_coins_markets",
+        "econith.plugins.pairlist.MarketCapPairList.FtCoinGeckoApi.get_coins_markets",
         return_value=[],
     )
 
@@ -2566,7 +2566,7 @@ def test_MarketCapPairList_exceptions(mocker, default_conf_usdt, caplog):
     assert log_has_re("The max rank you have set \\(500\\) is quite high", caplog)
     # Test invalid coinmarkets list
     mocker.patch(
-        "freqtrade.plugins.pairlist.MarketCapPairList.FtCoinGeckoApi.get_coins_categories_list",
+        "econith.plugins.pairlist.MarketCapPairList.FtCoinGeckoApi.get_coins_categories_list",
         return_value=[
             {"category_id": "layer-1"},
             {"category_id": "protocol"},
@@ -2743,7 +2743,7 @@ def test_CrossMarketPairList_breaks_prefix_loop_on_match(mocker, default_conf_us
         raise AssertionError("Prefix loop did not break after match")
 
     mocker.patch(
-        "freqtrade.plugins.pairlist.CrossMarketPairList.PairPrefixes",
+        "econith.plugins.pairlist.CrossMarketPairList.PairPrefixes",
         new=prefix_generator(),
     )
 
@@ -2779,7 +2779,7 @@ def test_CrossMarketPairList_breaks_prefix_loop_on_delayed_match(
         raise AssertionError("Prefix loop did not break after delayed match")
 
     mocker.patch(
-        "freqtrade.plugins.pairlist.CrossMarketPairList.PairPrefixes",
+        "econith.plugins.pairlist.CrossMarketPairList.PairPrefixes",
         new=prefix_generator(),
     )
 

@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 # =============================================================================
-# ECONITH :: Phase 0 :: Step 1b -- Source-level Find & Replace ("freqtrade" -> ECONITH)
+# ECONITH :: Phase 0 :: Step 1b -- Source-level Find & Replace ("econith" -> ECONITH)
 # -----------------------------------------------------------------------------
 # Cross-platform (Windows / Linux / macOS) refactor utility.
 #
 # It walks the vendored engine directory (default: ./econith_quant) and rewrites
-# occurrences of "freqtrade" according to a chosen mode:
+# occurrences of "econith" according to a chosen mode:
 #
 #   --mode branding   (RECOMMENDED, SAFE)
 #       Replaces ONLY user-facing brand strings:
-#           "Freqtrade" / "FreqTrade" / "FREQTRADE"  -> "ECONITH Quant"
-#       Leaves the python import path / package identifier `freqtrade` UNTOUCHED,
-#       so `pip install -e .` and `from freqtrade... import ...` keep working and
+#           "Econith" / "Econith" / "ECONITH"  -> "ECONITH Quant"
+#       Leaves the python import path / package identifier `econith` UNTOUCHED,
+#       so `pip install -e .` and `from econith... import ...` keep working and
 #       you can still pull upstream security patches.
 #
 #   --mode full       (AGGRESSIVE, BREAKS UPSTREAM COMPATIBILITY)
-#       Replaces every lowercase `freqtrade` token -> `econith_quant` AND the
+#       Replaces every lowercase `econith` token -> `econith_quant` AND the
 #       brand strings above. This rewrites import paths and (optionally) renames
 #       the inner python package directory. After this you can no longer cleanly
-#       merge upstream freqtrade updates. Use only if you intend to hard-fork.
+#       merge upstream econith updates. Use only if you intend to hard-fork.
 #
 # Safety features:
 #   * Dry-run by default. Nothing is written unless you pass --apply.
@@ -59,14 +59,14 @@ SKIP_FILES = {"poetry.lock", "package-lock.json", "yarn.lock"}
 
 # Brand-string replacements applied in BOTH modes (order matters).
 BRAND_RULES = [
-    (re.compile(r"FREQTRADE"), "ECONITH_QUANT"),
-    (re.compile(r"FreqTrade"), "ECONITH Quant"),
-    (re.compile(r"Freqtrade"), "ECONITH Quant"),
+    (re.compile(r"ECONITH"), "ECONITH_QUANT"),
+    (re.compile(r"Econith"), "ECONITH Quant"),
+    (re.compile(r"Econith"), "ECONITH Quant"),
 ]
 
 # Lowercase identifier replacement, applied only in FULL mode.
-# \b word boundaries keep us from touching things like "myfreqtraderc".
-IDENT_RULE = (re.compile(r"\bfreqtrade\b"), "econith_quant")
+# \b word boundaries keep us from touching things like "myeconithrc".
+IDENT_RULE = (re.compile(r"\beconith\b"), "econith_quant")
 
 
 def iter_text_files(root: Path):
@@ -94,7 +94,7 @@ def transform(text: str, mode: str) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="ECONITH freqtrade refactor tool")
+    parser = argparse.ArgumentParser(description="ECONITH econith refactor tool")
     parser.add_argument("--target", default="econith_quant",
                         help="Directory to refactor (default: econith_quant)")
     parser.add_argument("--mode", choices=["branding", "full"], default="branding")
@@ -103,7 +103,7 @@ def main() -> int:
     parser.add_argument("--backup", action="store_true",
                         help="Copy each modified file to <file>.bak before writing")
     parser.add_argument("--rename-package", action="store_true",
-                        help="[full only] rename inner freqtrade/ package dir -> econith_quant/")
+                        help="[full only] rename inner econith/ package dir -> econith_quant/")
     args = parser.parse_args()
 
     target = Path(args.target).resolve()
@@ -144,7 +144,7 @@ def main() -> int:
 
     # Optional inner-package directory rename (FULL mode only).
     if args.mode == "full" and args.rename_package:
-        inner = target / "freqtrade"
+        inner = target / "econith"
         if inner.is_dir():
             dst = target / "econith_quant_pkg"  # avoids clash with the outer folder name
             print("-" * 70)

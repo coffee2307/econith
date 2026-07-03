@@ -1,16 +1,25 @@
-"""ECONITH :: backend_core entrypoint
+"""ECONITH :: backend_core entrypoint (unified production integration)
 
-FastAPI application that boots the AI-001 Core Engine and runs the full Phase 0
-+ Phase 1/3 mock pipeline concurrently:
+FastAPI application that boots the AI-001 Core Engine and wires together BOTH
+the legacy pipeline and the eight advanced production subsystems on a single
+deterministic 5-phase Tick Engine and shared EventBus.
 
-    TimeEngine  ──▶ governs market-data cadence
-    Streamer    ──▶ md.aggTrade / md.depth        (mock Binance frames)
-    Pipeline    ──▶ indicator.obi / .volume_delta / md.ticker
-    Sentinel    ──▶ sentinel.status / .emergency  (risk governance loop)
-    MetricsHub  ──▶ consolidated read-model for the dashboard
+    TimeEngine     ──▶ drives the deterministic 5-phase TickPipeline
+    Streamer       ──▶ md.aggTrade / md.depth        (mock/live Binance frames)
+    Pipeline       ──▶ indicator.obi / .volume_delta / md.ticker
+    Sentinel       ──▶ sentinel.status / .emergency  (risk governance loop)
+    MetricsHub     ──▶ consolidated legacy read-model for the dashboard
 
-A WebSocket at ``/api/v1/stream/metrics`` streams the consolidated JSON snapshot
-to the Next.js dashboard.
+    -- advanced subsystems --------------------------------------------------
+    MacroIngestionHub  ──▶ core.macro.* (FRED/World Bank/IMF/Eurostat/yfinance)
+    SovereignWorldGraph──▶ world.sovereign (4-agent butterfly, chronology forks)
+    CockpitTelemetryHub──▶ /api/v1/stream/cockpit (flight log / PnL / margin / radar)
+    JournalistLLM      ──▶ journalist.news (semantic narrative synthesis)
+    CCXTBinanceBridge  ──▶ quant.fill (REALITY live / SIMULATION synthetic)
+
+Bridges (bridges/):
+    WorldBridge          reconciles WorldKernel <-> SovereignWorldGraph
+    QuantExecutionBridge routes order.intent -> CCXT by REALITY/SIMULATION gate
 
 Run locally:
     uvicorn main:app --host 0.0.0.0 --port 8000 --reload
@@ -27,10 +36,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from ai.inference.predictor import Predictor
+from ai.journalist import JournalistLLM
 from ai.simulator_engine.llm_scenario import LLMScenarioEngine
+from ai.simulator_engine.sovereign_graph import SovereignWorldGraph, default_world
 from ai.simulator_engine.world_kernel import WorldKernel
+from bridges.quant_bridge import QuantExecutionBridge
+from bridges.world_bridge import WorldBridge
+from config.database import dispose_database, init_database, is_fallback
+from config.environment import get_environment
 from config.settings import TIME_SPEED_MULTIPLIERS, get_settings
+from core.cockpit import CockpitTelemetryHub, build_cockpit_router
 from core.engine import get_engine
+from core.ingestion import MacroIngestionHub, MacroIngestionSettings
 from core.mode import QuantMode, get_mode_manager
 from core.telemetry import MetricsHub
 from econith_quant.bridge.ai_bridge import AIBridge
@@ -39,9 +56,11 @@ from infrastructure.alternative.provider import AlternativeDataProvider
 from infrastructure.preprocessing.pipeline import MarketDataPipeline
 from infrastructure.storage.recorder import StateRecorder
 from infrastructure.websocket.streamer import BinanceWebSocketStreamer
+from quant.ccxt_bridge import CCXTBinanceBridge
 from sentinel.manager import Sentinel
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("econith")
 settings = get_settings()
 
 # Concurrent runtime components, populated during lifespan startup.
@@ -50,11 +69,20 @@ components: dict[str, object] = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    engine = get_engine()
-    await engine.startup()  # starts EventBus + TimeEngine
+    env = get_environment()
 
-    # --- Read-model + processing graph -----------------------------------
-    # Subscribers are registered BEFORE producers start so no frames are missed.
+    # Storage resiliency: probe primary DB, seamlessly fail over to local SQLite.
+    await init_database()
+    if is_fallback():
+        logger.warning("persistence running on local SQLite failover matrix")
+
+    engine = get_engine()
+    await engine.startup()  # starts EventBus + TimeEngine + TickPipeline
+
+    # =====================================================================
+    #  SUBSCRIBERS FIRST (registered before producers so no frame is missed)
+    # =====================================================================
+    # --- Legacy read-model + processing graph ----------------------------
     hub = MetricsHub(engine.bus, engine.time)
     hub.register()
 
@@ -67,6 +95,15 @@ async def lifespan(app: FastAPI):
     sentinel = Sentinel(engine.bus)
     sentinel.register()
 
+    # --- Advanced read-models (CORE / cockpit / journalist) --------------
+    macro_hub = MacroIngestionHub(engine.bus, MacroIngestionSettings.from_environment())
+
+    cockpit_hub = CockpitTelemetryHub(engine.bus)
+    cockpit_hub.register()
+
+    journalist = JournalistLLM(engine.bus)
+    journalist.register()
+
     # --- AI Quant layer (Phase 2 + Phase 4) ------------------------------
     predictor = Predictor(engine.bus)
     predictor.register()
@@ -74,51 +111,95 @@ async def lifespan(app: FastAPI):
     ai_bridge = AIBridge(engine.bus)
     ai_bridge.register()
 
+    # Legacy mock TWAP bridge: retained purely for its order.update UI feed.
     exchange_bridge = ExchangeBridge(engine.bus)
     exchange_bridge.register()
 
-    # --- ECONITH World layer (Phase 6-8) ---------------------------------
+    # Advanced execution: state-isolation gate over CCXT (REALITY/SIMULATION).
+    ccxt_bridge = CCXTBinanceBridge(
+        engine.bus,
+        api_key=env.effective_binance_trade_api_key,
+        api_secret=env.effective_binance_trade_api_secret,
+        testnet=env.binance_testnet,
+        credentialed=env.has_binance_trade_credentials,
+    )
+    quant_exec = QuantExecutionBridge(engine.bus, ccxt_bridge)
+    quant_exec.register()
+
+    # --- ECONITH World layer (legacy kernel + sovereign graph) -----------
     world_kernel = WorldKernel(engine.bus)
     world_kernel.register()
     llm_scenario = LLMScenarioEngine(engine.bus, world_kernel)
 
-    # --- Producers -------------------------------------------------------
+    sovereign_world: SovereignWorldGraph = default_world(engine.bus)
+    sovereign_world.register(engine.pipeline)  # wires the 4 agents into 5 phases
+
+    world_bridge = WorldBridge(world_kernel, sovereign_world)
+
+    # =====================================================================
+    #  PRODUCERS
+    # =====================================================================
     streamer = BinanceWebSocketStreamer(engine.bus, engine.time, symbol="BTCUSDT")
     alt_provider = AlternativeDataProvider(engine.bus, symbol="BTCUSDT")
     alt_provider.register()
 
-    # Start the concurrent loops.
+    # =====================================================================
+    #  START CONCURRENT LOOPS
+    # =====================================================================
     await sentinel.start()
     await predictor.start()
     await alt_provider.start()
     await streamer.start()
+    await macro_hub.start()      # launches one scheduler task per macro source
+    await journalist.start()     # starts the narrative synthesis flush loop
+    await ccxt_bridge.connect()  # authenticates only in REALITY mode
+
+    # Mount the cockpit router (GET /cockpit/snapshot + WS /stream/cockpit).
+    app.include_router(build_cockpit_router(cockpit_hub, settings.api_prefix))
 
     components.update(
+        env=env,
         engine=engine,
         hub=hub,
         pipeline=pipeline,
         recorder=recorder,
         sentinel=sentinel,
+        macro_hub=macro_hub,
+        cockpit_hub=cockpit_hub,
+        journalist=journalist,
         predictor=predictor,
         ai_bridge=ai_bridge,
         exchange_bridge=exchange_bridge,
+        ccxt_bridge=ccxt_bridge,
+        quant_exec=quant_exec,
         world_kernel=world_kernel,
         llm_scenario=llm_scenario,
+        sovereign_world=sovereign_world,
+        world_bridge=world_bridge,
         streamer=streamer,
         alt_provider=alt_provider,
     )
     app.state.components = components
-    logging.getLogger("econith").info(
-        "%s backend_core online (mock=%s)", settings.app_name, streamer.is_mock
+    logger.info(
+        "%s backend_core online (mock=%s, mode=%s, macro_sources=%d)",
+        settings.app_name, streamer.is_mock,
+        get_mode_manager().mode.value, len(MacroIngestionSettings.from_environment().enabled_sources()),
     )
     try:
         yield
     finally:
+        # =================================================================
+        #  GRACEFUL SHUTDOWN (strict reverse-priority: producers -> engine)
+        # =================================================================
         await streamer.stop()
         await alt_provider.stop()
+        await ccxt_bridge.close()
+        await macro_hub.stop()
+        await journalist.stop()
         await predictor.stop()
         await sentinel.stop()
-        await engine.shutdown()
+        await engine.shutdown()   # stops TimeEngine + EventBus last
+        await dispose_database()
         components.clear()
 
 
@@ -166,6 +247,7 @@ class ModeRequest(BaseModel):
     mode: Literal["REALITY", "SIMULATION"]
 
 
+# --- component accessors -----------------------------------------------------
 def _engine():
     return components.get("engine") or get_engine()
 
@@ -190,6 +272,26 @@ def _world_kernel() -> WorldKernel:
     return components["world_kernel"]  # type: ignore[return-value]
 
 
+def _world_bridge() -> WorldBridge:
+    return components["world_bridge"]  # type: ignore[return-value]
+
+
+def _sovereign() -> SovereignWorldGraph:
+    return components["sovereign_world"]  # type: ignore[return-value]
+
+
+def _cockpit() -> CockpitTelemetryHub:
+    return components["cockpit_hub"]  # type: ignore[return-value]
+
+
+def _journalist() -> JournalistLLM:
+    return components["journalist"]  # type: ignore[return-value]
+
+
+def _macro_hub() -> MacroIngestionHub:
+    return components["macro_hub"]  # type: ignore[return-value]
+
+
 # --- health / introspection --------------------------------------------------
 @app.get(f"{settings.api_prefix}/health")
 async def health() -> dict:
@@ -200,6 +302,7 @@ async def health() -> dict:
         "version": settings.app_version,
         "mock": getattr(streamer, "is_mock", None),
         "quant_mode": get_mode_manager().snapshot(),
+        "subsystems": sorted(components.keys()),
     }
 
 
@@ -250,6 +353,10 @@ async def get_quant_mode() -> dict:
 async def set_quant_mode(req: ModeRequest) -> dict:
     mgr = get_mode_manager()
     mgr.set(QuantMode(req.mode))
+    # Re-authenticate the CCXT session when entering REALITY.
+    ccxt = components.get("ccxt_bridge")
+    if ccxt is not None and mgr.is_reality():
+        await ccxt.connect()  # type: ignore[attr-defined]
     return mgr.snapshot()
 
 
@@ -281,7 +388,7 @@ async def get_state() -> dict:
     return {"state": _engine().state.snapshot()}
 
 
-# --- ECONITH World simulator (Phase 6-8) -------------------------------------
+# --- ECONITH World simulator (legacy kernel + sovereign graph bridge) --------
 @app.post(f"{settings.api_prefix}/world/scenario")
 async def world_scenario(req: ScenarioRequest) -> dict:
     if not req.prompt.strip():
@@ -302,16 +409,44 @@ async def world_country(code: str) -> dict:
 
 @app.post(f"{settings.api_prefix}/world/country/{{code}}/mutate")
 async def world_mutate(code: str, req: MutateRequest) -> dict:
-    return await _world_kernel().mutate_country(
-        code.upper(), req.group, req.field, req.value
-    )
+    # Bridged: legacy kernel (immediate) + sovereign graph (next-tick fork).
+    return await _world_bridge().mutate(code.upper(), req.group, req.field, req.value)
 
 
 @app.post(f"{settings.api_prefix}/world/tariff")
 async def world_tariff(req: TariffRequest) -> dict:
-    return await _world_kernel().set_tariff(
+    # Bridged: forks the scenario chronology on the next deterministic tick.
+    return await _world_bridge().apply_tariff(
         req.source.upper(), req.target.upper(), req.value
     )
+
+
+@app.get(f"{settings.api_prefix}/world/sovereign")
+async def world_sovereign() -> dict:
+    return _sovereign().snapshot()
+
+
+@app.get(f"{settings.api_prefix}/world/chronology")
+async def world_chronology() -> dict:
+    return _world_bridge().chronology()
+
+
+# --- CORE macro ingestion ----------------------------------------------------
+@app.get(f"{settings.api_prefix}/macro/snapshot")
+async def macro_snapshot() -> dict:
+    return _macro_hub().snapshot()
+
+
+# --- Journalist LLM news terminal --------------------------------------------
+@app.get(f"{settings.api_prefix}/journalist/news")
+async def journalist_news(limit: int = 20) -> dict:
+    return {"news": _journalist().recent(limit=limit)}
+
+
+# --- Cockpit snapshot (also exposed via the mounted cockpit router) ----------
+@app.get(f"{settings.api_prefix}/cockpit")
+async def cockpit_snapshot_alias() -> dict:
+    return _cockpit().snapshot()
 
 
 # --- live metrics WebSocket (consumed by the Next.js dashboard) --------------
@@ -326,5 +461,20 @@ async def stream_metrics(ws: WebSocket) -> None:
     except WebSocketDisconnect:
         return
     except Exception:  # noqa: BLE001 -- never let the socket loop crash the app
-        logging.getLogger("econith").exception("metrics websocket error")
+        logger.exception("metrics websocket error")
         await ws.close()
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    from config.environment import get_environment
+
+    env = get_environment()
+    uvicorn.run(
+        "main:app",
+        host=env.app_host,
+        port=env.app_port,
+        reload=not env.is_production,
+        log_level=env.log_level.lower(),
+    )

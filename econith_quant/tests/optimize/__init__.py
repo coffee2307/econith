@@ -3,9 +3,9 @@ from typing import NamedTuple
 
 from pandas import DataFrame
 
-from freqtrade.enums import ExitType
-from freqtrade.exchange import timeframe_to_minutes
-from freqtrade.util.datetime_helpers import dt_utc
+from econith.enums import ExitType
+from econith.exchange import timeframe_to_minutes
+from econith.util.datetime_helpers import dt_utc
 
 
 tests_start_time = dt_utc(2018, 10, 3)

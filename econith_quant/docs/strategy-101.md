@@ -48,7 +48,7 @@ dataframe['rsi'] = ta.RSI(dataframe)
 
 ??? Hint "Technical Analysis libraries"
     Different libraries work in different ways to generate indicator values. Please check the documentation of each library to understand
-    how to integrate it into your strategy. You can also check the [ECONITH Quant example strategies](https://github.com/freqtrade/freqtrade-strategies) to give you ideas.
+    how to integrate it into your strategy. You can also check the [ECONITH Quant example strategies](https://github.com/econith/econith-strategies) to give you ideas.
 
 ### Populate entry signals
 
@@ -73,7 +73,7 @@ The dataframe column `exit_long` is added to the dataframe, and when a value of 
 Here is a minimal example of a ECONITH Quant strategy:
 
 ```python
-from freqtrade.strategy import IStrategy
+from econith.strategy import IStrategy
 from pandas import DataFrame
 import talib.abstract as ta
 
@@ -169,8 +169,8 @@ Once your bot is running in dry or live mode, ECONITH Quant has six mechanisms t
 
 - **[FreqUI](freq-ui.md)**: The easiest to get started with, FreqUI is a web interface to see and control current activity of your bot.
 - **[Telegram](telegram-usage.md)**: On mobile devices, Telegram integration is available to get alerts about your bot activity and to control certain aspects.
-- **[FTUI](https://github.com/freqtrade/ftui)**: FTUI is a terminal (command line) interface to ECONITH Quant, and allows monitoring of a running bot only.
-- **[freqtrade-client](rest-api.md#consuming-the-api)**: A python implementation of the REST API, making it easy to make requests and consume bot responses from your python apps or the command line.
+- **[FTUI](https://github.com/econith/ftui)**: FTUI is a terminal (command line) interface to ECONITH Quant, and allows monitoring of a running bot only.
+- **[econith-client](rest-api.md#consuming-the-api)**: A python implementation of the REST API, making it easy to make requests and consume bot responses from your python apps or the command line.
 - **[REST API endpoints](rest-api.md#available-endpoints)**: The REST API allows programmers to develop their own tools to interact with a ECONITH Quant bot.
 - **[Webhooks](webhook-config.md)**: ECONITH Quant can send information to other services, e.g. discord, by webhooks.
 
@@ -178,7 +178,7 @@ Once your bot is running in dry or live mode, ECONITH Quant has six mechanisms t
 
 ECONITH Quant generates extensive debugging logs to help you understand what's happening. Please familiarise yourself with the information and error messages you might see in your bot logs.
 
-Logging by default occurs on standard out (the command line). If you want to write out to a file instead, many freqtrade commands, including the `trade` command, accept the `--logfile` option to write to a file.
+Logging by default occurs on standard out (the command line). If you want to write out to a file instead, many econith commands, including the `trade` command, accept the `--logfile` option to write to a file.
 
 Check the [FAQ](faq.md#how-do-i-search-the-bot-logs-for-something) for examples.
 

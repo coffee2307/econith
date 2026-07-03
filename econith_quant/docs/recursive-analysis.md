@@ -25,7 +25,7 @@ Command settings:
 In addition to the recursive formula check, this command also carries out a simple lookahead bias check on the indicator values only. For a full lookahead check, use [Lookahead-analysis](lookahead-analysis.md).
 
 !!! Tip "Running recursive-analysis via freqUI"
-    `recursive-analysis` can also be ran through freqUI when running freqtrade in [webserver mode](utils.md#webserver-mode).
+    `recursive-analysis` can also be ran through freqUI when running econith in [webserver mode](utils.md#webserver-mode).
     As the analysis can run for a while, it is executed as a background task.
 
 ## Recursive-analysis command reference
@@ -75,7 +75,7 @@ As such, aiming for absolute zero variance (shown by `-` value) might not be the
 
 ## Running recursive-analysis via the REST API
 
-`recursive-analysis` can also be triggered through the REST API when running freqtrade in [webserver mode](utils.md#webserver-mode).
+`recursive-analysis` can also be triggered through the REST API when running econith in [webserver mode](utils.md#webserver-mode).
 As the analysis can run for a while, it is executed as a background task.
 
 1. `POST /api/v1/recursive_analysis` with a JSON body containing at least `strategy` and `timerange` (optional: `timeframe`, `startup_candle`). Pairs are taken from the webserver configuration. This returns a `job_id`.

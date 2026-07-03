@@ -1,5 +1,5 @@
 ``` output
-usage: freqtrade strategy-updater [-h] [-v] [--no-color] [--logfile FILE] [-V]
+usage: econith strategy-updater [-h] [-v] [--no-color] [--logfile FILE] [-V]
                                   [-c PATH] [-d PATH] [--userdir PATH]
                                   [--strategy-list STRATEGY_LIST [STRATEGY_LIST ...]]
                                   [--strategy-path PATH]

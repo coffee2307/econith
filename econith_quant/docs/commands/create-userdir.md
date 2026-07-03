@@ -1,5 +1,5 @@
 ``` output
-usage: freqtrade create-userdir [-h] [--userdir PATH] [--reset]
+usage: econith create-userdir [-h] [--userdir PATH] [--reset]
 
 options:
   -h, --help            show this help message and exit

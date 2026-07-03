@@ -7,8 +7,8 @@ from datetime import datetime
 
 from pandas import DataFrame
 
-from freqtrade.persistence.trade_model import Order
-from freqtrade.strategy.interface import IStrategy
+from econith.persistence.trade_model import Order
+from econith.strategy.interface import IStrategy
 
 
 class TestStrategyNoImplements(IStrategy):

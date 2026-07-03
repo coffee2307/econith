@@ -1,6 +1,6 @@
 from shutil import copytree
 
-from freqtrade.util.migrations import migrate_funding_fee_timeframe
+from econith.util.migrations import migrate_funding_fee_timeframe
 
 
 def test_migrate_funding_rate_timeframe(default_conf_usdt, tmp_path, testdatadir):

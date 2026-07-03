@@ -90,4 +90,4 @@ runs:
       shell: bash
       # Add commit to docker container
       run: |
-        echo "${GITHUB_SHA}" > freqtrade_commit
+        echo "${GITHUB_SHA}" > econith_commit

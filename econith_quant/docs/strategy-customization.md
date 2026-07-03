@@ -11,7 +11,7 @@ If you haven't already, please familiarize yourself with:
 
 The bot includes a default strategy file.
 
-Also, several other strategies are available in the [strategy repository](https://github.com/freqtrade/freqtrade-strategies).
+Also, several other strategies are available in the [strategy repository](https://github.com/econith/econith-strategies).
 
 You will however most likely have your own idea for a strategy.
 
@@ -22,7 +22,7 @@ This document intends to help you convert your ideas into a working strategy.
 To get started, you can use the command:
 
 ```bash
-freqtrade new-strategy --strategy AwesomeStrategy
+econith new-strategy --strategy AwesomeStrategy
 ```
 
 This will create a new strategy called `AwesomeStrategy` from a template, which will be located using the filename `user_data/strategies/AwesomeStrategy.py`.
@@ -34,7 +34,7 @@ This will create a new strategy called `AwesomeStrategy` from a template, which 
     The `new-strategy` command generates starting examples which will not be profitable out of the box.
 
 ??? Hint "Different template levels"
-    `freqtrade new-strategy` has an additional parameter, `--template`, which controls the amount of pre-build information you get in the created strategy. Use `--template minimal` to get an empty strategy without any indicator examples, or `--template advanced` to get a template with more complicated features defined.
+    `econith new-strategy` has an additional parameter, `--template`, which controls the amount of pre-build information you get in the created strategy. Use `--template minimal` to get an empty strategy without any indicator examples, or `--template advanced` to get a template with more complicated features defined.
 
 ### Anatomy of a strategy
 
@@ -66,7 +66,7 @@ You may see older strategies set to interface version 2, and these will need to 
 Starting the bot in dry or live mode is accomplished using the `trade` command:
 
 ```bash
-freqtrade trade --strategy AwesomeStrategy
+econith trade --strategy AwesomeStrategy
 ```
 
 ### Bot modes
@@ -85,7 +85,7 @@ Check the [configuration documentation](configuration.md) about how to set the b
 
 ## Diving in deeper
 
-**For the following section we will use the [user_data/strategies/sample_strategy.py](https://github.com/freqtrade/freqtrade/blob/develop/freqtrade/templates/sample_strategy.py)
+**For the following section we will use the [user_data/strategies/sample_strategy.py](https://github.com/econith/econith/blob/develop/econith/templates/sample_strategy.py)
 file as reference.**
 
 !!! Note "Strategies and Backtesting"
@@ -222,16 +222,16 @@ def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame
 ```
 
 !!! Note "Want more indicator examples?"
-    Look into the [user_data/strategies/sample_strategy.py](https://github.com/freqtrade/freqtrade/blob/develop/freqtrade/templates/sample_strategy.py).
+    Look into the [user_data/strategies/sample_strategy.py](https://github.com/econith/econith/blob/develop/econith/templates/sample_strategy.py).
     Then uncomment indicators you need.
 
 #### Indicator libraries
 
-Out of the box, freqtrade installs the following technical libraries:
+Out of the box, econith installs the following technical libraries:
 
 - [ta-lib](https://ta-lib.github.io/ta-lib-python/)
 - [pandas-ta](https://twopirllc.github.io/pandas-ta/)
-- [technical](https://technical.freqtrade.io)
+- [technical](https://technical.econith)
 
 Additional technical libraries can be installed as necessary, or custom indicators may be written / invented by the strategy author.
 
@@ -257,7 +257,7 @@ By letting the bot know how much history is needed, backtest trades can start at
     If you receive a warning like `WARNING - Using 3 calls to get OHLCV. This can result in slower operations for the bot. Please check if you really need 1500 candles for your strategy` - you should consider if you really need this much historic data for your signals.
     Having this will cause ECONITH Quant to make multiple calls for the same pair, which will obviously be slower than one network request.
     As a consequence, ECONITH Quant will take longer to refresh candles - and should therefore be avoided if possible.
-    This is capped to 5 total calls to avoid overloading the exchange, or make freqtrade too slow.
+    This is capped to 5 total calls to avoid overloading the exchange, or make econith too slow.
 
 !!! Warning
     `startup_candle_count` should be below `ohlcv_candle_limit * 5` (which is 500 * 5 for most exchanges) - since only this amount of candles will be available during Dry-Run/Live Trade operations.
@@ -267,7 +267,7 @@ By letting the bot know how much history is needed, backtest trades can start at
 Let's try to backtest 1 month (January 2019) of 5m candles using an example strategy with EMA100, as above.
 
 ``` bash
-freqtrade backtesting --timerange 20190101-20190201 --timeframe 5m
+econith backtesting --timerange 20190101-20190201 --timeframe 5m
 ```
 
 Assuming `startup_candle_count` is set to 400, backtesting knows it needs 400 candles to generate valid entry signals. It will load data from `20190101 - (400 * 5m)` - which is ~2018-12-30 11:40:00.
@@ -448,7 +448,7 @@ To use times based on candle duration (timeframe), the following snippet can be 
 This will allow you to change the timeframe for the strategy, but the minimal ROI times will still be set as candles, e.g. after 3 candles.
 
 ``` python
-from freqtrade.exchange import timeframe_to_minutes
+from econith.exchange import timeframe_to_minutes
 
 class AwesomeStrategy(IStrategy):
 
@@ -509,17 +509,17 @@ Instead, please check the [Storing information](strategy-advanced.md#storing-inf
 
 ## Strategy file loading
 
-By default, freqtrade will attempt to load strategies from all `.py` files within the `userdir` (default `user_data/strategies`).
+By default, econith will attempt to load strategies from all `.py` files within the `userdir` (default `user_data/strategies`).
 
-Assuming your strategy is called `AwesomeStrategy`, stored in the file `user_data/strategies/AwesomeStrategy.py`, then you can start freqtrade in dry (or live, depending on your configuration) mode with:
+Assuming your strategy is called `AwesomeStrategy`, stored in the file `user_data/strategies/AwesomeStrategy.py`, then you can start econith in dry (or live, depending on your configuration) mode with:
 
 ```bash
-freqtrade trade --strategy AwesomeStrategy
+econith trade --strategy AwesomeStrategy
 ```
 
 Note that we're using the class name, not the file name.
 
-You can use `freqtrade list-strategies` to see a list of all strategies ECONITH Quant is able to load (all strategies in the correct folder).
+You can use `econith list-strategies` to see a list of all strategies ECONITH Quant is able to load (all strategies in the correct folder).
 It will also include a "status" field, highlighting potential problems.
 
 ??? Hint "Customize strategy directory"
@@ -630,8 +630,8 @@ When hyperopting, use of the hyperoptable parameter `.value` attribute is not su
     ``` python
 
     from datetime import datetime
-    from freqtrade.persistence import Trade
-    from freqtrade.strategy import IStrategy, informative
+    from econith.persistence import Trade
+    from econith.strategy import IStrategy, informative
 
     class AwesomeStrategy(IStrategy):
         
@@ -841,7 +841,7 @@ informative = self.dp.get_pair_dataframe(pair=inf_pair,
 
 ### *get_analyzed_dataframe(pair, timeframe)*
 
-This method is used by freqtrade internally to determine the last signal.
+This method is used by econith internally to determine the last signal.
 It can also be used in specific callbacks to get the signal that caused the action (see [Advanced Strategy Documentation](strategy-advanced.md) for more details on available callbacks).
 
 ``` python
@@ -993,7 +993,7 @@ Notifications will only be sent in trading modes (Live/Dry-run) - so this method
 ### Complete DataProvider sample
 
 ```python
-from freqtrade.strategy import IStrategy, merge_informative_pair
+from econith.strategy import IStrategy, merge_informative_pair
 from pandas import DataFrame
 
 class SampleStrategy(IStrategy):
@@ -1088,7 +1088,7 @@ A history of trades can be retrieved in the strategy by querying the database.
 At the top of the file, import the required object:
 
 ```python
-from freqtrade.persistence import Trade
+from econith.persistence import Trade
 ```
 
 The following example queries trades from today for the current pair (`metadata['pair']`). Other filters can easily be added.
@@ -1136,7 +1136,7 @@ To verify if a pair is currently locked, use `self.is_pair_locked(pair)`.
 #### Pair locking example
 
 ``` python
-from freqtrade.persistence import Trade
+from econith.persistence import Trade
 from datetime import timedelta, datetime, timezone
 # Put the above lines at the top of the strategy file, next to all the other imports
 # --------
@@ -1200,7 +1200,7 @@ The following list contains some common patterns which should be avoided to prev
 
 ### Colliding signals
 
-When conflicting signals collide (e.g. both `'enter_long'` and `'exit_long'` are set to `1`), freqtrade will do nothing and ignore the entry signal. This will avoid trades that enter, and exit immediately. Obviously, this can potentially lead to missed entries.
+When conflicting signals collide (e.g. both `'enter_long'` and `'exit_long'` are set to `1`), econith will do nothing and ignore the entry signal. This will avoid trades that enter, and exit immediately. Obviously, this can potentially lead to missed entries.
 
 The following rules apply, and entry signals will be ignored if more than one of the 3 signals is set:
 
@@ -1209,7 +1209,7 @@ The following rules apply, and entry signals will be ignored if more than one of
 
 ## Further strategy ideas
 
-To get additional ideas for strategies, head over to the [strategy repository](https://github.com/freqtrade/freqtrade-strategies). Feel free to use them as examples, but results will depend on the current market situation, pairs used, etc. Therefore, these strategies should be considered only for learning purposes, not real world trading. Please backtest the strategy for your exchange/desired pairs first, then dry run to evaluate carefully, and use at your own risk.
+To get additional ideas for strategies, head over to the [strategy repository](https://github.com/econith/econith-strategies). Feel free to use them as examples, but results will depend on the current market situation, pairs used, etc. Therefore, these strategies should be considered only for learning purposes, not real world trading. Please backtest the strategy for your exchange/desired pairs first, then dry run to evaluate carefully, and use at your own risk.
 
 Feel free to use any of them as inspiration for your own strategies. We're happy to accept Pull Requests containing new strategies to the repository.
 

@@ -5,12 +5,12 @@ from unittest.mock import MagicMock, PropertyMock
 
 import pytest
 
-from freqtrade.commands.optimize_commands import start_recursive_analysis
-from freqtrade.data.history import get_timerange
-from freqtrade.exceptions import OperationalException
-from freqtrade.optimize.analysis.recursive import RecursiveAnalysis
-from freqtrade.optimize.analysis.recursive_helpers import RecursiveAnalysisSubFunctions
-from freqtrade.util import get_progress_tracker
+from econith.commands.optimize_commands import start_recursive_analysis
+from econith.data.history import get_timerange
+from econith.exceptions import OperationalException
+from econith.optimize.analysis.recursive import RecursiveAnalysis
+from econith.optimize.analysis.recursive_helpers import RecursiveAnalysisSubFunctions
+from econith.util import get_progress_tracker
 from tests.conftest import EXMS, get_args, log_has_re, patch_exchange
 
 
@@ -30,7 +30,7 @@ def test_start_recursive_analysis(mocker):
     single_mock = MagicMock()
     text_table_mock = MagicMock()
     mocker.patch.multiple(
-        "freqtrade.optimize.analysis.recursive_helpers.RecursiveAnalysisSubFunctions",
+        "econith.optimize.analysis.recursive_helpers.RecursiveAnalysisSubFunctions",
         initialize_single_recursive_analysis=single_mock,
         text_table_recursive_analysis_instances=text_table_mock,
     )
@@ -82,7 +82,7 @@ def test_recursive_helper_start(recursive_conf, mocker) -> None:
     single_mock = MagicMock()
     text_table_mock = MagicMock()
     mocker.patch.multiple(
-        "freqtrade.optimize.analysis.recursive_helpers.RecursiveAnalysisSubFunctions",
+        "econith.optimize.analysis.recursive_helpers.RecursiveAnalysisSubFunctions",
         initialize_single_recursive_analysis=single_mock,
         text_table_recursive_analysis_instances=text_table_mock,
     )
@@ -122,17 +122,17 @@ def test_recursive_helper_text_table_recursive_analysis_instances(recursive_conf
 
 
 def test_initialize_single_recursive_analysis(recursive_conf, mocker, caplog):
-    mocker.patch("freqtrade.data.history.get_timerange", get_timerange)
+    mocker.patch("econith.data.history.get_timerange", get_timerange)
     patch_exchange(mocker)
     mocker.patch(
-        "freqtrade.plugins.pairlistmanager.PairListManager.whitelist",
+        "econith.plugins.pairlistmanager.PairListManager.whitelist",
         PropertyMock(return_value=["UNITTEST/BTC"]),
     )
     recursive_conf["pairs"] = ["UNITTEST/BTC"]
 
     recursive_conf["timeframe"] = "5m"
     recursive_conf["timerange"] = "20180119-20180122"
-    start_mock = mocker.patch("freqtrade.optimize.analysis.recursive.RecursiveAnalysis.start")
+    start_mock = mocker.patch("econith.optimize.analysis.recursive.RecursiveAnalysis.start")
     strategy_obj = {
         "name": "strategy_test_v3_recursive_issue",
         "location": Path(recursive_conf["strategy_path"], f"{recursive_conf['strategy']}.py"),
@@ -151,9 +151,9 @@ def test_initialize_single_recursive_analysis(recursive_conf, mocker, caplog):
 def test_recursive_biased_strategy(recursive_conf, mocker, caplog, scenario) -> None:
     patch_exchange(mocker)
     mocker.patch(f"{EXMS}.get_fee", return_value=0.0)
-    mocker.patch("freqtrade.data.history.get_timerange", get_timerange)
+    mocker.patch("econith.data.history.get_timerange", get_timerange)
     mocker.patch(
-        "freqtrade.plugins.pairlistmanager.PairListManager.whitelist",
+        "econith.plugins.pairlistmanager.PairListManager.whitelist",
         PropertyMock(return_value=["UNITTEST/BTC"]),
     )
     recursive_conf["pairs"] = ["UNITTEST/BTC"]
@@ -164,7 +164,7 @@ def test_recursive_biased_strategy(recursive_conf, mocker, caplog, scenario) -> 
 
     # Patch scenario Parameter to allow for easy selection
     mocker.patch(
-        "freqtrade.strategy.hyper.HyperStrategyMixin.load_params_from_file",
+        "econith.strategy.hyper.HyperStrategyMixin.load_params_from_file",
         return_value={"params": {"buy": {"scenario": scenario}}},
     )
 

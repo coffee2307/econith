@@ -25,16 +25,16 @@ permissions:
   contents: read
 
 env:
-  IMAGE_NAME: "freqtradeorg/freqtrade"
-  CACHE_IMAGE: "freqtradeorg/freqtrade_cache"
-  GHCR_IMAGE_NAME: "ghcr.io/freqtrade/freqtrade"
+  IMAGE_NAME: "econith/econith-quant"
+  CACHE_IMAGE: "econith/econith-quant_cache"
+  GHCR_IMAGE_NAME: "ghcr.io/econith/econith"
   PI_PLATFORM: "linux/arm/v7"
 
 jobs:
   deploy-docker:
     name: "Deploy Docker x64 and armv7l"
     runs-on: ubuntu-22.04
-    if: github.repository == 'freqtrade/freqtrade'
+    if: github.repository == 'econith/econith'
     environment:
       name: docker
 
@@ -141,7 +141,7 @@ jobs:
       env:
         TAG: ${{ steps.tags.outputs.TAG }}
       run: |
-        docker run --rm -v $(pwd)/tests/testdata/config.tests.json:/freqtrade/config.json:ro -v $(pwd)/tests:/tests ${CACHE_IMAGE}:${TAG} backtesting --datadir /tests/testdata --strategy-path /tests/strategy/strats/ --strategy StrategyTestV3
+        docker run --rm -v $(pwd)/tests/testdata/config.tests.json:/econith/config.json:ro -v $(pwd)/tests:/tests ${CACHE_IMAGE}:${TAG} backtesting --datadir /tests/testdata --strategy-path /tests/strategy/strats/ --strategy StrategyTestV3
 
     - name: Push cache images
       env:
@@ -169,7 +169,7 @@ jobs:
     needs: [ deploy-docker ]
     # Must run on an ARM runner to avoid emulation
     runs-on: ubuntu-24.04-arm
-    if: github.repository == 'freqtrade/freqtrade'
+    if: github.repository == 'econith/econith'
     environment:
       name: docker
 
@@ -226,7 +226,7 @@ jobs:
       env:
         TAG_ARM: ${{ steps.tags.outputs.TAG_ARM }}
       run: |
-        docker run --rm -v $(pwd)/tests/testdata/config.tests.json:/freqtrade/config.json:ro -v $(pwd)/tests:/tests ${CACHE_IMAGE}:${TAG_ARM} backtesting --datadir /tests/testdata --strategy-path /tests/strategy/strats/ --strategy StrategyTestV3
+        docker run --rm -v $(pwd)/tests/testdata/config.tests.json:/econith/config.json:ro -v $(pwd)/tests:/tests ${CACHE_IMAGE}:${TAG_ARM} backtesting --datadir /tests/testdata --strategy-path /tests/strategy/strats/ --strategy StrategyTestV3
 
     - name: Docker images
       run: |

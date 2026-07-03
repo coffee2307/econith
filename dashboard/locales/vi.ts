@@ -122,6 +122,24 @@ export const vi: Dictionary = {
     researchTitle: "Khoa học bên dưới nền tảng.",
     researchDesc:
       "Tám hướng nghiên cứu thúc đẩy nền tảng, từ phát hiện chế độ thích ứng đến AI giao dịch giải thích được và xác thực chống overfitting.",
+    stats: {
+      tickEngine: { value: "5 Pha", label: "Tick engine xác định" },
+      modes: { value: "2", label: "Chế độ REALITY / SIMULATION" },
+      agents: { value: "4×", label: "Tác tử chủ quyền mỗi quốc gia" },
+      sources: { value: "5", label: "Nguồn macro miễn phí" },
+    },
+    pipeline: {
+      eyebrow: "Kiến trúc lõi",
+      title: "Mỗi ngày mô phỏng chạy qua năm pha nghiêm ngặt.",
+      desc:
+        "Snapshot → Apply Events → Resolve Conflicts → Update World → Emit Signals. Chờ đầy đủ, không race, tái lập được.",
+      steps: ["Snapshot", "Apply Events", "Resolve", "Update World", "Emit Signals"],
+    },
+    cta: {
+      title: "Sẵn sàng khám phá phòng thí nghiệm?",
+      desc:
+        "Mở cockpit quant để xem vi cấu trúc và tín hiệu AI trực tiếp, hoặc bước vào mô phỏng thế giới chủ quyền và điều khiển nhân quả vĩ mô theo thời gian thực.",
+    },
     cards: {
       dataSpine: {
         title: "Xương sống dữ liệu độ trễ thấp",
@@ -209,6 +227,31 @@ export const vi: Dictionary = {
         "Chỉ mô phỏng lệnh. Luồng Binance trực tiếp; lệnh không gửi sàn. Nạp vốn và kích hoạt router thật khi sẵn sàng vận hành.",
       wsLabel: "Kênh telemetry",
       symbolLabel: "Cặp giao dịch",
+    },
+    cockpit: {
+      title: "Cockpit HUD",
+      altimeter: "Đồng hồ PnL",
+      fuelGauge: "Đồng hồ ký quỹ",
+      flightLog: "Nhật ký lệnh",
+      radar: "Phân bổ tài sản",
+      noFills: "Chưa có lệnh khớp",
+      realized: "Thực hiện (phiên)",
+      unrealized: "Chưa thực hiện",
+      winRate: "Tỷ lệ thắng",
+      sharpe: "Sharpe",
+      drawdown: "DD tối đa",
+      equity: "Vốn chủ",
+      freeMargin: "Ký quỹ rảnh",
+      leverage: "Đòn bẩy",
+      liquidation: "Khoảng cách thanh lý",
+      notional: "Danh nghĩa",
+      mode: "Chế độ",
+      ws: {
+        connecting: "Cockpit đang kết nối",
+        open: "Cockpit trực tiếp",
+        reconnecting: "Cockpit kết nối lại",
+        closed: "Cockpit offline",
+      },
     },
     pipeline: {
       title: "Pipeline tín hiệu",

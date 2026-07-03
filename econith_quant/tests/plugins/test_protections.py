@@ -4,12 +4,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from freqtrade.enums import ExitType
-from freqtrade.exceptions import OperationalException
-from freqtrade.persistence import PairLocks, Trade
-from freqtrade.persistence.trade_model import Order
-from freqtrade.plugins.protectionmanager import ProtectionManager
-from tests.conftest import get_patched_freqtradebot, log_has_re
+from econith.enums import ExitType
+from econith.exceptions import OperationalException
+from econith.persistence import PairLocks, Trade
+from econith.persistence.trade_model import Order
+from econith.plugins.protectionmanager import ProtectionManager
+from tests.conftest import get_patched_econithbot, log_has_re
 
 
 AVAILABLE_PROTECTIONS = ["CooldownPeriod", "LowProfitPairs", "MaxDrawdown", "StoplossGuard"]
@@ -95,9 +95,9 @@ def test_protectionmanager(mocker, default_conf):
     default_conf["_strategy_protections"] = [
         {"method": protection} for protection in AVAILABLE_PROTECTIONS
     ]
-    freqtrade = get_patched_freqtradebot(mocker, default_conf)
+    econith = get_patched_econithbot(mocker, default_conf)
 
-    for handler in freqtrade.protections._protection_handlers:
+    for handler in econith.protections._protection_handlers:
         assert handler.name in AVAILABLE_PROTECTIONS
         if not handler.has_global_stop:
             assert handler.global_stop(datetime.now(UTC), "*", 1000.0) is None
@@ -260,9 +260,9 @@ def test_stoploss_guard(mocker, default_conf, fee, caplog, is_short):
     default_conf["_strategy_protections"] = [
         {"method": "StoplossGuard", "lookback_period": 60, "stop_duration": 40, "trade_limit": 3}
     ]
-    freqtrade = get_patched_freqtradebot(mocker, default_conf)
+    econith = get_patched_econithbot(mocker, default_conf)
     message = r"Trading stopped due to .*"
-    assert not freqtrade.protections.global_stop()
+    assert not econith.protections.global_stop()
     assert not log_has_re(message, caplog)
     caplog.clear()
 
@@ -276,7 +276,7 @@ def test_stoploss_guard(mocker, default_conf, fee, caplog, is_short):
         is_short=is_short,
     )
 
-    assert not freqtrade.protections.global_stop()
+    assert not econith.protections.global_stop()
     assert not log_has_re(message, caplog)
     caplog.clear()
     # This trade does not count, as it's closed too long ago
@@ -300,7 +300,7 @@ def test_stoploss_guard(mocker, default_conf, fee, caplog, is_short):
         is_short=is_short,
     )
     # 3 Trades closed - but the 2nd has been closed too long ago.
-    assert not freqtrade.protections.global_stop()
+    assert not econith.protections.global_stop()
     assert not log_has_re(message, caplog)
     caplog.clear()
 
@@ -314,14 +314,14 @@ def test_stoploss_guard(mocker, default_conf, fee, caplog, is_short):
         is_short=is_short,
     )
 
-    assert freqtrade.protections.global_stop()
+    assert econith.protections.global_stop()
     assert log_has_re(message, caplog)
     assert PairLocks.is_global_lock()
 
     # Test 5m after lock-period - this should try and relock the pair, but end-time
     # should be the previous end-time
     end_time = PairLocks.get_pair_longest_lock("*").lock_end_time + timedelta(minutes=5)
-    freqtrade.protections.global_stop(end_time)
+    econith.protections.global_stop(end_time)
     assert not PairLocks.is_global_lock(end_time)
 
 
@@ -341,11 +341,11 @@ def test_stoploss_guard_perpair(mocker, default_conf, fee, caplog, only_per_pair
     ]
     check_side = "long" if only_per_side else "*"
     is_short = False
-    freqtrade = get_patched_freqtradebot(mocker, default_conf)
+    econith = get_patched_econithbot(mocker, default_conf)
     message = r"Trading stopped due to .*"
     pair = "XRP/BTC"
-    assert not freqtrade.protections.stop_per_pair(pair)
-    assert not freqtrade.protections.global_stop()
+    assert not econith.protections.stop_per_pair(pair)
+    assert not econith.protections.global_stop()
     assert not log_has_re(message, caplog)
     caplog.clear()
 
@@ -360,8 +360,8 @@ def test_stoploss_guard_perpair(mocker, default_conf, fee, caplog, only_per_pair
         is_short=is_short,
     )
 
-    assert not freqtrade.protections.stop_per_pair(pair)
-    assert not freqtrade.protections.global_stop()
+    assert not econith.protections.stop_per_pair(pair)
+    assert not econith.protections.global_stop()
     assert not log_has_re(message, caplog)
     caplog.clear()
     # This trade does not count, as it's closed too long ago
@@ -387,8 +387,8 @@ def test_stoploss_guard_perpair(mocker, default_conf, fee, caplog, only_per_pair
         is_short=is_short,
     )
     # 3 Trades closed - but the 2nd has been closed too long ago.
-    assert not freqtrade.protections.stop_per_pair(pair)
-    assert freqtrade.protections.global_stop() != only_per_pair
+    assert not econith.protections.stop_per_pair(pair)
+    assert econith.protections.global_stop() != only_per_pair
     if not only_per_pair:
         assert log_has_re(message, caplog)
     else:
@@ -407,8 +407,8 @@ def test_stoploss_guard_perpair(mocker, default_conf, fee, caplog, only_per_pair
         profit_rate=0.9,
         is_short=not is_short,
     )
-    freqtrade.protections.stop_per_pair(pair)
-    assert freqtrade.protections.global_stop() != only_per_pair
+    econith.protections.stop_per_pair(pair)
+    assert econith.protections.global_stop() != only_per_pair
     assert PairLocks.is_pair_locked(pair, side=check_side) != (only_per_side and only_per_pair)
     assert PairLocks.is_global_lock(side=check_side) != only_per_pair
     if only_per_side:
@@ -429,8 +429,8 @@ def test_stoploss_guard_perpair(mocker, default_conf, fee, caplog, only_per_pair
         is_short=is_short,
     )
 
-    freqtrade.protections.stop_per_pair(pair)
-    assert freqtrade.protections.global_stop() != only_per_pair
+    econith.protections.stop_per_pair(pair)
+    assert econith.protections.global_stop() != only_per_pair
     assert PairLocks.is_pair_locked(pair, side=check_side)
     assert PairLocks.is_global_lock(side=check_side) != only_per_pair
     if only_per_side:
@@ -446,10 +446,10 @@ def test_CooldownPeriod(mocker, default_conf, fee, caplog):
             "stop_duration": 60,
         }
     ]
-    freqtrade = get_patched_freqtradebot(mocker, default_conf)
+    econith = get_patched_econithbot(mocker, default_conf)
     message = r"Trading stopped due to .*"
-    assert not freqtrade.protections.global_stop()
-    assert not freqtrade.protections.stop_per_pair("XRP/BTC")
+    assert not econith.protections.global_stop()
+    assert not econith.protections.stop_per_pair("XRP/BTC")
 
     assert not log_has_re(message, caplog)
     caplog.clear()
@@ -463,8 +463,8 @@ def test_CooldownPeriod(mocker, default_conf, fee, caplog):
         min_ago_close=30,
     )
 
-    assert not freqtrade.protections.global_stop()
-    assert freqtrade.protections.stop_per_pair("XRP/BTC")
+    assert not econith.protections.global_stop()
+    assert econith.protections.stop_per_pair("XRP/BTC")
     assert PairLocks.is_pair_locked("XRP/BTC")
     assert not PairLocks.is_global_lock()
 
@@ -477,9 +477,9 @@ def test_CooldownPeriod(mocker, default_conf, fee, caplog):
         min_ago_close=35,
     )
 
-    assert not freqtrade.protections.global_stop()
+    assert not econith.protections.global_stop()
     assert not PairLocks.is_pair_locked("ETH/BTC")
-    assert freqtrade.protections.stop_per_pair("ETH/BTC")
+    assert econith.protections.stop_per_pair("ETH/BTC")
     assert PairLocks.is_pair_locked("ETH/BTC")
     assert not PairLocks.is_global_lock()
 
@@ -492,10 +492,10 @@ def test_CooldownPeriod_unlock_at(mocker, default_conf, fee, caplog, time_machin
             "unlock_at": "05:00",
         }
     ]
-    freqtrade = get_patched_freqtradebot(mocker, default_conf)
+    econith = get_patched_econithbot(mocker, default_conf)
     message = r"Trading stopped due to .*"
-    assert not freqtrade.protections.global_stop()
-    assert not freqtrade.protections.stop_per_pair("XRP/BTC")
+    assert not econith.protections.global_stop()
+    assert not econith.protections.stop_per_pair("XRP/BTC")
 
     assert not log_has_re(message, caplog)
     caplog.clear()
@@ -512,8 +512,8 @@ def test_CooldownPeriod_unlock_at(mocker, default_conf, fee, caplog, time_machin
         min_ago_close=10,
     )
 
-    assert not freqtrade.protections.global_stop()
-    assert freqtrade.protections.stop_per_pair("XRP/BTC")
+    assert not econith.protections.global_stop()
+    assert econith.protections.stop_per_pair("XRP/BTC")
     assert PairLocks.is_pair_locked("XRP/BTC")
     assert not PairLocks.is_global_lock()
 
@@ -539,9 +539,9 @@ def test_CooldownPeriod_unlock_at(mocker, default_conf, fee, caplog, time_machin
         min_ago_close=10,
     )
 
-    assert not freqtrade.protections.global_stop()
+    assert not econith.protections.global_stop()
     assert not PairLocks.is_pair_locked("ETH/BTC")
-    assert freqtrade.protections.stop_per_pair("ETH/BTC")
+    assert econith.protections.stop_per_pair("ETH/BTC")
     assert PairLocks.is_pair_locked("ETH/BTC")
     assert not PairLocks.is_global_lock()
     # Move to 23:00
@@ -580,10 +580,10 @@ def test_LowProfitPairs(mocker, default_conf, fee, caplog, only_per_side):
             "only_per_side": only_per_side,
         }
     ]
-    freqtrade = get_patched_freqtradebot(mocker, default_conf)
+    econith = get_patched_econithbot(mocker, default_conf)
     message = r"Trading stopped due to .*"
-    assert not freqtrade.protections.global_stop()
-    assert not freqtrade.protections.stop_per_pair("XRP/BTC")
+    assert not econith.protections.global_stop()
+    assert not econith.protections.stop_per_pair("XRP/BTC")
 
     assert not log_has_re(message, caplog)
     caplog.clear()
@@ -600,8 +600,8 @@ def test_LowProfitPairs(mocker, default_conf, fee, caplog, only_per_side):
 
     Trade.commit()
     # Not locked with 1 trade
-    assert not freqtrade.protections.global_stop()
-    assert not freqtrade.protections.stop_per_pair("XRP/BTC")
+    assert not econith.protections.global_stop()
+    assert not econith.protections.stop_per_pair("XRP/BTC")
     assert not PairLocks.is_pair_locked("XRP/BTC")
     assert not PairLocks.is_global_lock()
 
@@ -617,8 +617,8 @@ def test_LowProfitPairs(mocker, default_conf, fee, caplog, only_per_side):
 
     Trade.commit()
     # Not locked with 1 trade (first trade is outside of lookback_period)
-    assert not freqtrade.protections.global_stop()
-    assert not freqtrade.protections.stop_per_pair("XRP/BTC")
+    assert not econith.protections.global_stop()
+    assert not econith.protections.stop_per_pair("XRP/BTC")
     assert not PairLocks.is_pair_locked("XRP/BTC")
     assert not PairLocks.is_global_lock()
 
@@ -634,7 +634,7 @@ def test_LowProfitPairs(mocker, default_conf, fee, caplog, only_per_side):
         is_short=True,
     )
     Trade.commit()
-    assert freqtrade.protections.stop_per_pair("XRP/BTC") != only_per_side
+    assert econith.protections.stop_per_pair("XRP/BTC") != only_per_side
     assert not PairLocks.is_pair_locked("XRP/BTC", side="*")
     assert PairLocks.is_pair_locked("XRP/BTC", side="long") == only_per_side
 
@@ -650,8 +650,8 @@ def test_LowProfitPairs(mocker, default_conf, fee, caplog, only_per_side):
     Trade.commit()
 
     # Locks due to 2nd trade
-    assert freqtrade.protections.global_stop() != only_per_side
-    assert freqtrade.protections.stop_per_pair("XRP/BTC") != only_per_side
+    assert econith.protections.global_stop() != only_per_side
+    assert econith.protections.stop_per_pair("XRP/BTC") != only_per_side
     assert PairLocks.is_pair_locked("XRP/BTC", side="long")
     assert PairLocks.is_pair_locked("XRP/BTC", side="*") != only_per_side
     assert not PairLocks.is_global_lock()
@@ -669,12 +669,12 @@ def test_MaxDrawdown_ratio_mode(mocker, default_conf, fee, caplog):
             "max_allowed_drawdown": 0.15,
         }
     ]
-    freqtrade = get_patched_freqtradebot(mocker, default_conf)
+    econith = get_patched_econithbot(mocker, default_conf)
     message = r"Trading stopped due to Max.*"
     starting_balance = 0.05
 
-    assert not freqtrade.protections.global_stop(starting_balance=starting_balance)
-    assert not freqtrade.protections.stop_per_pair("XRP/BTC", starting_balance=starting_balance)
+    assert not econith.protections.global_stop(starting_balance=starting_balance)
+    assert not econith.protections.stop_per_pair("XRP/BTC", starting_balance=starting_balance)
     caplog.clear()
 
     generate_mock_trade(
@@ -706,8 +706,8 @@ def test_MaxDrawdown_ratio_mode(mocker, default_conf, fee, caplog):
     )
     Trade.commit()
     # No losing trade yet ... so max_drawdown will raise exception
-    assert not freqtrade.protections.global_stop(starting_balance=starting_balance)
-    assert not freqtrade.protections.stop_per_pair("XRP/BTC", starting_balance=starting_balance)
+    assert not econith.protections.global_stop(starting_balance=starting_balance)
+    assert not econith.protections.stop_per_pair("XRP/BTC", starting_balance=starting_balance)
 
     generate_mock_trade(
         "XRP/BTC",
@@ -719,8 +719,8 @@ def test_MaxDrawdown_ratio_mode(mocker, default_conf, fee, caplog):
         profit_rate=0.9,
     )
     # Not locked with one trade
-    assert not freqtrade.protections.global_stop(starting_balance=starting_balance)
-    assert not freqtrade.protections.stop_per_pair("XRP/BTC", starting_balance=starting_balance)
+    assert not econith.protections.global_stop(starting_balance=starting_balance)
+    assert not econith.protections.stop_per_pair("XRP/BTC", starting_balance=starting_balance)
     assert not PairLocks.is_pair_locked("XRP/BTC")
     assert not PairLocks.is_global_lock()
 
@@ -736,8 +736,8 @@ def test_MaxDrawdown_ratio_mode(mocker, default_conf, fee, caplog):
     Trade.commit()
 
     # Not locked with 1 trade (2nd trade is outside of lookback_period)
-    assert not freqtrade.protections.global_stop(starting_balance=starting_balance)
-    assert not freqtrade.protections.stop_per_pair("XRP/BTC", starting_balance=starting_balance)
+    assert not econith.protections.global_stop(starting_balance=starting_balance)
+    assert not econith.protections.stop_per_pair("XRP/BTC", starting_balance=starting_balance)
     assert not PairLocks.is_pair_locked("XRP/BTC")
     assert not PairLocks.is_global_lock()
     assert not log_has_re(message, caplog)
@@ -753,7 +753,7 @@ def test_MaxDrawdown_ratio_mode(mocker, default_conf, fee, caplog):
         profit_rate=1.5,
     )
     Trade.commit()
-    assert not freqtrade.protections.global_stop(starting_balance=starting_balance)
+    assert not econith.protections.global_stop(starting_balance=starting_balance)
     assert not PairLocks.is_global_lock()
 
     caplog.clear()
@@ -769,10 +769,10 @@ def test_MaxDrawdown_ratio_mode(mocker, default_conf, fee, caplog):
         profit_rate=0.2,
     )
     Trade.commit()
-    assert not freqtrade.protections.stop_per_pair("XRP/BTC", starting_balance=starting_balance)
+    assert not econith.protections.stop_per_pair("XRP/BTC", starting_balance=starting_balance)
     # local lock not supported
     assert not PairLocks.is_pair_locked("XRP/BTC")
-    assert freqtrade.protections.global_stop(starting_balance=starting_balance)
+    assert econith.protections.global_stop(starting_balance=starting_balance)
     assert PairLocks.is_global_lock()
     assert log_has_re(message, caplog)
 
@@ -789,10 +789,10 @@ def test_MaxDrawdown_equity_mode(mocker, default_conf, fee):
             "calculation_mode": "equity",
         }
     ]
-    freqtrade = get_patched_freqtradebot(mocker, default_conf)
+    econith = get_patched_econithbot(mocker, default_conf)
     starting_balance = 0.01
 
-    assert not freqtrade.protections.global_stop(starting_balance=starting_balance)
+    assert not econith.protections.global_stop(starting_balance=starting_balance)
 
     generate_mock_trade(
         "XRP/BTC",
@@ -805,7 +805,7 @@ def test_MaxDrawdown_equity_mode(mocker, default_conf, fee):
     )
     Trade.commit()
 
-    assert freqtrade.protections.global_stop(starting_balance=starting_balance)
+    assert econith.protections.global_stop(starting_balance=starting_balance)
     assert PairLocks.is_global_lock()
 
 
@@ -825,7 +825,7 @@ def test_MaxDrawdown_mode_comparison(mocker, default_conf, fee, calculation_mode
             "calculation_mode": calculation_mode,
         }
     ]
-    freqtrade = get_patched_freqtradebot(mocker, default_conf)
+    econith = get_patched_econithbot(mocker, default_conf)
     starting_balance = 1000.0
 
     # Same trade sequence for both modes: ratios mode lock expected,equity mode no lock expected.
@@ -858,7 +858,7 @@ def test_MaxDrawdown_mode_comparison(mocker, default_conf, fee, calculation_mode
     )
     Trade.commit()
 
-    lock = freqtrade.protections.global_stop(starting_balance=starting_balance)
+    lock = econith.protections.global_stop(starting_balance=starting_balance)
     assert bool(lock) is expected_locked
     assert PairLocks.is_global_lock(side="long") is expected_locked
 
@@ -877,8 +877,8 @@ def test_MaxDrawdown_threshold_boundary(mocker, default_conf, calculation_mode):
             "calculation_mode": calculation_mode,
         }
     ]
-    freqtrade = get_patched_freqtradebot(mocker, default_conf)
-    handler = next(p for p in freqtrade.protections._protection_handlers if p.name == "MaxDrawdown")
+    econith = get_patched_econithbot(mocker, default_conf)
+    handler = next(p for p in econith.protections._protection_handlers if p.name == "MaxDrawdown")
     md_globals = handler._max_drawdown.__globals__
 
     now = datetime.now(UTC)
@@ -930,8 +930,8 @@ def test_MaxDrawdown_calculation_mode_dispatch(
             "calculation_mode": calculation_mode,
         }
     ]
-    freqtrade = get_patched_freqtradebot(mocker, default_conf)
-    handler = next(p for p in freqtrade.protections._protection_handlers if p.name == "MaxDrawdown")
+    econith = get_patched_econithbot(mocker, default_conf)
+    handler = next(p for p in econith.protections._protection_handlers if p.name == "MaxDrawdown")
     md_globals = handler._max_drawdown.__globals__
 
     now = datetime.now(UTC)
@@ -1073,7 +1073,7 @@ def test_protection_manager_desc(
     mocker, default_conf, protectionconf, desc_expected, exception_expected
 ):
     default_conf["_strategy_protections"] = [protectionconf]
-    freqtrade = get_patched_freqtradebot(mocker, default_conf)
+    econith = get_patched_econithbot(mocker, default_conf)
 
-    short_desc = str(freqtrade.protections.short_desc())
+    short_desc = str(econith.protections.short_desc())
     assert short_desc == desc_expected

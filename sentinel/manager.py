@@ -5,13 +5,22 @@ The Sentinel -- the platform's independent "master circuit breaker"
 power: when the safety mathematics are violated it freezes trading regardless
 of what any strategy/agent wants.
 
-Responsibilities wired here (Phase 3 core):
-  * Track a mock equity curve derived from the live (mock) price feed and
-    compute real-time drawdown from the running peak.
-  * Maintain a rolling VaR / C-VaR estimate (HistoricalSimulationVaR).
-  * Monitor data latency as a heartbeat proxy (>300ms == fault).
-  * Drive a CircuitBreaker and publish governance state + emergency events
-    onto the EventBus.
+P0 REFACTOR (Equity Synchronization)
+------------------------------------
+Historically the Sentinel tracked a *mock* equity curve derived purely from the
+market price feed on top of a static $1,000,000 ledger. That decoupled its risk
+mathematics (VaR / drawdown) from the actual capital the engine deployed via the
+``quant.fill`` execution stream, so it governed a *ghost budget*.
+
+The Sentinel now anchors its principal equity base to **execution truth**:
+
+  * It subscribes to ``quant.fill`` and replays every matched execution through
+    the exact same position/PnL accounting used by :class:`CockpitTelemetryHub`
+    (starting capital + realised PnL + unrealised mark-to-market). This makes its
+    equity match the Cockpit Fuel Gauge 1:1.
+  * It retains its ``md.ticker`` subscription strictly for *mark-to-market*
+    revaluation of open positions (unrealised PnL) and as a latency heartbeat --
+    it no longer fabricates equity from raw price moves.
 
 Governance thresholds (from the master plan):
   * 24h VaR > 3% of capital            -> soft freeze: REDUCE_ONLY.
@@ -23,14 +32,20 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
 from enum import Enum
+from typing import Optional
 
 from core.event_bus import Event, EventBus
 from sentinel.circuit_breaker import BreakerState, CircuitBreaker
 from sentinel.var import HistoricalSimulationVaR
 
 logger = logging.getLogger("econith.sentinel.manager")
+
+# Shared with :class:`CockpitTelemetryHub` so both read-models start from an
+# identical principal base and therefore agree on equity to the cent.
+DEFAULT_STARTING_CAPITAL: float = 100_000.0
 
 
 class SystemMode(str, Enum):
@@ -43,7 +58,7 @@ class SystemMode(str, Enum):
 class SentinelStatus:
     state: str            # circuit-breaker state
     mode: str             # resolved system mode
-    equity: float
+    equity: float         # execution-truth equity (capital + realised + unrealised)
     peak_equity: float
     drawdown: float       # fractional, e.g. 0.031 == 3.1%
     var: float
@@ -58,8 +73,7 @@ class Sentinel:
     def __init__(
         self,
         bus: EventBus,
-        initial_equity: float = 1_000_000.0,
-        exposure: float = 1.0,
+        starting_capital: float = DEFAULT_STARTING_CAPITAL,
         max_drawdown_pct: float = 0.03,
         var_limit_pct: float = 0.03,
         latency_limit_ms: float = 300.0,
@@ -67,8 +81,7 @@ class Sentinel:
         status_interval_s: float = 1.0,
     ) -> None:
         self._bus = bus
-        self._initial_equity = initial_equity
-        self._exposure = exposure
+        self._starting_capital = starting_capital
         self._max_dd = max_drawdown_pct
         self._var_limit = var_limit_pct
         self._latency_limit = latency_limit_ms
@@ -83,12 +96,17 @@ class Sentinel:
             on_transition=self._on_breaker_transition,
         )
 
-        # equity / price state
-        self._open_price: float | None = None
+        # --- execution-truth ledger (mirrors CockpitTelemetryHub 1:1) --------
+        self._positions: dict[str, dict[str, float]] = {}
+        self._marks: dict[str, float] = {}
+        self._realized_total: float = 0.0
+        self._unrealized: float = 0.0
+        self._equity: float = starting_capital
+        self._prev_equity: float = starting_capital
+        self._peak_equity: float = starting_capital
+
+        # --- price / latency heartbeat state ---------------------------------
         self._last_price: float = 0.0
-        self._prev_price: float | None = None
-        self._equity: float = initial_equity
-        self._peak_equity: float = initial_equity
 
         # risk / latency state
         self._latency_ms: float = 0.0
@@ -97,18 +115,23 @@ class Sentinel:
         self._risk_unfreeze_at: float = 0.0
 
         self._running = False
-        self._task: asyncio.Task[None] | None = None
+        self._task: Optional[asyncio.Task[None]] = None
 
     # -- lifecycle ------------------------------------------------------------
     def register(self) -> None:
+        # Execution truth: the principal equity base is driven by real fills.
+        self._bus.subscribe("quant.fill", self._on_fill)
+        # Mark-to-market + latency heartbeat only (never fabricates equity).
         self._bus.subscribe("md.ticker", self._on_ticker)
-        logger.info("sentinel registered to market feed")
+        logger.info("sentinel registered to execution (quant.fill) + market feed")
 
     async def start(self) -> None:
         if self._running:
             return
         self._running = True
-        await self._log("Sentinel armed -- monitoring drawdown, VaR and latency")
+        await self._log(
+            "Sentinel armed -- monitoring execution equity, drawdown, VaR and latency"
+        )
         self._task = asyncio.create_task(self.run(), name="sentinel")
 
     async def stop(self) -> None:
@@ -128,21 +151,51 @@ class Sentinel:
         self._var_soft_breach = False
 
     # -- event handlers -------------------------------------------------------
+    async def _on_fill(self, event: Event) -> None:
+        """Replay a matched execution into the execution-truth ledger.
+
+        Uses the exact position/PnL algorithm of :class:`CockpitTelemetryHub`
+        so Sentinel equity and Cockpit Fuel Gauge equity are identical.
+        """
+        p = event.payload
+        try:
+            asset = str(p["asset"]).upper()
+            side = str(p["side"])
+            qty = float(p["filledVolume"])
+            price = float(p["fillPrice"])
+            commission = float(p.get("commission", 0.0))
+        except (KeyError, TypeError, ValueError):
+            logger.exception("sentinel received malformed quant.fill payload")
+            return
+
+        pos = self._positions.setdefault(asset, {"qty": 0.0, "avg": 0.0})
+        signed = qty * (1.0 if side.startswith("LONG") else -1.0)
+        is_close = side.endswith("CLOSE")
+        if is_close and pos["qty"] != 0.0:
+            direction = 1.0 if pos["qty"] > 0 else -1.0
+            realized = direction * (price - pos["avg"]) * qty - commission
+            self._realized_total += realized
+            pos["qty"] -= direction * qty
+        else:
+            new_qty = pos["qty"] + signed
+            if new_qty != 0.0:
+                pos["avg"] = (
+                    pos["avg"] * abs(pos["qty"]) + price * abs(signed)
+                ) / abs(new_qty)
+            pos["qty"] = new_qty
+
+        self._marks[asset] = price
+        await self._revalue_and_govern()
+
     async def _on_ticker(self, event: Event) -> None:
+        """Mark-to-market open positions + latency heartbeat (no equity fabrication)."""
         price = float(event.payload["price"])
         self._last_price = price
-        if self._open_price is None:
-            self._open_price = price
 
-        # realised per-tick return -> feeds the VaR engine
-        if self._prev_price and self._prev_price > 0:
-            self._risk.update((price / self._prev_price) - 1.0)
-        self._prev_price = price
-
-        # mock equity from price move vs the session open
-        move = (price / self._open_price) - 1.0
-        self._equity = self._initial_equity * (1.0 + self._exposure * move)
-        self._peak_equity = max(self._peak_equity, self._equity)
+        # Re-mark the traded symbol so unrealised PnL tracks live price.
+        symbol = str(event.payload.get("symbol", "")).upper()
+        if symbol and symbol in self._positions:
+            self._marks[symbol] = price
 
         # latency / heartbeat proxy
         event_ms = int(event.payload.get("event_ms", 0))
@@ -155,7 +208,21 @@ class Sentinel:
             else:
                 await self._breaker.record_success()
 
-        # hard drawdown freeze
+        await self._revalue_and_govern()
+
+    # -- valuation + risk governance -----------------------------------------
+    async def _revalue_and_govern(self) -> None:
+        """Recompute execution-truth equity, feed portfolio VaR, enforce drawdown."""
+        self._recompute_unrealized()
+        equity = self._starting_capital + self._realized_total + self._unrealized
+
+        # Feed *portfolio* returns (not raw price returns) into the VaR engine.
+        if self._prev_equity > 0 and equity != self._prev_equity:
+            self._risk.update((equity - self._prev_equity) / self._prev_equity)
+        self._prev_equity = equity
+        self._equity = equity
+        self._peak_equity = max(self._peak_equity, equity)
+
         drawdown = self._drawdown()
         if drawdown >= self._max_dd and not self._risk_frozen:
             self._risk_frozen = True
@@ -164,6 +231,15 @@ class Sentinel:
                 action="FREEZE",
                 reason=f"drawdown {drawdown*100:.2f}% breached {self._max_dd*100:.0f}% limit",
             )
+
+    def _recompute_unrealized(self) -> None:
+        total = 0.0
+        for sym, pos in self._positions.items():
+            if pos["qty"] == 0.0:
+                continue
+            mark = self._marks.get(sym, pos["avg"])
+            total += (mark - pos["avg"]) * pos["qty"]
+        self._unrealized = total
 
     # -- active risk loop -----------------------------------------------------
     async def run(self) -> None:
@@ -252,3 +328,7 @@ class Sentinel:
         await self._bus.publish(
             "system.log", level=level, source="sentinel", message=message
         )
+
+
+# Explicit alias so the module's async handler contract is importable/testable.
+FillHandler = Callable[[Event], Awaitable[None]]

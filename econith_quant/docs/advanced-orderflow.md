@@ -3,11 +3,11 @@
 This guide walks you through utilizing public trade data for advanced orderflow analysis in ECONITH Quant.
 
 !!! Warning "Experimental Feature"
-    The orderflow feature is currently in beta and may be subject to changes in future releases. Please report any issues or feedback on the [ECONITH Quant GitHub repository](https://github.com/freqtrade/freqtrade/issues).
+    The orderflow feature is currently in beta and may be subject to changes in future releases. Please report any issues or feedback on the [ECONITH Quant GitHub repository](https://github.com/econith/econith/issues).
     It's also currently not been tested with freqAI - and combining these two features is considered out of scope at this point.
 
 !!! Warning "Performance"
-    Orderflow requires raw trades data. This data is rather large, and can cause a slow initial startup, when freqtrade needs to download the trades data for the last X candles. Additionally, enabling this feature will cause increased memory usage. Please ensure to have sufficient resources available.
+    Orderflow requires raw trades data. This data is rather large, and can cause a slow initial startup, when econith needs to download the trades data for the last X candles. Additionally, enabling this feature will cause increased memory usage. Please ensure to have sufficient resources available.
 
 ## Getting Started
 
@@ -46,14 +46,14 @@ Define your desired settings for orderflow processing within the orderflow secti
 
 ## Downloading Trade Data for Backtesting
 
-To download historical trade data for backtesting, use the --dl-trades flag with the freqtrade download-data command.
+To download historical trade data for backtesting, use the --dl-trades flag with the econith download-data command.
 
 ```bash
-freqtrade download-data -p BTC/USDT:USDT --timerange 20230101- --trading-mode futures --timeframes 5m --dl-trades
+econith download-data -p BTC/USDT:USDT --timerange 20230101- --trading-mode futures --timeframes 5m --dl-trades
 ```
 
 !!! Warning "Data availability"
-    Not all exchanges provide public trade data. For supported exchanges, freqtrade will warn you if public trade data is not available if you start downloading data with the `--dl-trades` flag.
+    Not all exchanges provide public trade data. For supported exchanges, econith will warn you if public trade data is not available if you start downloading data with the `--dl-trades` flag.
 
 ## Accessing Orderflow Data
 

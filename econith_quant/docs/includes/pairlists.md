@@ -280,7 +280,7 @@ You can limit the length of the pairlist with the optional parameter `number_ass
 
 #### RemotePairList
 
-It allows the user to fetch a pairlist from a remote server or a locally stored json file within the freqtrade directory, enabling dynamic updates and customization of the trading pairlist.
+It allows the user to fetch a pairlist from a remote server or a locally stored json file within the econith directory, enabling dynamic updates and customization of the trading pairlist.
 
 The RemotePairList is defined in the pairlists section of the configuration settings. It uses the following configuration options:
 
@@ -420,7 +420,7 @@ When pairs are first listed on an exchange they can suffer huge price drops and 
 in the first few days while the pair goes through its price-discovery period. Bots can often
 be caught out buying before the pair has finished dropping in price.
 
-This filter allows freqtrade to ignore pairs until they have been listed for at least `min_days_listed` days and listed before `max_days_listed`.
+This filter allows econith to ignore pairs until they have been listed for at least `min_days_listed` days and listed before `max_days_listed`.
 
 #### DelistFilter
 

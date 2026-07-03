@@ -14,10 +14,10 @@ We need to run backtesting with the `--export` option set to `signals` to enable
 signals **and** trades:
 
 ``` bash
-freqtrade backtesting -c <config.json> --timeframe <tf> --strategy <strategy_name> --timerange=<timerange> --export=signals
+econith backtesting -c <config.json> --timeframe <tf> --strategy <strategy_name> --timerange=<timerange> --export=signals
 ```
 
-This will tell freqtrade to output a pickled dictionary of strategy, pairs and corresponding
+This will tell econith to output a pickled dictionary of strategy, pairs and corresponding
 DataFrame of the candles that resulted in entry and exit signals.
 Depending on how many entries your strategy makes, this file may get quite large, so periodically check your `user_data/backtest_results` folder to delete old exports.
 
@@ -26,11 +26,11 @@ backtesting with the `--cache none` option to make sure no cached results are us
 
 If all goes well, you should now see a `backtest-result-{timestamp}_signals.pkl` and `backtest-result-{timestamp}_exited.pkl` files in the `user_data/backtest_results` folder.
 
-To analyze the entry/exit tags, we now need to use the `freqtrade backtesting-analysis` command
+To analyze the entry/exit tags, we now need to use the `econith backtesting-analysis` command
 with `--analysis-groups` option provided with space-separated arguments:
 
 ``` bash
-freqtrade backtesting-analysis -c <config.json> --analysis-groups 0 1 2 3 4 5
+econith backtesting-analysis -c <config.json> --analysis-groups 0 1 2 3 4 5
 ```
 
 This command will read from the last backtesting results. The `--analysis-groups` option is
@@ -52,25 +52,25 @@ By default, `backtesting-analysis` processes the most recent backtest results in
 If you want to analyze results from an earlier backtest, use the `--backtest-filename` option to specify the desired file. This lets you revisit and re-analyze historical backtest outputs at any time by providing the filename of the relevant backtest result:
 
 ``` bash
-freqtrade backtesting -c <config.json> --strategy <strategy_name> --timerange <timerange> --export signals --backtest-filename backtest-result-2025-03-05_20-38-34.zip
+econith backtesting -c <config.json> --strategy <strategy_name> --timerange <timerange> --export signals --backtest-filename backtest-result-2025-03-05_20-38-34.zip
 ```
 
 You should see some output similar to below in the logs with the name of the timestamped filename that was exported:
 
 ```
-2022-06-14 16:28:32,698 - freqtrade.misc - INFO - dumping json to "mystrat_backtest-2022-06-14_16-28-32.json"
+2022-06-14 16:28:32,698 - econith.misc - INFO - dumping json to "mystrat_backtest-2022-06-14_16-28-32.json"
 ```
 
 You can then use that filename in `backtesting-analysis`:
 
 ``` bash
-freqtrade backtesting-analysis -c <config.json> --backtest-filename=backtest-result-2025-03-05_20-38-34.zip
+econith backtesting-analysis -c <config.json> --backtest-filename=backtest-result-2025-03-05_20-38-34.zip
 ```
 
 To use a result from a different results directory, you can use  `--backtest-directory` to specify the directory
 
 ``` bash
-freqtrade backtesting-analysis -c <config.json> --backtest-directory custom_results/ --backtest-filename backtest-result-2025-03-05_20-38-34.zip
+econith backtesting-analysis -c <config.json> --backtest-directory custom_results/ --backtest-filename backtest-result-2025-03-05_20-38-34.zip
 ```
 
 ### Tuning the buy tags and sell tags to display
@@ -85,18 +85,18 @@ To show only certain buy and sell tags in the displayed output, use the followin
 For example:
 
 ``` bash
-freqtrade backtesting-analysis -c <config.json> --analysis-groups 0 2 --enter-reason-list enter_tag_a enter_tag_b --exit-reason-list roi custom_exit_tag_a stop_loss
+econith backtesting-analysis -c <config.json> --analysis-groups 0 2 --enter-reason-list enter_tag_a enter_tag_b --exit-reason-list roi custom_exit_tag_a stop_loss
 ```
 
 ### Outputting signal candle indicators
 
-The real power of `freqtrade backtesting-analysis` comes from the ability to print out the indicator
+The real power of `econith backtesting-analysis` comes from the ability to print out the indicator
 values present on signal candles to allow fine-grained investigation and tuning of buy signal
 indicators. To print out a column for a given set of indicators, use the `--indicator-list`
 option:
 
 ``` bash
-freqtrade backtesting-analysis -c <config.json> --analysis-groups 0 2 --enter-reason-list enter_tag_a enter_tag_b --exit-reason-list roi custom_exit_tag_a stop_loss --indicator-list rsi rsi_1h bb_lowerband ema_9 macd macdsignal
+econith backtesting-analysis -c <config.json> --analysis-groups 0 2 --enter-reason-list enter_tag_a enter_tag_b --exit-reason-list roi custom_exit_tag_a stop_loss --indicator-list rsi rsi_1h bb_lowerband ema_9 macd macdsignal
 ```
 
 The indicators have to be present in your strategy's main DataFrame (either for your main
@@ -125,7 +125,7 @@ automatically accessible by including them on the indicator-list, and these incl
 #### Sample Output for Indicator Values
 
 ``` bash
-freqtrade backtesting-analysis -c user_data/config.json --analysis-groups 0 --indicator-list chikou_span tenkan_sen 
+econith backtesting-analysis -c user_data/config.json --analysis-groups 0 --indicator-list chikou_span tenkan_sen 
 ```
 
 In this example,
@@ -158,13 +158,13 @@ The `--indicator-list` option, by default, displays indicator values for both en
 Example: Display indicator values at entry signals:
 
 ``` bash
-freqtrade backtesting-analysis -c user_data/config.json --analysis-groups 0 --indicator-list chikou_span tenkan_sen --entry-only
+econith backtesting-analysis -c user_data/config.json --analysis-groups 0 --indicator-list chikou_span tenkan_sen --entry-only
 ```
 
 Example: Display indicator values at exit signals:
 
 ``` bash
-freqtrade backtesting-analysis -c user_data/config.json --analysis-groups 0 --indicator-list chikou_span tenkan_sen --exit-only
+econith backtesting-analysis -c user_data/config.json --analysis-groups 0 --indicator-list chikou_span tenkan_sen --exit-only
 ```
 
 !!! note 
@@ -181,7 +181,7 @@ To show only trades between dates within your backtested timerange, supply the u
 For example, if your backtest timerange was `20220101-20221231` but you only want to output trades in January:
 
 ``` bash
-freqtrade backtesting-analysis -c <config.json> --timerange 20220101-20220201
+econith backtesting-analysis -c <config.json> --timerange 20220101-20220201
 ```
 
 ### Printing out rejected signals
@@ -189,7 +189,7 @@ freqtrade backtesting-analysis -c <config.json> --timerange 20220101-20220201
 Use the `--rejected-signals` option to print out rejected signals.
 
 ``` bash
-freqtrade backtesting-analysis -c <config.json> --rejected-signals
+econith backtesting-analysis -c <config.json> --rejected-signals
 ```
 
 ### Writing tables to CSV
@@ -198,13 +198,13 @@ Some of the tabular outputs can become large, so printing them out to the termin
 Use the `--analysis-to-csv` option to disable printing out of tables to standard out and write them to CSV files.
 
 ``` bash
-freqtrade backtesting-analysis -c <config.json> --analysis-to-csv
+econith backtesting-analysis -c <config.json> --analysis-to-csv
 ```
 
 By default this will write one file per output table you specified in the `backtesting-analysis` command, e.g.
 
 ``` bash
-freqtrade backtesting-analysis -c <config.json> --analysis-to-csv --rejected-signals --analysis-groups 0 1
+econith backtesting-analysis -c <config.json> --analysis-to-csv --rejected-signals --analysis-groups 0 1
 ```
 
 This will write to `user_data/backtest_results`:
@@ -216,5 +216,5 @@ This will write to `user_data/backtest_results`:
 To override where the files will be written, also specify the `--analysis-csv-path` option.
 
 ``` bash
-freqtrade backtesting-analysis -c <config.json> --analysis-to-csv --analysis-csv-path another/data/path/
+econith backtesting-analysis -c <config.json> --analysis-to-csv --analysis-csv-path another/data/path/
 ```

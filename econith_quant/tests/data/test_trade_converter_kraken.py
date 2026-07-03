@@ -4,10 +4,10 @@ from unittest.mock import PropertyMock
 
 import pytest
 
-from freqtrade.data.converter.trade_converter_kraken import import_kraken_trades_from_csv
-from freqtrade.data.history import get_datahandler
-from freqtrade.enums import TradingMode
-from freqtrade.exceptions import OperationalException
+from econith.data.converter.trade_converter_kraken import import_kraken_trades_from_csv
+from econith.data.history import get_datahandler
+from econith.enums import TradingMode
+from econith.exceptions import OperationalException
 from tests.conftest import EXMS, log_has, log_has_re, patch_exchange
 
 

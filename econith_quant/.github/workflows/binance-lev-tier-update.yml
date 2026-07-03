@@ -45,14 +45,14 @@ jobs:
     - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
       with:
         token: ${{ secrets.REPO_SCOPED_TOKEN }}
-        add-paths: freqtrade/exchange/binance_leverage_tiers.json
+        add-paths: econith/exchange/binance_leverage_tiers.json
         labels: |
           Tech maintenance
           Dependencies
         branch: update/binance-leverage-tiers
         title: Update Binance Leverage Tiers
         commit-message: "chore: update binance leverage tiers"
-        committer: ECONITH Quant Bot <154552126+freqtrade-bot@users.noreply.github.com>
-        author: ECONITH Quant Bot <154552126+freqtrade-bot@users.noreply.github.com>
+        committer: ECONITH Quant Bot <coffee2307.pham@gmail.com>
+        author: ECONITH Quant Bot <coffee2307.pham@gmail.com>
         body: Update binance leverage tiers.
         delete-branch: true

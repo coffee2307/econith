@@ -8,7 +8,7 @@ readme = "README.md"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-exclude = ["econith_quant", "freqtrade", "dashboard"]
+extend-exclude = ["econith_quant", "econith", "dashboard"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

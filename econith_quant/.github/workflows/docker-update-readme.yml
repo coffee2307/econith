@@ -28,4 +28,4 @@ jobs:
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
-        repository: freqtradeorg/freqtrade
+        repository: econith/econith-quant

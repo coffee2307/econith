@@ -27,7 +27,7 @@ This is done by not looking at the strategy code itself, but at changed indicato
 These are set to avoid users accidentally generating false positives.
 
 !!! Tip "Running lookahead-analysis via freqUI"
-    `lookahead-analysis` can also be ran through freqUI when running freqtrade in [webserver mode](utils.md#webserver-mode).
+    `lookahead-analysis` can also be ran through freqUI when running econith in [webserver mode](utils.md#webserver-mode).
     As the analysis can run for a while, it is executed as a background task.
 
 ## Lookahead-analysis command reference
@@ -42,7 +42,7 @@ These are set to avoid users accidentally generating false positives.
 Many strategies, without the programmer knowing, have fallen prey to lookahead bias.
 This typically makes the strategy backtest look profitable, sometimes to extremes,  but this is not realistic as the strategy is "cheating" by looking at data it would not have in dry or live modes.
 
-The reason why strategies can "cheat" is because the freqtrade backtesting process populates the full dataframe including all candle timestamps at the outset.
+The reason why strategies can "cheat" is because the econith backtesting process populates the full dataframe including all candle timestamps at the outset.
 If the programmer is not careful or oblivious how things work internally
 (which sometimes can be really hard to find out) then the strategy will look into the future.
 

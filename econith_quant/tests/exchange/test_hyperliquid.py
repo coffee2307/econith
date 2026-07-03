@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, PropertyMock
 
 import pytest
 
-from freqtrade.exceptions import ConfigurationError
+from econith.exceptions import ConfigurationError
 from tests.conftest import EXMS, get_mock_coro, get_patched_exchange, log_has_re
 
 
@@ -472,7 +472,7 @@ def test_hyperliquid_get_funding_fees(default_conf, mocker):
     default_conf["exchange"]["hip3_dexes"] = ["xyz", "vntl"]
 
     # Mock validate_config to skip validation
-    mocker.patch("freqtrade.exchange.hyperliquid.Hyperliquid.validate_config")
+    mocker.patch("econith.exchange.hyperliquid.Hyperliquid.validate_config")
 
     exchange = get_patched_exchange(mocker, default_conf, exchange="hyperliquid")
     exchange._fetch_and_calculate_funding_fees = MagicMock()
@@ -501,7 +501,7 @@ def test_hyperliquid_get_max_leverage(default_conf, mocker, markets_hip3):
     default_conf["exchange"]["hip3_dexes"] = ["xyz", "vntl"]
 
     # Mock validate_config to skip validation
-    mocker.patch("freqtrade.exchange.hyperliquid.Hyperliquid.validate_config")
+    mocker.patch("econith.exchange.hyperliquid.Hyperliquid.validate_config")
 
     exchange = get_patched_exchange(mocker, default_conf, exchange="hyperliquid")
     mocker.patch.multiple(EXMS, markets=PropertyMock(return_value=markets_hip3))
@@ -537,7 +537,7 @@ def test_hyperliquid__lev_prep(default_conf, mocker):
     default_conf["exchange"]["hip3_dexes"] = ["xyz", "vntl"]
 
     # Mock validate_config to skip validation
-    mocker.patch("freqtrade.exchange.hyperliquid.Hyperliquid.validate_config")
+    mocker.patch("econith.exchange.hyperliquid.Hyperliquid.validate_config")
 
     exchange = get_patched_exchange(mocker, default_conf, api_mock, exchange="hyperliquid")
 
@@ -618,7 +618,7 @@ def test_hyperliquid_fetch_order(default_conf_usdt, mocker, markets_hip3):
             },
         ],
     )
-    mocker.patch("freqtrade.exchange.hyperliquid.Hyperliquid.validate_config")
+    mocker.patch("econith.exchange.hyperliquid.Hyperliquid.validate_config")
     exchange = get_patched_exchange(
         mocker, default_conf_usdt, api_mock, exchange="hyperliquid", mock_markets=markets_hip3
     )
@@ -781,7 +781,7 @@ def test_hyperliquid_get_balances_hip3(default_conf, mocker, caplog, markets_hip
     default_conf["exchange"]["hip3_dexes"] = ["xyz", "vntl", "flx"]
     default_conf["trading_mode"] = "futures"
     default_conf["margin_mode"] = "isolated"
-    mocker.patch("freqtrade.exchange.hyperliquid.Hyperliquid.validate_config")
+    mocker.patch("econith.exchange.hyperliquid.Hyperliquid.validate_config")
     exchange = get_patched_exchange(
         mocker, default_conf, api_mock, exchange="hyperliquid", mock_markets=markets_hip3
     )
@@ -824,7 +824,7 @@ def test_hyperliquid_fetch_positions_hip3(default_conf, mocker, caplog, markets_
     default_conf["margin_mode"] = "isolated"
     default_conf["exchange"]["hip3_dexes"] = ["xyz", "vntl", "flx"]
 
-    mocker.patch("freqtrade.exchange.hyperliquid.Hyperliquid.validate_config")
+    mocker.patch("econith.exchange.hyperliquid.Hyperliquid.validate_config")
     exchange = get_patched_exchange(
         mocker, default_conf, api_mock, exchange="hyperliquid", mock_markets=markets_hip3
     )

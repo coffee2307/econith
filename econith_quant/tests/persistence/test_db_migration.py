@@ -1,12 +1,12 @@
 from unittest.mock import MagicMock
 
-from freqtrade.persistence.base import ModelBase
-from freqtrade.persistence.custom_data import _CustomData
-from freqtrade.persistence.db_migration import migrate_db
-from freqtrade.persistence.key_value_store import _KeyValueStoreModel
-from freqtrade.persistence.pairlock import PairLock
-from freqtrade.persistence.trade_model import Trade
-from freqtrade.persistence.wallet_history import WalletHistory
+from econith.persistence.base import ModelBase
+from econith.persistence.custom_data import _CustomData
+from econith.persistence.db_migration import migrate_db
+from econith.persistence.key_value_store import _KeyValueStoreModel
+from econith.persistence.pairlock import PairLock
+from econith.persistence.trade_model import Trade
+from econith.persistence.wallet_history import WalletHistory
 
 
 def test_migrate_db_detail(mocker):
@@ -34,8 +34,8 @@ def test_migrate_db_detail(mocker):
     mocker.patch.object(_CustomData, "session", custom_data_session, create=True)
     mocker.patch.object(WalletHistory, "session", wallet_history_session, create=True)
 
-    make_transient_mock = mocker.patch("freqtrade.persistence.db_migration.make_transient")
-    set_sequence_ids_mock = mocker.patch("freqtrade.persistence.db_migration.set_sequence_ids")
+    make_transient_mock = mocker.patch("econith.persistence.db_migration.make_transient")
+    set_sequence_ids_mock = mocker.patch("econith.persistence.db_migration.set_sequence_ids")
 
     # max ids for Trade, Order, PairLock, KeyValueStore, CustomData, WalletHistory
     session_target.scalar.side_effect = [10, 11, 12, 13, 14, 15]

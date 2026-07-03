@@ -10,7 +10,7 @@ Hyperopt requires historic data to be available, just as backtesting does (hyper
 To learn how to get data for the pairs and exchange you're interested in, head over to the [Data Downloading](data-download.md) section of the documentation.
 
 !!! Bug
-    Hyperopt can crash when used with only 1 CPU Core as found out in [Issue #1133](https://github.com/freqtrade/freqtrade/issues/1133)
+    Hyperopt can crash when used with only 1 CPU Core as found out in [Issue #1133](https://github.com/econith/econith/issues/1133)
 
 !!! Note
     Since 2021.4 release you no longer have to write a separate hyperopt class, but can configure the parameters directly in the strategy.
@@ -70,7 +70,7 @@ Rarely you may also need to create a [nested class](advanced-hyperopt.md#overrid
 
     ``` bash
     # Have a working strategy at hand.
-    freqtrade hyperopt --hyperopt-loss SharpeHyperOptLossDaily --spaces roi stoploss trailing --strategy MyWorkingStrategy --config config.json -e 100
+    econith hyperopt --hyperopt-loss SharpeHyperOptLossDaily --spaces roi stoploss trailing --strategy MyWorkingStrategy --config config.json -e 100
     ```
 
 ### Hyperopt execution logic
@@ -79,7 +79,7 @@ Hyperopt will first load your data into memory and will then run `populate_indic
 
 Hyperopt will then spawn into different processes (number of processors, or `-j <n>`), and run backtesting over and over again, changing the parameters that are part of the `--spaces` defined.
 
-For every new set of parameters, freqtrade will run first `populate_entry_trend()` followed by `populate_exit_trend()`, and then run the regular backtesting process to simulate trades.
+For every new set of parameters, econith will run first `populate_entry_trend()` followed by `populate_exit_trend()`, and then run the regular backtesting process to simulate trades.
 
 After backtesting, the results are passed into the [loss function](#loss-functions), which will evaluate if this result was better or worse than previous results.  
 Based on the loss function result, hyperopt will determine the next set of parameters to try in the next round of backtesting.
@@ -238,7 +238,7 @@ There are two parameter options that can help you to quickly test various ideas:
 ## Optimizing an indicator parameter
 
 Assuming you have a simple strategy in mind - a EMA cross strategy (2 Moving averages crossing) - and you'd like to find the ideal parameters for this strategy.
-By default, we assume a stoploss of 5% - and a take-profit (`minimal_roi`) of 10% - which means freqtrade will sell the trade once 10% profit has been reached.
+By default, we assume a stoploss of 5% - and a take-profit (`minimal_roi`) of 10% - which means econith will sell the trade once 10% profit has been reached.
 
 ``` python
 from pandas import DataFrame
@@ -246,9 +246,9 @@ from functools import reduce
 
 import talib.abstract as ta
 
-from freqtrade.strategy import (BooleanParameter, CategoricalParameter, DecimalParameter, 
+from econith.strategy import (BooleanParameter, CategoricalParameter, DecimalParameter, 
                                 IStrategy, IntParameter)
-import freqtrade.vendor.qtpylib.indicators as qtpylib
+import econith.vendor.qtpylib.indicators as qtpylib
 
 class MyAwesomeStrategy(IStrategy):
     stoploss = -0.05
@@ -343,9 +343,9 @@ from functools import reduce
 
 import talib.abstract as ta
 
-from freqtrade.strategy import (BooleanParameter, CategoricalParameter, DecimalParameter, 
+from econith.strategy import (BooleanParameter, CategoricalParameter, DecimalParameter, 
                                 IStrategy, IntParameter)
-import freqtrade.vendor.qtpylib.indicators as qtpylib
+import econith.vendor.qtpylib.indicators as qtpylib
 
 class MyAwesomeStrategy(IStrategy):
     stoploss = -0.05
@@ -381,7 +381,7 @@ class MyAwesomeStrategy(IStrategy):
 ```
 
 You can then run hyperopt as follows:
-`freqtrade hyperopt --hyperopt-loss SharpeHyperOptLossDaily --strategy MyAwesomeStrategy --spaces protection`
+`econith hyperopt --hyperopt-loss SharpeHyperOptLossDaily --strategy MyAwesomeStrategy --spaces protection`
 
 !!! Note
     The protection space is not part of the default space, and is only available with the Parameters Hyperopt interface, not with the legacy hyperopt interface (which required separate hyperopt files).
@@ -433,9 +433,9 @@ from functools import reduce
 
 import talib.abstract as ta
 
-from freqtrade.strategy import (BooleanParameter, CategoricalParameter, DecimalParameter, 
+from econith.strategy import (BooleanParameter, CategoricalParameter, DecimalParameter, 
                                 IStrategy, IntParameter)
-import freqtrade.vendor.qtpylib.indicators as qtpylib
+import econith.vendor.qtpylib.indicators as qtpylib
 
 class MyAwesomeStrategy(IStrategy):
     stoploss = -0.05
@@ -495,7 +495,7 @@ Because hyperopt tries a lot of combinations to find the best parameters it will
 We strongly recommend to use `screen` or `tmux` to prevent any connection loss.
 
 ```bash
-freqtrade hyperopt --config config.json --hyperopt-loss <hyperoptlossname> --strategy <strategyname> -e 500 --spaces all
+econith hyperopt --config config.json --hyperopt-loss <hyperoptlossname> --strategy <strategyname> -e 500 --spaces all
 ```
 
 The `-e` option will set how many evaluations hyperopt will do. Since hyperopt uses Bayesian search, running too many epochs at once may not produce greater results. Experience has shown that best results are usually not improving much after 500-1000 epochs.  
@@ -523,7 +523,7 @@ For example, to use one month of data, pass `--timerange 20210101-20210201` (fro
 Full command:
 
 ```bash
-freqtrade hyperopt --strategy <strategyname> --timerange 20210101-20210201
+econith hyperopt --strategy <strategyname> --timerange 20210101-20210201
 ```
 
 ### Running Hyperopt with Smaller Search Space
@@ -843,7 +843,7 @@ To achieve same the results (number of trades, their durations, profit, etc.) as
 
 Should results not match, check the following factors:
 
-* You may have added parameters to hyperopt in `populate_indicators()` where they will be calculated only once **for all epochs**. If you are, for example, trying to optimise multiple SMA timeperiod values, the hyperoptable timeperiod parameter should be placed in `populate_entry_trend()` which is calculated every epoch. See [Optimizing an indicator parameter](https://www.freqtrade.io/en/stable/hyperopt/#optimizing-an-indicator-parameter).
+* You may have added parameters to hyperopt in `populate_indicators()` where they will be calculated only once **for all epochs**. If you are, for example, trying to optimise multiple SMA timeperiod values, the hyperoptable timeperiod parameter should be placed in `populate_entry_trend()` which is calculated every epoch. See [Optimizing an indicator parameter](https://econith/en/stable/hyperopt/#optimizing-an-indicator-parameter).
 * If you have disabled the auto-export of hyperopt parameters into the JSON parameters file, double-check to make sure you transferred all hyperopted values into your strategy correctly.
 * Check the logs to verify what parameters are being set and what values are being used.
 * Pay special care to the stoploss, max_open_trades and trailing stoploss parameters, as these are often set in configuration files, which override changes to the strategy. Check the logs of your backtest to ensure that there were no parameters inadvertently set by the configuration (like `stoploss`, `max_open_trades` or `trailing_stop`).

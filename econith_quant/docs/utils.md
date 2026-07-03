@@ -4,7 +4,7 @@ Besides the Live-Trade and Dry-Run run modes, the `backtesting` and `hyperopt` o
 
 ## Create userdir
 
-Creates the directory structure to hold your files for freqtrade.
+Creates the directory structure to hold your files for econith.
 Will also create strategy and hyperopt examples for you to get started.
 Can be used multiple times - using `--reset` will reset the sample strategy and hyperopt files to their default state.
 
@@ -38,7 +38,7 @@ Creates a new configuration file, asking some questions which are important sele
 ### Create config examples
 
 ```
-$ freqtrade new-config --config user_data/config_binance.json
+$ econith new-config --config user_data/config_binance.json
 
 ? Do you want to enable Dry-run (simulated trades)?  Yes
 ? Please insert your stake currency: BTC
@@ -95,19 +95,19 @@ Results will be located in `user_data/strategies/<strategyclassname>.py`.
 ### Sample usage of new-strategy
 
 ```bash
-freqtrade new-strategy --strategy AwesomeStrategy
+econith new-strategy --strategy AwesomeStrategy
 ```
 
 With custom user directory
 
 ```bash
-freqtrade new-strategy --userdir ~/.freqtrade/ --strategy AwesomeStrategy
+econith new-strategy --userdir ~/.econith/ --strategy AwesomeStrategy
 ```
 
 Using the advanced template (populates all optional functions and methods)
 
 ```bash
-freqtrade new-strategy --strategy AwesomeStrategy --template advanced
+econith new-strategy --strategy AwesomeStrategy --template advanced
 ```
 
 ## List Strategies
@@ -124,19 +124,19 @@ This subcommand is useful for finding problems in your environment with loading 
 Example: Search default strategies directories (within the default userdir).
 
 ``` bash
-freqtrade list-strategies
+econith list-strategies
 ```
 
 Example: Search strategies  directory within the userdir.
 
 ``` bash
-freqtrade list-strategies --userdir ~/.freqtrade/
+econith list-strategies --userdir ~/.econith/
 ```
 
 Example: Search dedicated strategy path.
 
 ``` bash
-freqtrade list-strategies --strategy-path ~/.freqtrade/strategies/
+econith list-strategies --strategy-path ~/.econith/strategies/
 ```
 
 ## List Hyperopt-Loss functions
@@ -166,7 +166,7 @@ Use the `list-exchanges` subcommand to see the exchanges available for the bot.
 Example: see exchanges available for the bot:
 
 ```
-$ freqtrade list-exchanges
+$ econith list-exchanges
 Exchanges available for ECONITH Quant:
 Exchange name       Supported    Markets                 Reason
 ------------------  -----------  ----------------------  ------------------------------------------------------------------------
@@ -189,7 +189,7 @@ okx                 Official     spot, isolated futures
 Example: see all exchanges supported by the ccxt library (including 'bad' ones, i.e. those that are known to not work with ECONITH Quant)
 
 ```
-$ freqtrade list-exchanges -a
+$ econith list-exchanges -a
 All exchanges supported by the ccxt library:
 Exchange name       Valid    Supported    Markets                 Reason
 ------------------  -------  -----------  ----------------------  ---------------------------------------------------------------------------------
@@ -215,14 +215,14 @@ Use the `list-timeframes` subcommand to see the list of timeframes available for
 * Example: see the timeframes for the 'binance' exchange, set in the configuration file:
 
 ```
-$ freqtrade list-timeframes -c config_binance.json
+$ econith list-timeframes -c config_binance.json
 ...
 Timeframes available for the exchange `binance`: 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M
 ```
 
 * Example: enumerate exchanges available for ECONITH Quant and print timeframes supported by each of them:
 ```
-$ for i in `freqtrade list-exchanges -1`; do freqtrade list-timeframes --exchange $i; done
+$ for i in `econith list-exchanges -1`; do econith list-timeframes --exchange $i; done
 ```
 
 ## List pairs/list markets
@@ -252,7 +252,7 @@ Pairs/markets are sorted by its symbol string in the printed output.
 configuration file (i.e. pairs on the "Binance" exchange) in JSON format:
 
 ```
-$ freqtrade list-pairs --quote USD --print-json
+$ econith list-pairs --quote USD --print-json
 ```
 
 * Print the list of all pairs on the exchange, specified in the `config_binance.json` configuration file
@@ -260,13 +260,13 @@ $ freqtrade list-pairs --quote USD --print-json
 human-readable list with summary:
 
 ```
-$ freqtrade list-pairs -c config_binance.json --all --base BTC ETH --quote USDT USD --print-list
+$ econith list-pairs -c config_binance.json --all --base BTC ETH --quote USDT USD --print-list
 ```
 
 * Print all markets on exchange "Kraken", in the tabular format:
 
 ```
-$ freqtrade list-markets --exchange kraken --all
+$ econith list-markets --exchange kraken --all
 ```
 
 ## Test pairlist
@@ -283,12 +283,12 @@ Can be used to generate static pairlists to be used during backtesting / hyperop
 Show whitelist when using a [dynamic pairlist](plugins.md#pairlists).
 
 ```
-freqtrade test-pairlist --config config.json --quote USDT BTC
+econith test-pairlist --config config.json --quote USDT BTC
 ```
 
 ## Convert database
 
-`freqtrade convert-db` can be used to convert your database from one system to another (sqlite -> postgres, postgres -> other postgres), migrating all trades, orders and Pairlocks.
+`econith convert-db` can be used to convert your database from one system to another (sqlite -> postgres, postgres -> other postgres), migrating all trades, orders and Pairlocks.
 
 Please refer to the [corresponding documentation](advanced-setup.md#use-a-different-database-system) to learn about requirements for different database systems.
 
@@ -303,7 +303,7 @@ Please refer to the [corresponding documentation](advanced-setup.md#use-a-differ
     Webserver mode is an experimental mode to increase backesting and strategy development productivity.
     There may still be bugs - so if you happen to stumble across these, please report them as github issues, thanks.
 
-Run freqtrade in webserver mode.
+Run econith in webserver mode.
 ECONITH Quant will start the webserver and allow FreqUI to start and control backtesting processes.
 This has the advantage that data will not be reloaded between backtesting runs (as long as timeframe and timerange remain identical).
 FreqUI will also show the backtesting results.
@@ -314,14 +314,14 @@ FreqUI will also show the backtesting results.
 
 You can also use webserver mode via docker.
 Starting a one-off container requires the configuration of the port explicitly, as ports are not exposed by default.
-You can use `docker compose run --rm -p 127.0.0.1:8080:8080 freqtrade webserver` to start a one-off container that'll be removed once you stop it. This assumes that port 8080 is still available and no other bot is running on that port.
+You can use `docker compose run --rm -p 127.0.0.1:8080:8080 econith webserver` to start a one-off container that'll be removed once you stop it. This assumes that port 8080 is still available and no other bot is running on that port.
 
 Alternatively, you can reconfigure the docker-compose file to have the command updated:
 
 ``` yml
     command: >
       webserver
-      --config /freqtrade/user_data/config.json
+      --config /econith/user_data/config.json
 ```
 
 You can now use `docker compose up` to start the webserver.
@@ -362,12 +362,12 @@ You can list the hyperoptimization epochs the Hyperopt module evaluated previous
 
 List all results, print details of the best result at the end:
 ```
-freqtrade hyperopt-list
+econith hyperopt-list
 ```
 
 List only epochs with positive profit. Do not print the details of the best epoch, so that the list can be iterated in a script:
 ```
-freqtrade hyperopt-list --profitable --no-details
+econith hyperopt-list --profitable --no-details
 ```
 
 ## Show details of Hyperopt results
@@ -385,13 +385,13 @@ You can show the details of any hyperoptimization epoch previously evaluated by 
 Print details for the epoch 168 (the number of the epoch is shown by the `hyperopt-list` subcommand or by Hyperopt itself during hyperoptimization run):
 
 ```
-freqtrade hyperopt-show -n 168
+econith hyperopt-show -n 168
 ```
 
 Prints JSON data with details for the last best epoch (i.e., the best of all epochs):
 
 ```
-freqtrade hyperopt-show --best -n -1 --print-json --no-header
+econith hyperopt-show --best -n -1 --print-json --no-header
 ```
 
 ## Show trades
@@ -405,7 +405,7 @@ Print selected (or all) trades from database to screen.
 Print trades with id 2 and 3 as json
 
 ``` bash
-freqtrade show-trades --db-url sqlite:///tradesv3.sqlite --trade-ids 2 3 --print-json
+econith show-trades --db-url sqlite:///tradesv3.sqlite --trade-ids 2 3 --print-json
 ```
 
 ## Strategy-Updater

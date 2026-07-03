@@ -1,5 +1,5 @@
 ``` output
-usage: freqtrade convert-data [-h] [-v] [--no-color] [--logfile FILE] [-V]
+usage: econith convert-data [-h] [-v] [--no-color] [--logfile FILE] [-V]
                               [-c PATH] [-d PATH] [--userdir PATH]
                               [-p PAIRS [PAIRS ...]]
                               --format-from {json,jsongz,feather,parquet}

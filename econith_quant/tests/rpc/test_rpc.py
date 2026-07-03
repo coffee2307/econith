@@ -6,17 +6,17 @@ import pytest
 from numpy import isnan
 from sqlalchemy import select
 
-from freqtrade.enums import SignalDirection, State, TradingMode
-from freqtrade.exceptions import ExchangeError, InvalidOrderException, TemporaryError
-from freqtrade.persistence import Order, Trade
-from freqtrade.persistence.key_value_store import set_startup_time
-from freqtrade.rpc import RPC, RPCException
-from freqtrade.rpc.fiat_convert import CryptoToFiatConverter
+from econith.enums import SignalDirection, State, TradingMode
+from econith.exceptions import ExchangeError, InvalidOrderException, TemporaryError
+from econith.persistence import Order, Trade
+from econith.persistence.key_value_store import set_startup_time
+from econith.rpc import RPC, RPCException
+from econith.rpc.fiat_convert import CryptoToFiatConverter
 from tests.conftest import (
     EXMS,
     create_mock_trades,
     create_mock_trades_usdt,
-    get_patched_freqtradebot,
+    get_patched_econithbot,
     log_has_re,
     patch_get_signal,
 )
@@ -127,8 +127,8 @@ def test_rpc_trade_status(default_conf, ticker, fee, mocker) -> None:
             }
         ],
     }
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    econithbot = get_patched_econithbot(mocker, default_conf)
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
     mocker.patch.multiple(
         EXMS,
         fetch_ticker=ticker,
@@ -136,14 +136,14 @@ def test_rpc_trade_status(default_conf, ticker, fee, mocker) -> None:
         _dry_is_price_crossed=MagicMock(side_effect=[False, True]),
     )
 
-    patch_get_signal(freqtradebot)
-    rpc = RPC(freqtradebot)
+    patch_get_signal(econithbot)
+    rpc = RPC(econithbot)
 
-    freqtradebot.state = State.RUNNING
+    econithbot.state = State.RUNNING
     with pytest.raises(RPCException, match=r".*no active trade*"):
         rpc._rpc_trade_status()
 
-    freqtradebot.enter_positions()
+    econithbot.enter_positions()
 
     # Open order...
     results = rpc._rpc_trade_status()
@@ -188,9 +188,9 @@ def test_rpc_trade_status(default_conf, ticker, fee, mocker) -> None:
     Trade.commit()
 
     # Fill open order ...
-    freqtradebot.manage_open_orders()
+    econithbot.manage_open_orders()
     trades = Trade.get_open_trades()
-    freqtradebot.exit_positions(trades)
+    econithbot.exit_positions(trades)
 
     results = rpc._rpc_trade_status()
 
@@ -232,22 +232,22 @@ def test_rpc_trade_status(default_conf, ticker, fee, mocker) -> None:
 def test_rpc_status_table(default_conf, ticker, fee, mocker, time_machine) -> None:
     time_machine.move_to("2024-05-10 11:15:00 +00:00", tick=False)
 
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
     mocker.patch.multiple(
         EXMS,
         fetch_ticker=ticker,
         get_fee=fee,
     )
     del default_conf["fiat_display_currency"]
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
-    patch_get_signal(freqtradebot)
-    rpc = RPC(freqtradebot)
+    econithbot = get_patched_econithbot(mocker, default_conf)
+    patch_get_signal(econithbot)
+    rpc = RPC(econithbot)
 
-    freqtradebot.state = State.RUNNING
+    econithbot.state = State.RUNNING
     with pytest.raises(RPCException, match=r".*no active trade*"):
         rpc._rpc_status_table(default_conf["stake_currency"], "USD")
     mocker.patch(f"{EXMS}._dry_is_price_crossed", return_value=False)
-    freqtradebot.enter_positions()
+    econithbot.enter_positions()
 
     result, headers, fiat_profit_sum, total_sum = rpc._rpc_status_table(
         default_conf["stake_currency"], "USD"
@@ -261,7 +261,7 @@ def test_rpc_status_table(default_conf, ticker, fee, mocker, time_machine) -> No
     assert "0.00" == f"{total_sum:.2f}"
 
     mocker.patch(f"{EXMS}._dry_is_price_crossed", return_value=True)
-    freqtradebot.process()
+    econithbot.process()
 
     result, headers, fiat_profit_sum, total_sum = rpc._rpc_status_table(
         default_conf["stake_currency"], "USD"
@@ -318,18 +318,18 @@ def test__rpc_timeunit_profit(
 ) -> None:
     time_machine.move_to("2023-09-05 10:00:00 +00:00", tick=False)
 
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
     mocker.patch.multiple(
         EXMS, fetch_ticker=ticker, get_fee=fee, markets=PropertyMock(return_value=markets)
     )
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf_usdt)
+    econithbot = get_patched_econithbot(mocker, default_conf_usdt)
     create_mock_trades_usdt(fee)
 
     stake_currency = default_conf_usdt["stake_currency"]
     fiat_display_currency = default_conf_usdt["fiat_display_currency"]
 
-    rpc = RPC(freqtradebot)
+    rpc = RPC(econithbot)
     rpc._fiat_converter = CryptoToFiatConverter({})
 
     # Try valid data
@@ -356,12 +356,12 @@ def test__rpc_timeunit_profit(
 
 @pytest.mark.parametrize("is_short", [True, False])
 def test_rpc_trade_history(mocker, default_conf, markets, fee, is_short):
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
     mocker.patch.multiple(EXMS, markets=PropertyMock(return_value=markets))
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
+    econithbot = get_patched_econithbot(mocker, default_conf)
     create_mock_trades(fee, is_short)
-    rpc = RPC(freqtradebot)
+    rpc = RPC(econithbot)
     rpc._fiat_converter = CryptoToFiatConverter({})
     trades = rpc._rpc_trade_history(2)
     assert len(trades["trades"]) == 2
@@ -379,7 +379,7 @@ def test_rpc_trade_history(mocker, default_conf, markets, fee, is_short):
 
 @pytest.mark.parametrize("is_short", [True, False])
 def test_rpc_delete_trade(mocker, default_conf, fee, markets, caplog, is_short):
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
     stoploss_mock = MagicMock()
     cancel_mock = MagicMock()
     mocker.patch.multiple(
@@ -387,15 +387,15 @@ def test_rpc_delete_trade(mocker, default_conf, fee, markets, caplog, is_short):
         markets=PropertyMock(return_value=markets),
     )
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
+    econithbot = get_patched_econithbot(mocker, default_conf)
     mocker.patch.multiple(
-        freqtradebot.exchange,
+        econithbot.exchange,
         cancel_order=cancel_mock,
         cancel_stoploss_order=stoploss_mock,
     )
-    freqtradebot.strategy.order_types["stoploss_on_exchange"] = True
+    econithbot.strategy.order_types["stoploss_on_exchange"] = True
     create_mock_trades(fee, is_short)
-    rpc = RPC(freqtradebot)
+    rpc = RPC(econithbot)
     with pytest.raises(RPCException, match=r"Trade with id '200' not found\."):
         rpc._rpc_delete("200")
 
@@ -429,7 +429,7 @@ def test_rpc_delete_trade(mocker, default_conf, fee, markets, caplog, is_short):
     assert res["cancel_order_count"] == 1
 
     stoploss_mock = mocker.patch.object(
-        freqtradebot.exchange, "cancel_stoploss_order", side_effect=InvalidOrderException
+        econithbot.exchange, "cancel_stoploss_order", side_effect=InvalidOrderException
     )
 
     res = rpc._rpc_delete("3")
@@ -437,7 +437,7 @@ def test_rpc_delete_trade(mocker, default_conf, fee, markets, caplog, is_short):
     stoploss_mock.reset_mock()
 
     cancel_mock = mocker.patch.object(
-        freqtradebot.exchange, "cancel_order", side_effect=InvalidOrderException
+        econithbot.exchange, "cancel_order", side_effect=InvalidOrderException
     )
 
     res = rpc._rpc_delete("4")
@@ -446,18 +446,18 @@ def test_rpc_delete_trade(mocker, default_conf, fee, markets, caplog, is_short):
 
 
 def test_rpc_trade_statistics(default_conf_usdt, ticker, fee, mocker) -> None:
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
     mocker.patch.multiple(
         EXMS,
         fetch_ticker=ticker,
         get_fee=fee,
     )
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf_usdt)
+    econithbot = get_patched_econithbot(mocker, default_conf_usdt)
     stake_currency = default_conf_usdt["stake_currency"]
     fiat_display_currency = default_conf_usdt["fiat_display_currency"]
 
-    rpc = RPC(freqtradebot)
+    rpc = RPC(econithbot)
     rpc._fiat_converter = CryptoToFiatConverter({})
     mocker.patch.object(rpc._fiat_converter, "get_price", return_value=1.1)
 
@@ -544,7 +544,7 @@ def test_rpc_balance_handle_error(default_conf, mocker, caplog):
         }
     ]
 
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
     mocker.patch.multiple(
         EXMS,
         get_balances=MagicMock(return_value=mock_balance),
@@ -554,9 +554,9 @@ def test_rpc_balance_handle_error(default_conf, mocker, caplog):
     default_conf["trading_mode"] = "futures"
     default_conf["margin_mode"] = "isolated"
     default_conf["dry_run"] = False
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
-    patch_get_signal(freqtradebot)
-    rpc = RPC(freqtradebot)
+    econithbot = get_patched_econithbot(mocker, default_conf)
+    patch_get_signal(econithbot)
+    rpc = RPC(econithbot)
     rpc._fiat_converter = CryptoToFiatConverter({})
     mocker.patch.object(rpc._fiat_converter, "get_price", return_value=15000.0)
     res = rpc._rpc_balance(default_conf["stake_currency"], default_conf["fiat_display_currency"])
@@ -646,7 +646,7 @@ def test_rpc_balance_handle(default_conf_usdt, mocker, tickers, proxy_coin, marg
         }
     ]
 
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
     mocker.patch.multiple(
         EXMS,
         validate_trading_mode_and_margin_mode=MagicMock(),
@@ -661,13 +661,13 @@ def test_rpc_balance_handle(default_conf_usdt, mocker, tickers, proxy_coin, marg
     default_conf_usdt["dry_run"] = False
     default_conf_usdt["trading_mode"] = "futures"
     default_conf_usdt["margin_mode"] = margin_mode
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf_usdt)
-    patch_get_signal(freqtradebot)
-    rpc = RPC(freqtradebot)
+    econithbot = get_patched_econithbot(mocker, default_conf_usdt)
+    patch_get_signal(econithbot)
+    rpc = RPC(econithbot)
     rpc._fiat_converter = CryptoToFiatConverter({})
     mocker.patch.object(rpc._fiat_converter, "get_price", return_value=1.2)
     mocker.patch(
-        "freqtrade.persistence.trade_model.Trade.get_open_trades",
+        "econith.persistence.trade_model.Trade.get_open_trades",
         return_value=[
             MagicMock(pair="ADA/USDT:USDT", safe_base_currency="ADA"),
         ],
@@ -836,7 +836,7 @@ def test_rpc_balance_futures(default_conf_usdt, mocker):
     - open_value = 450, current_value = 600 -> unlevered PnL = 150
     - equity = collateral + PnL = 300
     """
-    from freqtrade.wallets import PositionWallet, Wallet
+    from econith.wallets import PositionWallet, Wallet
 
     mock_balance = {"USDT": {"free": 1000.0, "total": 1000.0, "used": 0.0}}
 
@@ -861,7 +861,7 @@ def test_rpc_balance_futures(default_conf_usdt, mocker):
     default_conf_usdt["trading_mode"] = "futures"
     default_conf_usdt["margin_mode"] = "isolated"
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf_usdt)
+    econithbot = get_patched_econithbot(mocker, default_conf_usdt)
 
     # Create a short and a long position wallet directly to avoid depending on position parsing
     short_pos = PositionWallet(
@@ -880,14 +880,14 @@ def test_rpc_balance_futures(default_conf_usdt, mocker):
     )
 
     mocker.patch.multiple(
-        freqtradebot.wallets,
+        econithbot.wallets,
         get_all_positions=MagicMock(
             return_value={short_pos.symbol: short_pos, long_pos.symbol: long_pos}
         ),
         get_all_balances=MagicMock(return_value={"USDT": Wallet("USDT", 1000.0, 1000.0, 0.0)}),
     )
 
-    rpc = RPC(freqtradebot)
+    rpc = RPC(econithbot)
     result = rpc._rpc_balance(
         default_conf_usdt["stake_currency"], default_conf_usdt["fiat_display_currency"]
     )
@@ -907,50 +907,50 @@ def test_rpc_balance_futures(default_conf_usdt, mocker):
 
 
 def test_rpc_start(mocker, default_conf) -> None:
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
     mocker.patch.multiple(EXMS, fetch_ticker=MagicMock())
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
-    patch_get_signal(freqtradebot)
-    rpc = RPC(freqtradebot)
-    freqtradebot.state = State.STOPPED
+    econithbot = get_patched_econithbot(mocker, default_conf)
+    patch_get_signal(econithbot)
+    rpc = RPC(econithbot)
+    econithbot.state = State.STOPPED
 
     result = rpc._rpc_start()
     assert {"status": "starting trader ..."} == result
-    assert freqtradebot.state == State.RUNNING
+    assert econithbot.state == State.RUNNING
 
     result = rpc._rpc_start()
     assert {"status": "already running"} == result
-    assert freqtradebot.state == State.RUNNING
+    assert econithbot.state == State.RUNNING
 
 
 def test_rpc_stop(mocker, default_conf) -> None:
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
     mocker.patch.multiple(EXMS, fetch_ticker=MagicMock())
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
-    patch_get_signal(freqtradebot)
-    rpc = RPC(freqtradebot)
-    freqtradebot.state = State.RUNNING
+    econithbot = get_patched_econithbot(mocker, default_conf)
+    patch_get_signal(econithbot)
+    rpc = RPC(econithbot)
+    econithbot.state = State.RUNNING
 
     result = rpc._rpc_stop()
     assert {"status": "stopping trader ..."} == result
-    assert freqtradebot.state == State.STOPPED
+    assert econithbot.state == State.STOPPED
 
     result = rpc._rpc_stop()
 
     assert {"status": "already stopped"} == result
-    assert freqtradebot.state == State.STOPPED
+    assert econithbot.state == State.STOPPED
 
 
 def test_rpc_pause(mocker, default_conf) -> None:
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
     mocker.patch.multiple(EXMS, fetch_ticker=MagicMock())
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
-    patch_get_signal(freqtradebot)
-    rpc = RPC(freqtradebot)
-    freqtradebot.state = State.PAUSED
+    econithbot = get_patched_econithbot(mocker, default_conf)
+    patch_get_signal(econithbot)
+    rpc = RPC(econithbot)
+    econithbot.state = State.PAUSED
 
     result = rpc._rpc_pause()
     assert {
@@ -959,7 +959,7 @@ def test_rpc_pause(mocker, default_conf) -> None:
 
 
 def test_rpc_force_exit(default_conf, ticker, fee, mocker) -> None:
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
 
     cancel_order_mock = MagicMock()
     mocker.patch.multiple(
@@ -977,42 +977,42 @@ def test_rpc_force_exit(default_conf, ticker, fee, mocker) -> None:
         _dry_is_price_crossed=MagicMock(return_value=True),
         get_fee=fee,
     )
-    mocker.patch("freqtrade.wallets.Wallets.get_free", return_value=1000)
+    mocker.patch("econith.wallets.Wallets.get_free", return_value=1000)
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
-    patch_get_signal(freqtradebot)
-    rpc = RPC(freqtradebot)
+    econithbot = get_patched_econithbot(mocker, default_conf)
+    patch_get_signal(econithbot)
+    rpc = RPC(econithbot)
 
-    freqtradebot.state = State.STOPPED
+    econithbot.state = State.STOPPED
     with pytest.raises(RPCException, match=r".*trader is not running*"):
         rpc._rpc_force_exit("22222")
 
-    freqtradebot.state = State.RUNNING
+    econithbot.state = State.RUNNING
     with pytest.raises(RPCException, match=r".*invalid argument*"):
         rpc._rpc_force_exit("22222")
 
     msg = rpc._rpc_force_exit("all")
     assert msg == {"result": "Created exit orders for all open trades."}
 
-    freqtradebot.enter_positions()
+    econithbot.enter_positions()
     msg = rpc._rpc_force_exit("all")
     assert msg == {"result": "Created exit orders for all open trades."}
 
-    freqtradebot.enter_positions()
+    econithbot.enter_positions()
     msg = rpc._rpc_force_exit("2")
     assert msg == {"result": "Created exit order for trade 2."}
 
-    freqtradebot.state = State.STOPPED
+    econithbot.state = State.STOPPED
     with pytest.raises(RPCException, match=r".*trader is not running*"):
         rpc._rpc_force_exit("22222")
 
     with pytest.raises(RPCException, match=r".*trader is not running*"):
         rpc._rpc_force_exit("all")
 
-    freqtradebot.state = State.RUNNING
+    econithbot.state = State.RUNNING
     assert cancel_order_mock.call_count == 0
     mocker.patch(f"{EXMS}._dry_is_price_crossed", MagicMock(return_value=False))
-    freqtradebot.enter_positions()
+    econithbot.enter_positions()
     # make an limit-buy open trade
     trade = Trade.session.scalars(select(Trade).filter(Trade.id == "3")).first()
     filled_amount = trade.amount_requested / 2
@@ -1047,8 +1047,8 @@ def test_rpc_force_exit(default_conf, ticker, fee, mocker) -> None:
         return_value={"status": "open", "type": "limit", "side": "buy", "filled": filled_amount},
     )
 
-    freqtradebot.config["max_open_trades"] = 3
-    freqtradebot.enter_positions()
+    econithbot.config["max_open_trades"] = 3
+    econithbot.enter_positions()
 
     cancel_order_mock.reset_mock()
     trade = Trade.session.scalars(select(Trade).filter(Trade.id == "3")).first()
@@ -1112,7 +1112,7 @@ def test_rpc_force_exit(default_conf, ticker, fee, mocker) -> None:
 
 
 def test_performance_handle(default_conf_usdt, ticker, fee, mocker) -> None:
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
     mocker.patch.multiple(
         EXMS,
         get_balances=MagicMock(return_value=ticker),
@@ -1120,9 +1120,9 @@ def test_performance_handle(default_conf_usdt, ticker, fee, mocker) -> None:
         get_fee=fee,
     )
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf_usdt)
-    patch_get_signal(freqtradebot)
-    rpc = RPC(freqtradebot)
+    econithbot = get_patched_econithbot(mocker, default_conf_usdt)
+    patch_get_signal(econithbot)
+    rpc = RPC(econithbot)
     # Create some test data
     create_mock_trades_usdt(fee)
 
@@ -1135,7 +1135,7 @@ def test_performance_handle(default_conf_usdt, ticker, fee, mocker) -> None:
 
 
 def test_enter_tag_performance_handle(default_conf, ticker, fee, mocker) -> None:
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
     mocker.patch.multiple(
         EXMS,
         get_balances=MagicMock(return_value=ticker),
@@ -1143,13 +1143,13 @@ def test_enter_tag_performance_handle(default_conf, ticker, fee, mocker) -> None
         get_fee=fee,
     )
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
-    patch_get_signal(freqtradebot)
-    rpc = RPC(freqtradebot)
+    econithbot = get_patched_econithbot(mocker, default_conf)
+    patch_get_signal(econithbot)
+    rpc = RPC(econithbot)
 
     # Create some test data
     create_mock_trades_usdt(fee)
-    freqtradebot.enter_positions()
+    econithbot.enter_positions()
 
     res = rpc._rpc_enter_tag_performance(None)
 
@@ -1167,12 +1167,12 @@ def test_enter_tag_performance_handle(default_conf, ticker, fee, mocker) -> None
 
 
 def test_enter_tag_performance_handle_2(mocker, default_conf, markets, fee):
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
     mocker.patch.multiple(EXMS, markets=PropertyMock(return_value=markets))
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
+    econithbot = get_patched_econithbot(mocker, default_conf)
     create_mock_trades(fee)
-    rpc = RPC(freqtradebot)
+    rpc = RPC(econithbot)
 
     res = rpc._rpc_enter_tag_performance(None)
 
@@ -1196,7 +1196,7 @@ def test_enter_tag_performance_handle_2(mocker, default_conf, markets, fee):
 
 
 def test_exit_reason_performance_handle(default_conf_usdt, ticker, fee, mocker) -> None:
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
     mocker.patch.multiple(
         EXMS,
         get_balances=MagicMock(return_value=ticker),
@@ -1204,9 +1204,9 @@ def test_exit_reason_performance_handle(default_conf_usdt, ticker, fee, mocker) 
         get_fee=fee,
     )
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf_usdt)
-    patch_get_signal(freqtradebot)
-    rpc = RPC(freqtradebot)
+    econithbot = get_patched_econithbot(mocker, default_conf_usdt)
+    patch_get_signal(econithbot)
+    rpc = RPC(econithbot)
 
     # Create some test data
     create_mock_trades_usdt(fee)
@@ -1223,12 +1223,12 @@ def test_exit_reason_performance_handle(default_conf_usdt, ticker, fee, mocker) 
 
 
 def test_exit_reason_performance_handle_2(mocker, default_conf, markets, fee):
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
     mocker.patch.multiple(EXMS, markets=PropertyMock(return_value=markets))
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
+    econithbot = get_patched_econithbot(mocker, default_conf)
     create_mock_trades(fee)
-    rpc = RPC(freqtradebot)
+    rpc = RPC(econithbot)
 
     res = rpc._rpc_exit_reason_performance(None)
 
@@ -1252,7 +1252,7 @@ def test_exit_reason_performance_handle_2(mocker, default_conf, markets, fee):
 
 
 def test_mix_tag_performance_handle(default_conf, ticker, fee, mocker) -> None:
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
     mocker.patch.multiple(
         EXMS,
         get_balances=MagicMock(return_value=ticker),
@@ -1260,9 +1260,9 @@ def test_mix_tag_performance_handle(default_conf, ticker, fee, mocker) -> None:
         get_fee=fee,
     )
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
-    patch_get_signal(freqtradebot)
-    rpc = RPC(freqtradebot)
+    econithbot = get_patched_econithbot(mocker, default_conf)
+    patch_get_signal(econithbot)
+    rpc = RPC(econithbot)
 
     # Create some test data
     create_mock_trades_usdt(fee)
@@ -1276,12 +1276,12 @@ def test_mix_tag_performance_handle(default_conf, ticker, fee, mocker) -> None:
 
 
 def test_mix_tag_performance_handle_2(mocker, default_conf, markets, fee):
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
     mocker.patch.multiple(EXMS, markets=PropertyMock(return_value=markets))
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
+    econithbot = get_patched_econithbot(mocker, default_conf)
     create_mock_trades(fee)
-    rpc = RPC(freqtradebot)
+    rpc = RPC(econithbot)
 
     res = rpc._rpc_mix_tag_performance(None)
 
@@ -1303,7 +1303,7 @@ def test_mix_tag_performance_handle_2(mocker, default_conf, markets, fee):
 
 
 def test_rpc_count(mocker, default_conf, ticker, fee) -> None:
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
     mocker.patch.multiple(
         EXMS,
         get_balances=MagicMock(return_value=ticker),
@@ -1311,15 +1311,15 @@ def test_rpc_count(mocker, default_conf, ticker, fee) -> None:
         get_fee=fee,
     )
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
-    patch_get_signal(freqtradebot)
-    rpc = RPC(freqtradebot)
+    econithbot = get_patched_econithbot(mocker, default_conf)
+    patch_get_signal(econithbot)
+    rpc = RPC(econithbot)
 
     counts = rpc._rpc_count()
     assert counts["current"] == 0
 
     # Create some test data
-    freqtradebot.enter_positions()
+    econithbot.enter_positions()
     counts = rpc._rpc_count()
     assert counts["current"] == 1
 
@@ -1327,7 +1327,7 @@ def test_rpc_count(mocker, default_conf, ticker, fee) -> None:
 def test_rpc_force_entry(mocker, default_conf, ticker, fee, limit_buy_order_open) -> None:
     default_conf["force_entry_enable"] = True
     default_conf["max_open_trades"] = 0
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
     buy_mm = MagicMock(return_value=limit_buy_order_open)
     mocker.patch.multiple(
         EXMS,
@@ -1337,13 +1337,13 @@ def test_rpc_force_entry(mocker, default_conf, ticker, fee, limit_buy_order_open
         create_order=buy_mm,
     )
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
-    patch_get_signal(freqtradebot)
-    rpc = RPC(freqtradebot)
+    econithbot = get_patched_econithbot(mocker, default_conf)
+    patch_get_signal(econithbot)
+    rpc = RPC(econithbot)
     pair = "ETH/BTC"
     with pytest.raises(RPCException, match=r"Maximum number of trades is reached\."):
         rpc._rpc_force_entry(pair, None)
-    freqtradebot.config["max_open_trades"] = 5
+    econithbot.config["max_open_trades"] = 5
 
     trade = rpc._rpc_force_entry(pair, None)
     assert isinstance(trade, Trade)
@@ -1376,16 +1376,16 @@ def test_rpc_force_entry(mocker, default_conf, ticker, fee, limit_buy_order_open
 
     assert trade.open_orders_ids[-1] == "mocked_limit_buy"
 
-    freqtradebot.strategy.position_adjustment_enable = True
+    econithbot.strategy.position_adjustment_enable = True
     with pytest.raises(RPCException, match=r"position for LTC/BTC already open.*open order.*"):
         rpc._rpc_force_entry(pair, 0.0001, order_type="limit", stake_amount=0.05)
 
     # Test not buying
     pair = "XRP/BTC"
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
-    freqtradebot.config["stake_amount"] = 0
-    patch_get_signal(freqtradebot)
-    rpc = RPC(freqtradebot)
+    econithbot = get_patched_econithbot(mocker, default_conf)
+    econithbot.config["stake_amount"] = 0
+    patch_get_signal(econithbot)
+    rpc = RPC(econithbot)
     pair = "TKN/BTC"
     with pytest.raises(RPCException, match=r"Failed to enter position for TKN/BTC."):
         trade = rpc._rpc_force_entry(pair, None)
@@ -1394,22 +1394,22 @@ def test_rpc_force_entry(mocker, default_conf, ticker, fee, limit_buy_order_open
 def test_rpc_force_entry_stopped(mocker, default_conf) -> None:
     default_conf["force_entry_enable"] = True
     default_conf["initial_state"] = "stopped"
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
-    patch_get_signal(freqtradebot)
-    rpc = RPC(freqtradebot)
+    econithbot = get_patched_econithbot(mocker, default_conf)
+    patch_get_signal(econithbot)
+    rpc = RPC(econithbot)
     pair = "ETH/BTC"
     with pytest.raises(RPCException, match=r"trader is not running"):
         rpc._rpc_force_entry(pair, None)
 
 
 def test_rpc_force_entry_disabled(mocker, default_conf) -> None:
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
-    patch_get_signal(freqtradebot)
-    rpc = RPC(freqtradebot)
+    econithbot = get_patched_econithbot(mocker, default_conf)
+    patch_get_signal(econithbot)
+    rpc = RPC(econithbot)
     pair = "ETH/BTC"
     with pytest.raises(RPCException, match=r"Force_entry not enabled."):
         rpc._rpc_force_entry(pair, None)
@@ -1417,11 +1417,11 @@ def test_rpc_force_entry_disabled(mocker, default_conf) -> None:
 
 def test_rpc_force_entry_wrong_mode(mocker, default_conf) -> None:
     default_conf["force_entry_enable"] = True
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
-    patch_get_signal(freqtradebot)
-    rpc = RPC(freqtradebot)
+    econithbot = get_patched_econithbot(mocker, default_conf)
+    patch_get_signal(econithbot)
+    rpc = RPC(econithbot)
     pair = "ETH/BTC"
     with pytest.raises(RPCException, match=r"Can't go short on Spot markets\."):
         rpc._rpc_force_entry(pair, None, order_side=SignalDirection.SHORT)
@@ -1429,8 +1429,8 @@ def test_rpc_force_entry_wrong_mode(mocker, default_conf) -> None:
 
 @pytest.mark.usefixtures("init_persistence")
 def test_rpc_add_and_delete_lock(mocker, default_conf):
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
-    rpc = RPC(freqtradebot)
+    econithbot = get_patched_econithbot(mocker, default_conf)
+    rpc = RPC(econithbot)
     pair = "ETH/BTC"
 
     rpc._rpc_add_lock(pair, datetime.now(UTC) + timedelta(minutes=4), "", "*")
@@ -1447,10 +1447,10 @@ def test_rpc_add_and_delete_lock(mocker, default_conf):
 
 
 def test_rpc_whitelist(mocker, default_conf) -> None:
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
-    rpc = RPC(freqtradebot)
+    econithbot = get_patched_econithbot(mocker, default_conf)
+    rpc = RPC(econithbot)
     ret = rpc._rpc_whitelist()
     assert len(ret["method"]) == 1
     assert "StaticPairList" in ret["method"]
@@ -1465,10 +1465,10 @@ def test_rpc_whitelist_dynamic(mocker, default_conf) -> None:
         }
     ]
     mocker.patch(f"{EXMS}.exchange_has", MagicMock(return_value=True))
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
-    rpc = RPC(freqtradebot)
+    econithbot = get_patched_econithbot(mocker, default_conf)
+    rpc = RPC(econithbot)
     ret = rpc._rpc_whitelist()
     assert len(ret["method"]) == 1
     assert "VolumePairList" in ret["method"]
@@ -1477,10 +1477,10 @@ def test_rpc_whitelist_dynamic(mocker, default_conf) -> None:
 
 
 def test_rpc_blacklist(mocker, default_conf) -> None:
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
-    rpc = RPC(freqtradebot)
+    econithbot = get_patched_econithbot(mocker, default_conf)
+    rpc = RPC(econithbot)
     ret = rpc._rpc_blacklist(None)
     assert len(ret["method"]) == 1
     assert "StaticPairList" in ret["method"]
@@ -1530,11 +1530,11 @@ def test_rpc_blacklist(mocker, default_conf) -> None:
 
 
 def test_rpc_health(mocker, default_conf) -> None:
-    mocker.patch("freqtrade.rpc.telegram.Telegram", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram", MagicMock())
 
-    freqtradebot = get_patched_freqtradebot(mocker, default_conf)
+    econithbot = get_patched_econithbot(mocker, default_conf)
     set_startup_time()
-    rpc = RPC(freqtradebot)
+    rpc = RPC(econithbot)
     result = rpc.health()
     assert result["last_process"] is None
     assert result["last_process_ts"] is None

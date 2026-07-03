@@ -116,7 +116,7 @@ function updateenv() {
     fi
 
     echo "Installing freqUI"
-    freqtrade install-ui
+    econith install-ui
 
     echo "pip install completed"
     echo
@@ -236,7 +236,7 @@ function reset() {
 }
 
 function config() {
-    echo_block "Please use 'freqtrade new-config -c user_data/config.json' to generate a new configuration file."
+    echo_block "Please use 'econith new-config -c user_data/config.json' to generate a new configuration file."
 }
 
 function install() {
@@ -262,9 +262,9 @@ function install() {
     reset
     config
     echo_block "Run the bot !"
-    echo "You can now use the bot by executing 'source .venv/bin/activate; freqtrade <subcommand>'."
-    echo "You can see the list of available bot sub-commands by executing 'source .venv/bin/activate; freqtrade --help'."
-    echo "You verify that freqtrade is installed successfully by running 'source .venv/bin/activate; freqtrade --version'."
+    echo "You can now use the bot by executing 'source .venv/bin/activate; econith <subcommand>'."
+    echo "You can see the list of available bot sub-commands by executing 'source .venv/bin/activate; econith --help'."
+    echo "You verify that econith is installed successfully by running 'source .venv/bin/activate; econith --version'."
 }
 
 function plot() {
@@ -274,7 +274,7 @@ function plot() {
 
 function help() {
     echo "usage:"
-    echo "	-i,--install    Install freqtrade from scratch"
+    echo "	-i,--install    Install econith from scratch"
     echo "	-u,--update     Command git pull to update."
     echo "	-r,--reset      Hard reset your develop/stable branch."
     echo "	-c,--config     Easy config generator (Will override your existing file)."

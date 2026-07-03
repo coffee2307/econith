@@ -2,10 +2,10 @@
 
 import pytest
 
-from freqtrade.enums import HyperoptState
-from freqtrade.exceptions import OperationalException
-from freqtrade.optimize.hyperopt_tools import HyperoptStateContainer
-from freqtrade.strategy.parameters import (
+from econith.enums import HyperoptState
+from econith.exceptions import OperationalException
+from econith.optimize.hyperopt_tools import HyperoptStateContainer
+from econith.strategy.parameters import (
     BaseParameter,
     BooleanParameter,
     CategoricalParameter,
@@ -66,7 +66,7 @@ def test_hyperopt_real_parameter():
 
 def test_hyperopt_decimal_parameter():
     HyperoptStateContainer.set_state(HyperoptState.INDICATORS)
-    from freqtrade.optimize.space import SKDecimal
+    from econith.optimize.space import SKDecimal
 
     with pytest.raises(OperationalException, match=r"DecimalParameter space must be.*"):
         DecimalParameter(low=0, default=5, space="buy")

@@ -267,16 +267,16 @@ function Main {
     & pip install @PipInstallArguments # Use array splatting to pass arguments correctly
   }
 
-  # Install freqtrade from setup using the virtual environment's Python
-  Write-Log "Installing freqtrade from setup..."
+  # Install econith from setup using the virtual environment's Python
+  Write-Log "Installing econith from setup..."
   pip install -e . 2>&1 | Out-File $LogFilePath -Append
   if ($LASTEXITCODE -ne 0) {
-    Write-Log "Failed to install freqtrade." -Level 'ERROR'
+    Write-Log "Failed to install econith." -Level 'ERROR'
     Exit-Script -exitCode 1
   }
 
   Write-Log "Installing freqUI..."
-  python freqtrade install-ui 2>&1 | Out-File $LogFilePath -Append
+  python econith install-ui 2>&1 | Out-File $LogFilePath -Append
   if ($LASTEXITCODE -ne 0) {
     Write-Log "Failed to install freqUI." -Level 'ERROR'
     Exit-Script -exitCode 1

@@ -3,12 +3,11 @@ requires = ["setuptools >= 64.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "freqtrade"
+name = "econith"
 dynamic = ["version"]
 
 authors = [
-  {name = "ECONITH Quant Team"},
-  {name = "ECONITH Quant Team", email = "freqtrade@protonmail.com"},
+  {name = "ECONITH Team", email = "coffee2307.pham@gmail.com"},
 ]
 
 description = "ECONITH Quant - Crypto Trading Bot"
@@ -70,7 +69,7 @@ dependencies = [
   "python-dateutil",
   "pytz",
   "packaging",
-  "freqtrade-client",
+  "econith-client",
 ]
 
 [project.optional-dependencies]
@@ -124,20 +123,20 @@ jupyter = [
   "nbstripout",
 ]
 all = [
-  "freqtrade[plot,hyperopt,freqai,freqai_rl,jupyter]",
+  "econith[plot,hyperopt,freqai,freqai_rl,jupyter]",
 ]
 dev = [
-  "freqtrade[all,develop]",
+  "econith[all,develop]",
 ]
 
 [project.urls]
-Homepage = "https://github.com/freqtrade/freqtrade"
-Documentation = "https://freqtrade.io"
-"Bug Tracker" = "https://github.com/freqtrade/freqtrade/issues"
+Homepage = "https://github.com/econith/econith"
+Documentation = "https://econith"
+"Bug Tracker" = "https://github.com/econith/econith/issues"
 
 
 [project.scripts]
-freqtrade = "freqtrade.main:main"
+econith = "econith.main:main"
 
 [tool.setuptools]
 include-package-data = true
@@ -145,12 +144,12 @@ zip-safe = false
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["freqtrade*"]
+include = ["econith*"]
 exclude = ["tests", "tests.*", "user_data", "user_data*"]
 namespaces = true
 
 [tool.setuptools.dynamic]
-version = {attr = "freqtrade.__version__"}
+version = {attr = "econith.__version__"}
 
 [tool.pytest]
 log_format = "%(asctime)s %(levelname)s %(message)s"
@@ -166,7 +165,7 @@ namespace_packages = false
 warn_unused_ignores = true
 exclude = [
     '^build_helpers\.py$',
-    '^ft_client/build/.*$',
+    '^econith_client/build/.*$',
 ]
 plugins = [
   "sqlalchemy.ext.mypy.plugin"
@@ -178,21 +177,21 @@ ignore_errors = true
 
 [[tool.mypy.overrides]]
 module = [
-  "freqtrade.templates.*",
+  "econith.templates.*",
   "tests.strategy.strats"
 ]
 # Disable attr-defined check due to ta-lib not having type stubs
 disable_error_code = "attr-defined"
 
 [tool.pyright]
-include = ["freqtrade", "ft_client"]
+include = ["econith", "econith_client"]
 exclude = [
   "**/__pycache__",
   "build_helpers/*.py",
-  "ft_client/build/*",
+  "econith_client/build/*",
   "build/*",
 ]
-ignore = ["freqtrade/vendor/**"]
+ignore = ["econith/vendor/**"]
 pythonPlatform = "All"
 pythonVersion = "3.11"
 
@@ -272,7 +271,7 @@ extend-ignore = [
 max-complexity = 12
 
 [tool.ruff.lint.per-file-ignores]
-"freqtrade/freqai/**/*.py" = [
+"econith/freqai/**/*.py" = [
   "S311",  # Standard pseudo-random generators are not suitable for cryptographic purposes
 ]
 "tests/**.py" = [
@@ -284,11 +283,11 @@ max-complexity = 12
   "S110",  # `try`-`except`-`pass` detected, consider logging the exception
   ]
 
-"freqtrade/templates/**.py" = [
+"econith/templates/**.py" = [
   "RUF100",  # Allow unused noqa
 ]
 
-"ft_client/test_client/**.py" = [
+"econith_client/test_client/**.py" = [
   "S101",  # allow assert in tests
 ]
 
@@ -298,7 +297,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
 
 [tool.ruff.lint.isort]
 lines-after-imports = 2
-known-first-party = ["freqtrade_client"]
+known-first-party = ["econith_client"]
 
 [tool.flake8]
 # Default from https://flake8.pycqa.org/en/latest/user/options.html#cmdoption-flake8-ignore
@@ -317,4 +316,4 @@ exclude = [
 
 [tool.codespell]
 ignore-words-list = "coo,fo,strat,zar,selectin"
-skip="*.svg,./user_data,freqtrade/rpc/api_server/ui/installed,freqtrade/exchange/*.json"
+skip="*.svg,./user_data,econith/rpc/api_server/ui/installed,econith/exchange/*.json"

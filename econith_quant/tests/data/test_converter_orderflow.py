@@ -1,16 +1,16 @@
 import pandas as pd
 import pytest
 
-from freqtrade.constants import DEFAULT_TRADES_COLUMNS
-from freqtrade.data.converter import populate_dataframe_with_trades
-from freqtrade.data.converter.orderflow import (
+from econith.constants import DEFAULT_TRADES_COLUMNS
+from econith.data.converter import populate_dataframe_with_trades
+from econith.data.converter.orderflow import (
     ORDERFLOW_ADDED_COLUMNS,
     stacked_imbalance,
     timeframe_to_DateOffset,
     trades_to_volumeprofile_with_total_delta_bid_ask,
 )
-from freqtrade.data.converter.trade_converter import trades_list_to_df
-from freqtrade.data.dataprovider import DataProvider
+from econith.data.converter.trade_converter import trades_list_to_df
+from econith.data.dataprovider import DataProvider
 from tests.strategy.strats.strategy_test_v3 import StrategyTestV3
 
 
@@ -492,7 +492,7 @@ def test_analyze_with_orderflow(
     strategy.dp = DataProvider(default_conf_usdt, None, None)
 
     mocker.patch.object(strategy.dp, "trades", return_value=populate_dataframe_with_trades_trades)
-    import freqtrade.data.converter.orderflow as orderflow_module
+    import econith.data.converter.orderflow as orderflow_module
 
     spy = mocker.spy(orderflow_module, "trades_to_volumeprofile_with_total_delta_bid_ask")
 

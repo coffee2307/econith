@@ -6,7 +6,7 @@ import pandas as pd
 from numpy import nan
 from pandas import DataFrame, Timestamp
 
-from freqtrade.data.btanalysis.historic_precision import get_tick_size_over_time
+from econith.data.btanalysis.historic_precision import get_tick_size_over_time
 
 
 def test_get_tick_size_over_time():
@@ -64,7 +64,7 @@ def test_get_tick_size_over_time_real_data(testdatadir):
     """
     Test the get_tick_size_over_time function with real data from the testdatadir
     """
-    from freqtrade.data.history import load_pair_history
+    from econith.data.history import load_pair_history
 
     # Load some test data from the testdata directory
     pair = "UNITTEST/BTC"

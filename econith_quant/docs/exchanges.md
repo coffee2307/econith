@@ -125,7 +125,7 @@ When trading on Binance Futures market, orderbook must be used because there is 
 #### Binance isolated futures settings
 
 Users will also have to have the futures-setting "Position Mode" set to "One-way Mode", and "Asset Mode" set to "Single-Asset Mode".
-These settings will be checked on startup, and freqtrade will show an error if this setting is wrong.
+These settings will be checked on startup, and econith will show an error if this setting is wrong.
 
 ![Binance futures settings](assets/binance_futures_settings.png)
 
@@ -195,23 +195,23 @@ Not having this will lead to incomplete data, and therefore invalid results whil
         └── XBTEUR.csv
 ```
 
-You can convert these files into freqtrade files:
+You can convert these files into econith files:
 
 ``` bash
-freqtrade convert-trade-data --exchange kraken --format-from kraken_csv --format-to feather
+econith convert-trade-data --exchange kraken --format-from kraken_csv --format-to feather
 # Convert trade data to different ohlcv timeframes
-freqtrade trades-to-ohlcv -p BTC/EUR BCH/EUR --exchange kraken -t 1m 5m 15m 1h
+econith trades-to-ohlcv -p BTC/EUR BCH/EUR --exchange kraken -t 1m 5m 15m 1h
 ```
 
 The converted data also makes downloading data possible, and will start the download after the latest loaded trade.
 
 ``` bash
-freqtrade download-data --exchange kraken --dl-trades -p BTC/EUR BCH/EUR 
+econith download-data --exchange kraken --dl-trades -p BTC/EUR BCH/EUR 
 ```
 
 !!! Warning "Downloading data from kraken"
     Downloading kraken data will require significantly more memory (RAM) than any other exchange, as the trades-data needs to be converted into candles on your machine.
-    It will also take a long time, as freqtrade will need to download every single trade that happened on the exchange for the pair / timerange combination, therefore please be patient.
+    It will also take a long time, as econith will need to download every single trade that happened on the exchange for the pair / timerange combination, therefore please be patient.
 
 !!! Warning "rateLimit tuning"
     Please pay attention that rateLimit configuration entry holds delay in milliseconds between requests, NOT requests/sec rate.
@@ -333,7 +333,7 @@ Bybit supports [time_in_force](configuration.md#understand-order_time_in_force) 
 
 Futures trading on bybit is supported for isolated futures mode.
 
-On startup, freqtrade will set the position mode to "One-way Mode" for the whole (sub)account. This avoids making this call over and over again (slowing down bot operations), but means that manual changes to this setting may result in exceptions and errors.
+On startup, econith will set the position mode to "One-way Mode" for the whole (sub)account. This avoids making this call over and over again (slowing down bot operations), but means that manual changes to this setting may result in exceptions and errors.
 
 As bybit doesn't provide funding rate history, the dry-run calculation is used for live trades as well.
 
@@ -348,7 +348,7 @@ We do strongly recommend to limit all API keys to the IP you're going to use it 
 ### Bybit Demo Mode
 
 Bybit has a [demo mode](https://learn.bybit.com/en/bybit-guide/how-to-use-bybit-demo-trading) - which can be activated by setting `exchange.demo_trading` to `true` in the configuration.
-Bybit uses live markets to simulate your trades (without market impact) - making it work very similar to freqtrade's dry-run mode.  
+Bybit uses live markets to simulate your trades (without market impact) - making it work very similar to econith's dry-run mode.  
 
 You'll need to use separate API keys for demo trading, which you can create on bybit's demo page.
 
@@ -396,7 +396,7 @@ Bitget supports [time_in_force](configuration.md#understand-order_time_in_force)
 
 Futures trading on bitget is supported for isolated futures mode.
 
-On startup, freqtrade will set the position mode to "One-way Mode" for the whole (sub)account. This avoids making this call over and over again (slowing down bot operations), but means that manual changes to this setting may result in exceptions and errors.
+On startup, econith will set the position mode to "One-way Mode" for the whole (sub)account. This avoids making this call over and over again (slowing down bot operations), but means that manual changes to this setting may result in exceptions and errors.
 
 ## Hyperliquid
 
@@ -404,7 +404,7 @@ On startup, freqtrade will set the position mode to "One-way Mode" for the whole
     Hyperliquid supports `stoploss_on_exchange` and uses `stop-loss-limit` orders. It provides great advantages, so we recommend to benefit from it.
 
 !!! Warning "Unified accounts"
-    Hyperliquid unified accounts are supported - though this relies freqtrade's assumption of "owning" the account, and being the only one trading on it (in this case, extended to both spot and futures).
+    Hyperliquid unified accounts are supported - though this relies econith's assumption of "owning" the account, and being the only one trading on it (in this case, extended to both spot and futures).
     We hence recommend the usage of subaccounts where possible, and to avoid manual trading on the same account while the bot is running.
     ECONITH Quant will attempt to detect the account type on startup - changing the account type mid-trading is not supported and may lead to exceptions and errors.
 
@@ -432,7 +432,7 @@ Hyperliquid handles deposits and withdrawals on the Arbitrum One chain, a Layer 
 !!! Info "Some general best practices (non exhaustive)"
     * Beware of supply chain attacks, like pip package poisoning etcetera. Whenever you use your private key, make sure your environment is safe.
     * Don't use your actual wallet private key for trading. Use the Hyperliquid [API generator](https://app.hyperliquid.xyz/API) to create a separate API wallet.
-    * Don't store your actual wallet private key on the server you use for freqtrade. Use the API wallet private key instead. This key won't allow withdrawals, only trading.
+    * Don't store your actual wallet private key on the server you use for econith. Use the API wallet private key instead. This key won't allow withdrawals, only trading.
     * Always keep your mnemonic phrase and private key private.
     * Don't use the same mnemonic as the one you had to backup when initializing a hardware wallet, using the same mnemonic basically deletes the security of your hardware wallet.
     * Create a different software wallet, only transfer the funds you want to trade with to that wallet, and use that wallet to trade on Hyperliquid.

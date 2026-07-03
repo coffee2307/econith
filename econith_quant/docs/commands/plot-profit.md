@@ -1,5 +1,5 @@
 ``` output
-usage: freqtrade plot-profit [-h] [-v] [--no-color] [--logfile FILE] [-V]
+usage: econith plot-profit [-h] [-v] [--no-color] [--logfile FILE] [-V]
                              [-c PATH] [-d PATH] [--userdir PATH] [-s NAME]
                              [--strategy-path PATH]
                              [--recursive-strategy-search]

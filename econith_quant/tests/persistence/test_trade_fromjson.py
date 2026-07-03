@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from freqtrade.persistence.trade_model import LocalTrade, Trade
+from econith.persistence.trade_model import LocalTrade, Trade
 from tests.conftest import create_mock_trades_usdt
 
 

@@ -5,21 +5,21 @@ ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONFAULTHANDLER=1
-ENV PATH=/home/ftuser/.local/bin:$PATH
-ENV FT_APP_ENV="docker"
+ENV PATH=/home/econithuser/.local/bin:$PATH
+ENV ECONITH_APP_ENV="docker"
 
 # Prepare environment
-RUN mkdir /freqtrade \
+RUN mkdir /econith \
   && apt-get update \
   && apt-get -y install --no-install-recommends sudo libatlas3-base curl sqlite3 libgomp1 \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/* \
-  && useradd -u 1000 -G sudo -U -m -s /bin/bash ftuser \
-  && chown ftuser:ftuser /freqtrade \
+  && useradd -u 1000 -G sudo -U -m -s /bin/bash econithuser \
+  && chown econithuser:econithuser /econith \
   # Allow sudoers
-  && echo "ftuser ALL=(ALL) NOPASSWD: /bin/chown" >> /etc/sudoers
+  && echo "econithuser ALL=(ALL) NOPASSWD: /bin/chown" >> /etc/sudoers
 
-WORKDIR /freqtrade
+WORKDIR /econith
 
 # Install dependencies
 FROM base AS python-deps
@@ -30,24 +30,24 @@ RUN  apt-get update \
   && pip install --upgrade pip wheel
 
 # Install dependencies
-COPY --chown=ftuser:ftuser requirements.txt requirements-hyperopt.txt /freqtrade/
-USER ftuser
+COPY --chown=econithuser:econithuser requirements.txt requirements-hyperopt.txt /econith/
+USER econithuser
 RUN  pip install --user --no-cache-dir "numpy<3.0" \
   && pip install --user --no-cache-dir -r requirements-hyperopt.txt
 
 # Copy dependencies to runtime-image
 FROM base AS runtime-image
 
-COPY --from=python-deps --chown=ftuser:ftuser /home/ftuser/.local /home/ftuser/.local
+COPY --from=python-deps --chown=econithuser:econithuser /home/econithuser/.local /home/econithuser/.local
 
-USER ftuser
+USER econithuser
 # Install and execute
-COPY --chown=ftuser:ftuser . /freqtrade/
+COPY --chown=econithuser:econithuser . /econith/
 
 RUN pip install -e . --user --no-cache-dir \
-  && mkdir /freqtrade/user_data/ \
-  && freqtrade install-ui
+  && mkdir /econith/user_data/ \
+  && econith install-ui
 
-ENTRYPOINT ["freqtrade"]
+ENTRYPOINT ["econith"]
 # Default to trade mode
 CMD [ "trade" ]

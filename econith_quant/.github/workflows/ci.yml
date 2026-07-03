@@ -74,7 +74,7 @@ jobs:
 
     - name: Check for version alignment
       run: |
-        python build_helpers/freqtrade_client_version_align.py
+        python build_helpers/econith_client_version_align.py
 
     - name: Tests
       if: (!(runner.os == 'Linux' && matrix.python-version == '3.12' && matrix.os == 'ubuntu-24.04'))
@@ -84,7 +84,7 @@ jobs:
     - name: Tests with Coveralls
       if: (runner.os == 'Linux' && matrix.python-version == '3.12' && matrix.os == 'ubuntu-24.04')
       run: |
-        pytest --random-order --cov=freqtrade --cov=freqtrade_client --cov-config=.coveragerc
+        pytest --random-order --cov=econith --cov=econith_client --cov-config=.coveragerc
 
     - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
       if: (runner.os == 'Linux' && matrix.python-version == '3.12' && matrix.os == 'ubuntu-24.04')
@@ -136,18 +136,18 @@ jobs:
 
     - name: Backtesting (multi)
       run: |
-        freqtrade create-userdir --userdir user_data
+        econith create-userdir --userdir user_data
         cp tests/testdata/config.tests.json user_data/config.json
-        freqtrade new-strategy -s AwesomeStrategy
-        freqtrade new-strategy -s AwesomeStrategyMin --template minimal
-        freqtrade new-strategy -s AwesomeStrategyAdv --template advanced
-        freqtrade backtesting --datadir tests/testdata --strategy-list AwesomeStrategy AwesomeStrategyMin AwesomeStrategyAdv -i 5m
+        econith new-strategy -s AwesomeStrategy
+        econith new-strategy -s AwesomeStrategyMin --template minimal
+        econith new-strategy -s AwesomeStrategyAdv --template advanced
+        econith backtesting --datadir tests/testdata --strategy-list AwesomeStrategy AwesomeStrategyMin AwesomeStrategyAdv -i 5m
 
     - name: Hyperopt
       run: |
         cp tests/testdata/config.tests.json config.json
-        freqtrade create-userdir --userdir user_data
-        freqtrade hyperopt --datadir tests/testdata -e 6 --strategy SampleStrategy --hyperopt-loss SharpeHyperOptLossDaily --print-all
+        econith create-userdir --userdir user_data
+        econith hyperopt --datadir tests/testdata -e 6 --strategy SampleStrategy --hyperopt-loss SharpeHyperOptLossDaily --print-all
 
     - name: Run Ruff
       run: |
@@ -160,7 +160,7 @@ jobs:
     - name: Mypy
       if: ${{ matrix.os == 'ubuntu-24.04' || matrix.os == 'macos-15' }}
       run: |
-        mypy freqtrade scripts tests
+        mypy econith scripts tests
 
     - name: Run Pester tests (PowerShell)
       if: ${{ runner.os == 'Windows' }}
@@ -300,7 +300,7 @@ jobs:
     ]
     runs-on: ubuntu-22.04
     # Discord notification can't handle schedule events
-    if: github.event_name != 'schedule' && github.repository == 'freqtrade/freqtrade'
+    if: github.event_name != 'schedule' && github.repository == 'econith/econith'
     steps:
 
     - name: Discord notification
@@ -352,7 +352,7 @@ jobs:
     - name: Upload artifacts 📦
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
-        name: freqtrade-build
+        name: econith-build
         path: |
           dist
         retention-days: 10
@@ -364,7 +364,7 @@ jobs:
     - name: Upload artifacts 📦
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
-        name: freqtrade-client-build
+        name: econith-client-build
         path: |
           ft_client/dist
         retention-days: 10
@@ -376,7 +376,7 @@ jobs:
     if: (github.event_name == 'release')
     environment:
       name: testpypi
-      url: https://test.pypi.org/p/freqtrade
+      url: https://test.pypi.org/p/econith
     permissions:
       id-token: write # Needed for pypa/gh-action-pypi-publish
 
@@ -388,7 +388,7 @@ jobs:
     - name: Download artifact  📦
       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
-        pattern: freqtrade*-build
+        pattern: econith*-build
         path: dist
         merge-multiple: true
 
@@ -405,7 +405,7 @@ jobs:
     if: (github.event_name == 'release')
     environment:
       name: pypi
-      url: https://pypi.org/p/freqtrade
+      url: https://pypi.org/p/econith
     permissions:
       id-token: write # Needed for pypa/gh-action-pypi-publish
 
@@ -417,7 +417,7 @@ jobs:
     - name: Download artifact  📦
       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
-        pattern: freqtrade*-build
+        pattern: econith*-build
         path: dist
         merge-multiple: true
 
@@ -430,7 +430,7 @@ jobs:
     needs: [
      build,
     ]
-    if: (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'release') && github.repository == 'freqtrade/freqtrade'
+    if: (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'release') && github.repository == 'econith/econith'
     uses: ./.github/workflows/docker-build.yml
     permissions:
       packages: write # Needed to push package versions
@@ -445,8 +445,8 @@ jobs:
     name: "Docker Package Cleanup"
     uses: ./.github/workflows/packages-cleanup.yml
     # Only run on push, schedule, or release events
-    if: (github.event_name == 'push' || github.event_name == 'schedule') && github.repository == 'freqtrade/freqtrade'
+    if: (github.event_name == 'push' || github.event_name == 'schedule') && github.repository == 'econith/econith'
     permissions:
       packages: write # Needed to delete package versions
     with:
-      package_name: 'freqtrade'
+      package_name: 'econith'

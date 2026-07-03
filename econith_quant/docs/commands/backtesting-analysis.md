@@ -1,5 +1,5 @@
 ``` output
-usage: freqtrade backtesting-analysis [-h] [-v] [--no-color] [--logfile FILE]
+usage: econith backtesting-analysis [-h] [-v] [--no-color] [--logfile FILE]
                                       [-V] [-c PATH] [-d PATH]
                                       [--userdir PATH]
                                       [--backtest-filename PATH]

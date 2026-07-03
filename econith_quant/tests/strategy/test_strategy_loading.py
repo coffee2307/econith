@@ -6,10 +6,10 @@ from pathlib import Path
 import pytest
 from pandas import DataFrame
 
-from freqtrade.configuration import Configuration
-from freqtrade.exceptions import OperationalException
-from freqtrade.resolvers import StrategyResolver
-from freqtrade.strategy.interface import IStrategy
+from econith.configuration import Configuration
+from econith.exceptions import OperationalException
+from econith.resolvers import StrategyResolver
+from econith.strategy.interface import IStrategy
 from tests.conftest import CURRENT_TEST_STRATEGY, log_has, log_has_re
 
 
@@ -59,7 +59,7 @@ def test_load_strategy(default_conf, dataframe_1m):
     default_conf.update(
         {
             "strategy": "SampleStrategy",
-            "strategy_path": str(Path(__file__).parents[2] / "freqtrade/templates"),
+            "strategy_path": str(Path(__file__).parents[2] / "econith/templates"),
         }
     )
     strategy = StrategyResolver.load_strategy(default_conf)
@@ -70,7 +70,7 @@ def test_load_strategy(default_conf, dataframe_1m):
 
 
 def test_load_strategy_base64(dataframe_1m, caplog, default_conf):
-    filepath = Path(__file__).parents[2] / "freqtrade/templates/sample_strategy.py"
+    filepath = Path(__file__).parents[2] / "econith/templates/sample_strategy.py"
     encoded_string = urlsafe_b64encode(filepath.read_bytes()).decode("utf-8")
     default_conf.update({"strategy": f"SampleStrategy:{encoded_string}"})
 
@@ -535,7 +535,7 @@ def test_strategy_ft_set_special_params_from_file(mocker, default_conf):
     default_conf.update({"strategy": "StrategyTestV2"})
     del default_conf["max_open_trades"]
     mocker.patch(
-        "freqtrade.strategy.hyper.HyperStrategyMixin.load_params_from_file",
+        "econith.strategy.hyper.HyperStrategyMixin.load_params_from_file",
         return_value={"params": {"max_open_trades": {"max_open_trades": -1}}},
     )
     strategy = StrategyResolver.load_strategy(default_conf)

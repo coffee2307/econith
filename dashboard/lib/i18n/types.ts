@@ -61,6 +61,22 @@ export interface Dictionary {
     researchEyebrow: string;
     researchTitle: string;
     researchDesc: string;
+    stats: {
+      tickEngine: { value: string; label: string };
+      modes: { value: string; label: string };
+      agents: { value: string; label: string };
+      sources: { value: string; label: string };
+    };
+    pipeline: {
+      eyebrow: string;
+      title: string;
+      desc: string;
+      steps: [string, string, string, string, string];
+    };
+    cta: {
+      title: string;
+      desc: string;
+    };
     cards: {
       dataSpine: { title: string; desc: string };
       multiAgent: { title: string; desc: string };
@@ -111,6 +127,31 @@ export interface Dictionary {
       testBannerDesc: string;
       wsLabel: string;
       symbolLabel: string;
+    };
+    cockpit: {
+      title: string;
+      altimeter: string;
+      fuelGauge: string;
+      flightLog: string;
+      radar: string;
+      noFills: string;
+      realized: string;
+      unrealized: string;
+      winRate: string;
+      sharpe: string;
+      drawdown: string;
+      equity: string;
+      freeMargin: string;
+      leverage: string;
+      liquidation: string;
+      notional: string;
+      mode: string;
+      ws: {
+        connecting: string;
+        open: string;
+        reconnecting: string;
+        closed: string;
+      };
     };
     pipeline: {
       title: string;

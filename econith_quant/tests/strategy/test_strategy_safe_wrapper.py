@@ -1,9 +1,9 @@
 import pytest
 
-from freqtrade.exceptions import StrategyError
-from freqtrade.persistence import Trade
-from freqtrade.strategy.strategy_wrapper import strategy_safe_wrapper
-from freqtrade.util.datetime_helpers import dt_now
+from econith.exceptions import StrategyError
+from econith.persistence import Trade
+from econith.strategy.strategy_wrapper import strategy_safe_wrapper
+from econith.util.datetime_helpers import dt_now
 from tests.conftest import create_mock_trades, log_has_re
 
 from .strats.strategy_test_v3 import StrategyTestV3
@@ -52,7 +52,7 @@ def test_strategy_safe_wrapper(value):
 @pytest.mark.usefixtures("init_persistence")
 def test_strategy_safe_wrapper_trade_copy(fee, mocker):
     create_mock_trades(fee)
-    import freqtrade.strategy.strategy_wrapper as swm
+    import econith.strategy.strategy_wrapper as swm
 
     deepcopy_mock = mocker.spy(swm, "deepcopy")
 

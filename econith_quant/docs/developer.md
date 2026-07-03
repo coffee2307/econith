@@ -2,11 +2,11 @@
 
 This page is intended for developers of ECONITH Quant, people who want to contribute to the ECONITH Quant codebase or documentation, or people who want to understand the source code of the application they're running.
 
-All contributions, bug reports, bug fixes, documentation improvements, enhancements and ideas are welcome. We [track issues](https://github.com/freqtrade/freqtrade/issues) on [GitHub](https://github.com) and also have a dev channel on [discord](https://discord.gg/p7nuUNVfP7) where you can ask questions.
+All contributions, bug reports, bug fixes, documentation improvements, enhancements and ideas are welcome. We [track issues](https://github.com/econith/econith/issues) on [GitHub](https://github.com) and also have a dev channel on [discord](https://discord.gg/p7nuUNVfP7) where you can ask questions.
 
 ## Documentation
 
-Documentation is available at [https://freqtrade.io](https://www.freqtrade.io/) and needs to be provided with every new feature PR.
+Documentation is available at [https://econith](https://econith/) and needs to be provided with every new feature PR.
 
 Special fields for the documentation (like Note boxes, ...) can be found [here](https://squidfunk.github.io/mkdocs-material/reference/admonitions/).
 
@@ -38,12 +38,12 @@ This reduces unnecessary CI failures, reduces maintenance burden, and improves c
 
 You can run the checks manually when necessary with `pre-commit run -a`.  
 
-Before opening a pull request, please also familiarize yourself with our [Contributing Guidelines](https://github.com/freqtrade/freqtrade/blob/develop/CONTRIBUTING.md).
+Before opening a pull request, please also familiarize yourself with our [Contributing Guidelines](https://github.com/econith/econith/blob/develop/CONTRIBUTING.md).
 
 ### Devcontainer setup
 
 The fastest and easiest way to get started is to use [VSCode](https://code.visualstudio.com/) with the Remote container extension.
-This gives developers the ability to start the bot with all required dependencies *without* needing to install any freqtrade specific dependencies on your local machine.
+This gives developers the ability to start the bot with all required dependencies *without* needing to install any econith specific dependencies on your local machine.
 
 #### Devcontainer dependencies
 
@@ -86,15 +86,15 @@ def test_method_to_test(caplog):
 
 ### Debug configuration
 
-To debug freqtrade, we recommend VSCode (with the Python extension) with the following launch configuration (located in `.vscode/launch.json`).
+To debug econith, we recommend VSCode (with the Python extension) with the following launch configuration (located in `.vscode/launch.json`).
 Details will obviously vary between setups - but this should work to get you started.
 
 ``` json
 {
-    "name": "freqtrade trade",
+    "name": "econith trade",
     "type": "debugpy",
     "request": "launch",
-    "module": "freqtrade",
+    "module": "econith",
     "console": "integratedTerminal",
     "args": [
         "trade",
@@ -109,7 +109,7 @@ Details will obviously vary between setups - but this should work to get you sta
 Command line arguments can be added in the `"args"` array.
 This method can also be used to debug a strategy, by setting the breakpoints within the strategy.
 
-A similar setup can also be taken for Pycharm - using `freqtrade` as module name, and setting the command line arguments as "parameters".
+A similar setup can also be taken for Pycharm - using `econith` as module name, and setting the command line arguments as "parameters".
 
 ??? Tip "Correct venv usage"
     When using a virtual environment (which you should), make sure that your Editor is using the correct virtual environment to avoid problems or "unknown import" errors.
@@ -171,7 +171,7 @@ Hopefully you also want to contribute this back upstream.
 
 Whatever your motivations are - This should get you off the ground in trying to develop a new Pairlist Handler.
 
-First of all, have a look at the [VolumePairList](https://github.com/freqtrade/freqtrade/blob/develop/freqtrade/plugins/pairlist/VolumePairList.py) Handler, and best copy this file with a name of your new Pairlist Handler.
+First of all, have a look at the [VolumePairList](https://github.com/econith/econith/blob/develop/econith/plugins/pairlist/VolumePairList.py) Handler, and best copy this file with a name of your new Pairlist Handler.
 
 This is a simple Handler, which however serves as a good example on how to start developing.
 
@@ -313,7 +313,7 @@ The `IProtection` parent class provides a helper method for this in `calculate_l
 
 Most exchanges supported by CCXT should work out of the box.
 
-If you need to implement a specific exchange class, these are found in the `freqtrade/exchange` source folder. You'll also need to add the import to `freqtrade/exchange/__init__.py` to make the loading logic aware of the new exchange.  
+If you need to implement a specific exchange class, these are found in the `econith/exchange` source folder. You'll also need to add the import to `econith/exchange/__init__.py` to make the loading logic aware of the new exchange.  
 We recommend looking at existing exchange implementations to get an idea of what might be required.
 
 !!! Warning
@@ -323,7 +323,7 @@ We recommend looking at existing exchange implementations to get an idea of what
 To quickly test the public endpoints of an exchange, add a configuration for your exchange to `tests/exchange_online/conftest.py` and run these tests with `pytest --longrun tests/exchange_online/test_ccxt_compat.py`.
 Completing these tests successfully a good basis point (it's a requirement, actually), however these won't guarantee correct exchange functioning, as this only tests public endpoints, but no private endpoint (like generate order or similar).
 
-Also try to use `freqtrade download-data` for an extended timerange (multiple months) and verify that the data downloaded correctly (no holes, the specified timerange was actually downloaded).
+Also try to use `econith download-data` for an extended timerange (multiple months) and verify that the data downloaded correctly (no holes, the specified timerange was actually downloaded).
 
 These are prerequisites to have an exchange listed as either Supported or Community tested (listed on the homepage).
 The below are "extras", which will make an exchange better (feature-complete) - but are not absolutely necessary for either of the 2 categories.
@@ -359,7 +359,7 @@ To check how the new exchange behaves, you can use the following snippet:
 ``` python
 import ccxt
 from datetime import datetime, timezone
-from freqtrade.data.converter import ohlcv_to_dataframe
+from econith.data.converter import ohlcv_to_dataframe
 ct = ccxt.binance()  # Use the exchange you're testing
 timeframe = "1d"
 pair = "BTC/USDT"  # Make sure to use a pair that exists on that exchange!
@@ -401,7 +401,7 @@ _ = exchange.load_markets()
 lev_tiers = exchange.fetch_leverage_tiers()
 
 # Assumes this is running in the root of the repository.
-file = Path('freqtrade/exchange/binance_leverage_tiers.json')
+file = Path('econith/exchange/binance_leverage_tiers.json')
 json.dump(dict(sorted(lev_tiers.items())), file.open('w'), indent=2)
 
 ```
@@ -413,8 +413,8 @@ This file should then be contributed upstream, so others can benefit from this, 
 To keep the jupyter notebooks aligned with the documentation, the following should be ran after updating a example notebook.
 
 ``` bash
-jupyter nbconvert --ClearOutputPreprocessor.enabled=True --inplace freqtrade/templates/strategy_analysis_example.ipynb
-jupyter nbconvert --ClearOutputPreprocessor.enabled=True --to markdown freqtrade/templates/strategy_analysis_example.ipynb --stdout > docs/strategy_analysis_example.md
+jupyter nbconvert --ClearOutputPreprocessor.enabled=True --inplace econith/templates/strategy_analysis_example.ipynb
+jupyter nbconvert --ClearOutputPreprocessor.enabled=True --to markdown econith/templates/strategy_analysis_example.ipynb --stdout > docs/strategy_analysis_example.md
 ```
 
 ## Backtest documentation results
@@ -423,13 +423,13 @@ To generate backtest outputs, please use the following commands:
 
 ``` bash
 # Assume a dedicated user directory for this output
-freqtrade create-userdir --userdir user_data_bttest/
+econith create-userdir --userdir user_data_bttest/
 # set can_short = True
 sed -i "s/can_short: bool = False/can_short: bool = True/" user_data_bttest/strategies/sample_strategy.py
 
-freqtrade download-data --timerange 20250625-20250801 --config tests/testdata/config.tests.usdt.json --userdir user_data_bttest/ -t 5m
+econith download-data --timerange 20250625-20250801 --config tests/testdata/config.tests.usdt.json --userdir user_data_bttest/ -t 5m
 
-freqtrade backtesting --config tests/testdata/config.tests.usdt.json -s SampleStrategy --userdir user_data_bttest/ --cache none --timerange 20250701-20250801
+econith backtesting --config tests/testdata/config.tests.usdt.json -s SampleStrategy --userdir user_data_bttest/ --cache none --timerange 20250701-20250801
 ```
 
 ## Continuous integration
@@ -439,7 +439,7 @@ This documents some decisions taken for the CI Pipeline.
 * CI runs on all OS variants, Linux (ubuntu), macOS and Windows.
 * Docker images are build for the branches `stable` and `develop`, and are built as multiarch builds, supporting multiple platforms via the same tag.
 * Docker images containing Plot dependencies are also available as `stable_plot` and `develop_plot`.
-* Docker images contain a file, `/freqtrade/freqtrade_commit` containing the commit this image is based of.
+* Docker images contain a file, `/econith/econith_commit` containing the commit this image is based of.
 * Full docker image rebuilds are run once a week via schedule.
 * Deployments run on ubuntu.
 * All tests must pass for a PR to be merged to `stable` or `develop`.
@@ -463,7 +463,7 @@ git checkout -b new_release <commitid>
 Determine if crucial bugfixes have been made between this commit and the current state, and eventually cherry-pick these.
 
 * Merge the release branch (stable) into this branch.
-* Edit `freqtrade/__init__.py` and add the version matching the current date (for example `2025.7` for July 2025). Minor versions can be `2025.7.1` should we need to do a second release that month. Version numbers must follow allowed versions from PEP0440 to avoid failures pushing to pypi.
+* Edit `econith/__init__.py` and add the version matching the current date (for example `2025.7` for July 2025). Minor versions can be `2025.7.1` should we need to do a second release that month. Version numbers must follow allowed versions from PEP0440 to avoid failures pushing to pypi.
 * Commit this part.
 * Push that branch to the remote and create a PR against the **stable branch**.
 * Update develop version to next version following the pattern `2025.8-dev`.

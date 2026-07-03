@@ -7,7 +7,7 @@
 FreqAI is a software designed to automate a variety of tasks associated with training a predictive machine learning model to generate market forecasts given a set of input signals. In general, FreqAI aims to be a sandbox for easily deploying robust machine learning libraries on real-time data ([details](#freqai-position-in-open-source-machine-learning-landscape)).
 
 !!! Note
-    FreqAI is, and always will be, a not-for-profit, open source project. FreqAI does *not* have a crypto token, FreqAI does *not* sell signals, and FreqAI does not have a domain besides the present [freqtrade documentation](https://www.freqtrade.io/en/stable/freqai/).
+    FreqAI is, and always will be, a not-for-profit, open source project. FreqAI does *not* have a crypto token, FreqAI does *not* sell signals, and FreqAI does not have a domain besides the present [econith documentation](https://econith/en/stable/freqai/).
 
 Features include:
 
@@ -29,7 +29,7 @@ Features include:
 The easiest way to quickly test FreqAI is to run it in dry mode with the following command:
 
 ```bash
-freqtrade trade --config config_examples/config_freqai.example.json --strategy FreqaiExampleStrategy --freqaimodel LightGBMRegressor --strategy-path freqtrade/templates
+econith trade --config config_examples/config_freqai.example.json --strategy FreqaiExampleStrategy --freqaimodel LightGBMRegressor --strategy-path econith/templates
 ```
 
 You will see the boot-up process of automatic data downloading, followed by simultaneous training and trading. 
@@ -38,7 +38,7 @@ You will see the boot-up process of automatic data downloading, followed by simu
     The example strategy provided with the ECONITH Quant source code is designed for showcasing/testing a wide variety of FreqAI features. It is also designed to run on small computers so that it can be used as a benchmark between developers and users. It is *not* designed to be run in production.
 
 An example strategy, prediction model, and config to use as a starting points can be found in
-`freqtrade/templates/FreqaiExampleStrategy.py`, `freqtrade/freqai/prediction_models/LightGBMRegressor.py`, and
+`econith/templates/FreqaiExampleStrategy.py`, `econith/freqai/prediction_models/LightGBMRegressor.py`, and
 `config_examples/config_freqai.example.json`, respectively.
 
 ## General approach
@@ -76,7 +76,7 @@ pip install -r requirements-freqai.txt
 
 ### Usage with docker
 
-If you are using docker, a dedicated tag with FreqAI dependencies is available as `:freqai`. As such - you can replace the image line in your docker compose file with `image: freqtradeorg/freqtrade:stable_freqai`. This image contains the regular FreqAI dependencies. Similar to native installs, Catboost will not be available on ARM based devices. If you would like to use PyTorch or Reinforcement learning, you should use the torch or RL tags, `image: freqtradeorg/freqtrade:stable_freqaitorch`, `image: freqtradeorg/freqtrade:stable_freqairl`.
+If you are using docker, a dedicated tag with FreqAI dependencies is available as `:freqai`. As such - you can replace the image line in your docker compose file with `image: econith/econith-quant:stable_freqai`. This image contains the regular FreqAI dependencies. Similar to native installs, Catboost will not be available on ARM based devices. If you would like to use PyTorch or Reinforcement learning, you should use the torch or RL tags, `image: econith/econith-quant:stable_freqaitorch`, `image: econith/econith-quant:stable_freqairl`.
 
 !!! note "docker-compose-freqai.yml"
     We do provide an explicit docker-compose file for this in `docker/docker-compose-freqai.yml` - which can be used via `docker compose -f docker/docker-compose-freqai.yml run ...` - or can be copied to replace the original docker file. This docker-compose file also contains a (disabled) section to enable GPU resources within docker containers. This obviously assumes the system has GPU resources available.
@@ -117,7 +117,7 @@ Here we compile some external materials that provide deeper looks into various c
 
 ## Support
 
-You can find support for FreqAI in a variety of places, including the [ECONITH Quant discord](https://discord.gg/Jd8JYeWHc4), the dedicated [FreqAI discord](https://discord.gg/7AMWACmbjT), and in [github issues](https://github.com/freqtrade/freqtrade/issues).
+You can find support for FreqAI in a variety of places, including the [ECONITH Quant discord](https://discord.gg/Jd8JYeWHc4), the dedicated [FreqAI discord](https://discord.gg/7AMWACmbjT), and in [github issues](https://github.com/econith/econith/issues).
 
 ## Credits
 

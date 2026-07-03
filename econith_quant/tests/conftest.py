@@ -13,17 +13,17 @@ import pandas as pd
 import pytest
 from xdist.scheduler.loadscope import LoadScopeScheduling
 
-from freqtrade import constants
-from freqtrade.commands import Arguments
-from freqtrade.data.converter import ohlcv_to_dataframe, trades_list_to_df
-from freqtrade.enums import CandleType, MarginMode, SignalDirection, TradingMode
-from freqtrade.exchange import Exchange, timeframe_to_minutes, timeframe_to_seconds
-from freqtrade.freqtradebot import ECONITH QuantBot
-from freqtrade.persistence import LocalTrade, Order, Trade, init_db
-from freqtrade.resolvers import ExchangeResolver
-from freqtrade.system import set_mp_start_method
-from freqtrade.util import dt_now, dt_ts
-from freqtrade.worker import Worker
+from econith import constants
+from econith.commands import Arguments
+from econith.data.converter import ohlcv_to_dataframe, trades_list_to_df
+from econith.enums import CandleType, MarginMode, SignalDirection, TradingMode
+from econith.exchange import Exchange, timeframe_to_minutes, timeframe_to_seconds
+from econith.econithbot import EconithBot
+from econith.persistence import LocalTrade, Order, Trade, init_db
+from econith.resolvers import ExchangeResolver
+from econith.system import set_mp_start_method
+from econith.util import dt_now, dt_ts
+from econith.worker import Worker
 from tests.conftest_trades import (
     leverage_trade,
     mock_trade_1,
@@ -53,7 +53,7 @@ np.seterr(all="raise")
 
 CURRENT_TEST_STRATEGY = "StrategyTestV3"
 TRADE_SIDES = ("long", "short")
-EXMS = "freqtrade.exchange.exchange.Exchange"
+EXMS = "econith.exchange.exchange.Exchange"
 
 
 def pytest_addoption(parser):
@@ -233,7 +233,7 @@ def get_mock_coro(return_value=None, side_effect=None):
 
 def patched_configuration_load_config_file(mocker, config) -> None:
     mocker.patch(
-        "freqtrade.configuration.load_config.load_config_file", lambda *args, **kwargs: config
+        "econith.configuration.load_config.load_config_file", lambda *args, **kwargs: config
     )
 
 
@@ -247,7 +247,7 @@ def patch_exchange(
     mocker.patch(f"{EXMS}.precisionMode", PropertyMock(return_value=2))
     mocker.patch(f"{EXMS}.precision_mode_price", PropertyMock(return_value=2))
     # Temporary patch ...
-    mocker.patch("freqtrade.exchange.bybit.Bybit.cache_leverage_tiers")
+    mocker.patch("econith.exchange.bybit.Bybit.cache_leverage_tiers")
 
     if mock_markets:
         mocker.patch(f"{EXMS}._load_async_markets", return_value={})
@@ -257,7 +257,7 @@ def patch_exchange(
 
     if mock_supported_modes:
         mocker.patch(
-            f"freqtrade.exchange.{exchange}.{exchange.capitalize()}"
+            f"econith.exchange.{exchange}.{exchange.capitalize()}"
             "._supported_trading_mode_margin_pairs",
             PropertyMock(
                 return_value=[
@@ -291,12 +291,12 @@ def get_patched_exchange(
 
 
 def patch_wallet(mocker, free=999.9) -> None:
-    mocker.patch("freqtrade.wallets.Wallets.get_free", MagicMock(return_value=free))
+    mocker.patch("econith.wallets.Wallets.get_free", MagicMock(return_value=free))
 
 
 def patch_whitelist(mocker, conf) -> None:
     mocker.patch(
-        "freqtrade.freqtradebot.ECONITH QuantBot._refresh_active_whitelist",
+        "econith.econithbot.EconithBot._refresh_active_whitelist",
         MagicMock(return_value=conf["exchange"]["pair_whitelist"]),
     )
 
@@ -304,31 +304,31 @@ def patch_whitelist(mocker, conf) -> None:
 # Functions for recurrent object patching
 
 
-def patch_freqtradebot(mocker, config) -> None:
+def patch_econithbot(mocker, config) -> None:
     """
     This function patch _init_modules() to not call dependencies
     :param mocker: a Mocker object to apply patches
     :param config: Config to pass to the bot
     :return: None
     """
-    mocker.patch("freqtrade.freqtradebot.RPCManager", MagicMock())
+    mocker.patch("econith.econithbot.RPCManager", MagicMock())
     patch_exchange(mocker)
-    mocker.patch("freqtrade.freqtradebot.RPCManager._init", MagicMock())
-    mocker.patch("freqtrade.freqtradebot.RPCManager.send_msg", MagicMock())
+    mocker.patch("econith.econithbot.RPCManager._init", MagicMock())
+    mocker.patch("econith.econithbot.RPCManager.send_msg", MagicMock())
     patch_whitelist(mocker, config)
-    mocker.patch("freqtrade.freqtradebot.ExternalMessageConsumer")
-    mocker.patch("freqtrade.configuration.config_validation._validate_consumers")
+    mocker.patch("econith.econithbot.ExternalMessageConsumer")
+    mocker.patch("econith.configuration.config_validation._validate_consumers")
 
 
-def get_patched_freqtradebot(mocker, config) -> ECONITH QuantBot:
+def get_patched_econithbot(mocker, config) -> EconithBot:
     """
     This function patches _init_modules() to not call dependencies
     :param mocker: a Mocker object to apply patches
     :param config: Config to pass to the bot
-    :return: ECONITH QuantBot
+    :return: EconithBot
     """
-    patch_freqtradebot(mocker, config)
-    return ECONITH QuantBot(config)
+    patch_econithbot(mocker, config)
+    return EconithBot(config)
 
 
 def get_patched_worker(mocker, config) -> Worker:
@@ -338,12 +338,12 @@ def get_patched_worker(mocker, config) -> Worker:
     :param config: Config to pass to the bot
     :return: Worker
     """
-    patch_freqtradebot(mocker, config)
+    patch_econithbot(mocker, config)
     return Worker(args=None, config=config)
 
 
 def patch_get_signal(
-    freqtrade: ECONITH QuantBot,
+    econith: EconithBot,
     enter_long=True,
     exit_long=False,
     enter_short=False,
@@ -366,7 +366,7 @@ def patch_get_signal(
 
         return direction, enter_tag
 
-    freqtrade.strategy.get_entry_signal = patched_get_entry_signal
+    econith.strategy.get_entry_signal = patched_get_entry_signal
 
     def patched_get_exit_signal(pair, timeframe, dataframe, is_short):
         if is_short:
@@ -375,9 +375,9 @@ def patch_get_signal(
             return enter_long, exit_long, exit_tag
 
     # returns (enter, exit)
-    freqtrade.strategy.get_exit_signal = patched_get_exit_signal
+    econith.strategy.get_exit_signal = patched_get_exit_signal
 
-    freqtrade.exchange.refresh_latest_ohlcv = lambda p: None
+    econith.exchange.refresh_latest_ohlcv = lambda p: None
 
 
 def create_mock_trades(fee, is_short: bool | None = False, use_db: bool = True):
@@ -500,7 +500,7 @@ def create_mock_trades_usdt(fee, is_short: bool | None = False, use_db: bool = T
 
 @pytest.fixture(autouse=True)
 def patch_gc(mocker) -> None:
-    mocker.patch("freqtrade.main.gc_set_threshold")
+    mocker.patch("econith.main.gc_set_threshold")
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -548,7 +548,7 @@ def patch_torch_initlogs(mocker) -> None:
 @pytest.fixture(autouse=True)
 def user_dir(mocker, tmp_path) -> Path:
     user_dir = tmp_path / "user_data"
-    mocker.patch("freqtrade.configuration.configuration.create_userdata_dir", return_value=user_dir)
+    mocker.patch("econith.configuration.configuration.create_userdata_dir", return_value=user_dir)
     return user_dir
 
 
@@ -576,7 +576,7 @@ def patch_coingecko(mocker) -> None:
         ]
     )
     mocker.patch.multiple(
-        "freqtrade.rpc.fiat_convert.FtCoinGeckoApi",
+        "econith.rpc.fiat_convert.FtCoinGeckoApi",
         get_price=tickermock,
         get_coins_list=listmock,
     )

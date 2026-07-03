@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from freqtrade.persistence.models import Order, Trade
+from econith.persistence.models import Order, Trade
 
 
 MOCK_TRADE_COUNT = 6

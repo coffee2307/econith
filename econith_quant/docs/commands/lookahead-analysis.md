@@ -1,5 +1,5 @@
 ``` output
-usage: freqtrade lookahead-analysis [-h] [-v] [--no-color] [--logfile FILE]
+usage: econith lookahead-analysis [-h] [-v] [--no-color] [--logfile FILE]
                                     [-V] [-c PATH] [-d PATH] [--userdir PATH]
                                     [-s NAME] [--strategy-path PATH]
                                     [--recursive-strategy-search]

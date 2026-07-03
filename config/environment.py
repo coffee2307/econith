@@ -52,11 +52,21 @@ class Environment(BaseSettings):
         default="wss://stream.binance.com:9443/ws", alias="BINANCE_WS_BASE_URL"
     )
 
+    # --- Macro ingestion (CORE) ------------------------------------------
+    # St. Louis Fed FRED is the single keyed macro source; every other node
+    # (World Bank, IMF, Eurostat, yfinance) is keyless/open-access.
+    fred_api_key: str = Field(default="", alias="FRED_API_KEY")
+
     # --- Storage ---------------------------------------------------------
     database_url: str = Field(
         default="sqlite:///./datasets/econith.sqlite", alias="DATABASE_URL"
     )
     redis_url: str = Field(default="redis://redis:6379/0", alias="REDIS_URL")
+
+    @property
+    def has_fred_credentials(self) -> bool:
+        """True only if a real (non-placeholder) FRED API key is configured."""
+        return self._is_real_credential(self.fred_api_key)
 
     @property
     def is_production(self) -> bool:

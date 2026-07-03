@@ -4,9 +4,9 @@ from typing import Any, TypedDict
 
 import pytest
 
-from freqtrade.constants import Config
-from freqtrade.exchange.exchange import Exchange
-from freqtrade.resolvers.exchange_resolver import ExchangeResolver
+from econith.constants import Config
+from econith.exchange.exchange import Exchange
+from econith.resolvers.exchange_resolver import ExchangeResolver
 from tests.conftest import EXMS, get_default_conf_usdt
 
 
@@ -747,7 +747,7 @@ def get_futures_exchange(exchange_name, exchange_conf, class_mocker):
     exchange_conf["trading_mode"] = "futures"
     exchange_conf["margin_mode"] = "isolated"
 
-    class_mocker.patch("freqtrade.exchange.binance.Binance.fill_leverage_tiers")
+    class_mocker.patch("econith.exchange.binance.Binance.fill_leverage_tiers")
     class_mocker.patch(f"{EXMS}.fetch_trading_fees")
     class_mocker.patch(f"{EXMS}.ft_additional_exchange_init")
     class_mocker.patch(f"{EXMS}.load_cached_leverage_tiers", return_value=None)

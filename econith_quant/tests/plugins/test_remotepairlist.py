@@ -4,10 +4,10 @@ from unittest.mock import MagicMock, PropertyMock
 import pytest
 import requests
 
-from freqtrade.exceptions import OperationalException
-from freqtrade.plugins.pairlist.RemotePairList import RemotePairList
-from freqtrade.plugins.pairlistmanager import PairListManager
-from tests.conftest import EXMS, get_patched_exchange, get_patched_freqtradebot, log_has
+from econith.exceptions import OperationalException
+from econith.plugins.pairlist.RemotePairList import RemotePairList
+from econith.plugins.pairlistmanager import PairListManager
+from tests.conftest import EXMS, get_patched_exchange, get_patched_econithbot, log_has
 
 
 @pytest.fixture(scope="function")
@@ -26,13 +26,13 @@ def rpl_config(default_conf):
 def test_gen_pairlist_with_local_file(mocker, rpl_config):
     mock_file = MagicMock()
     mock_file.read.return_value = '{"pairs": ["TKN/USDT","ETH/USDT","NANO/USDT"]}'
-    mocker.patch("freqtrade.plugins.pairlist.RemotePairList.open", return_value=mock_file)
+    mocker.patch("econith.plugins.pairlist.RemotePairList.open", return_value=mock_file)
 
-    mock_file_path = mocker.patch("freqtrade.plugins.pairlist.RemotePairList.Path")
+    mock_file_path = mocker.patch("econith.plugins.pairlist.RemotePairList.Path")
     mock_file_path.exists.return_value = True
 
     jsonparse = json.loads(mock_file.read.return_value)
-    mocker.patch("freqtrade.plugins.pairlist.RemotePairList.rapidjson.load", return_value=jsonparse)
+    mocker.patch("econith.plugins.pairlist.RemotePairList.rapidjson.load", return_value=jsonparse)
 
     rpl_config["pairlists"] = [
         {
@@ -76,7 +76,7 @@ def test_fetch_pairlist_mock_response_html(mocker, rpl_config):
     pairlistmanager = PairListManager(exchange, rpl_config)
 
     mocker.patch(
-        "freqtrade.plugins.pairlist.RemotePairList.requests.get", return_value=mock_response
+        "econith.plugins.pairlist.RemotePairList.requests.get", return_value=mock_response
     )
     remote_pairlist = RemotePairList(
         exchange, pairlistmanager, rpl_config, rpl_config["pairlists"][0], 0
@@ -101,7 +101,7 @@ def test_fetch_pairlist_timeout_keep_last_pairlist(mocker, rpl_config, caplog):
     pairlistmanager = PairListManager(exchange, rpl_config)
 
     mocker.patch(
-        "freqtrade.plugins.pairlist.RemotePairList.requests.get",
+        "econith.plugins.pairlist.RemotePairList.requests.get",
         side_effect=requests.exceptions.RequestException,
     )
 
@@ -134,7 +134,7 @@ def test_remote_pairlist_init_no_pairlist_url(mocker, rpl_config):
         match=r"`pairlist_url` not specified."
         r' Please check your configuration for "pairlist.config.pairlist_url"',
     ):
-        get_patched_freqtradebot(mocker, rpl_config)
+        get_patched_econithbot(mocker, rpl_config)
 
 
 def test_fetch_pairlist_mock_response_valid(mocker, rpl_config):
@@ -160,7 +160,7 @@ def test_fetch_pairlist_mock_response_valid(mocker, rpl_config):
 
     mock_response.elapsed.total_seconds.return_value = 0.4
     mocker.patch(
-        "freqtrade.plugins.pairlist.RemotePairList.requests.get", return_value=mock_response
+        "econith.plugins.pairlist.RemotePairList.requests.get", return_value=mock_response
     )
 
     exchange = get_patched_exchange(mocker, rpl_config)
@@ -190,7 +190,7 @@ def test_remote_pairlist_init_wrong_mode(mocker, rpl_config):
         OperationalException,
         match=r'`mode` not configured correctly. Supported Modes are "whitelist","blacklist"',
     ):
-        get_patched_freqtradebot(mocker, rpl_config)
+        get_patched_econithbot(mocker, rpl_config)
 
     rpl_config["pairlists"] = [
         {
@@ -205,7 +205,7 @@ def test_remote_pairlist_init_wrong_mode(mocker, rpl_config):
     with pytest.raises(
         OperationalException, match=r"A `blacklist` mode RemotePairList can not be.*first.*"
     ):
-        get_patched_freqtradebot(mocker, rpl_config)
+        get_patched_econithbot(mocker, rpl_config)
 
 
 def test_remote_pairlist_init_wrong_proc_mode(mocker, rpl_config):
@@ -225,7 +225,7 @@ def test_remote_pairlist_init_wrong_proc_mode(mocker, rpl_config):
         OperationalException,
         match=r'`processing_mode` not configured correctly. Supported Modes are "filter","append"',
     ):
-        get_patched_freqtradebot(mocker, rpl_config)
+        get_patched_econithbot(mocker, rpl_config)
 
 
 def test_remote_pairlist_blacklist(mocker, rpl_config, caplog, markets, tickers):
@@ -255,7 +255,7 @@ def test_remote_pairlist_blacklist(mocker, rpl_config, caplog, markets, tickers)
     )
 
     mocker.patch(
-        "freqtrade.plugins.pairlist.RemotePairList.requests.get", return_value=mock_response
+        "econith.plugins.pairlist.RemotePairList.requests.get", return_value=mock_response
     )
 
     exchange = get_patched_exchange(mocker, rpl_config)
@@ -305,7 +305,7 @@ def test_remote_pairlist_whitelist(mocker, rpl_config, processing_mode, markets,
     )
 
     mocker.patch(
-        "freqtrade.plugins.pairlist.RemotePairList.requests.get", return_value=mock_response
+        "econith.plugins.pairlist.RemotePairList.requests.get", return_value=mock_response
     )
 
     exchange = get_patched_exchange(mocker, rpl_config)
@@ -362,7 +362,7 @@ def test_remote_pairlist_whitelist_number_assets(
     )
 
     mocker.patch(
-        "freqtrade.plugins.pairlist.RemotePairList.requests.get", return_value=mock_response
+        "econith.plugins.pairlist.RemotePairList.requests.get", return_value=mock_response
     )
 
     exchange = get_patched_exchange(mocker, rpl_config)

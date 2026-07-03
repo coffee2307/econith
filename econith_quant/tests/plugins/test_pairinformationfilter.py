@@ -2,8 +2,8 @@ from copy import deepcopy
 
 import pytest
 
-from freqtrade.exceptions import OperationalException
-from freqtrade.plugins.pairlistmanager import PairListManager
+from econith.exceptions import OperationalException
+from econith.plugins.pairlistmanager import PairListManager
 from tests.conftest import get_markets, get_patched_exchange
 
 

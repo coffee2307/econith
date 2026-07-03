@@ -1,15 +1,15 @@
-![freqtrade](assets/freqtrade_poweredby.svg)
+![econith](assets/econith_poweredby.svg)
 
-[![ECONITH Quant CI](https://github.com/freqtrade/freqtrade/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/freqtrade/freqtrade/actions/workflows/ci.yml)
+[![ECONITH Quant CI](https://github.com/econith/econith/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/econith/econith/actions/workflows/ci.yml)
 [![DOI](https://joss.theoj.org/papers/10.21105/joss.04864/status.svg)](https://doi.org/10.21105/joss.04864)
-[![codecov](https://codecov.io/gh/freqtrade/freqtrade/branch/develop/graph/badge.svg?token=AD5BG3ATKI)](https://codecov.io/gh/freqtrade/freqtrade)
-[![Documentation](https://readthedocs.org/projects/freqtrade/badge/)](https://www.freqtrade.io)
+[![codecov](https://codecov.io/gh/econith/econith/branch/develop/graph/badge.svg?token=AD5BG3ATKI)](https://codecov.io/gh/econith/econith)
+[![Documentation](https://readthedocs.org/projects/econith/badge/)](https://econith)
 [![Discord Server](https://img.shields.io/badge/ECONITH Quant_Discord-4E4E4E?logo=discord)](https://discord.gg/p7nuUNVfP7)
 
 <!-- GitHub action buttons -->
-[:octicons-star-16: Star](https://github.com/freqtrade/freqtrade){ .md-button .md-button--sm }
-[:octicons-repo-forked-16: Fork](https://github.com/freqtrade/freqtrade/fork){ .md-button .md-button--sm }
-[:octicons-download-16: Download](https://github.com/freqtrade/freqtrade/archive/stable.zip){ .md-button .md-button--sm }
+[:octicons-star-16: Star](https://github.com/econith/econith){ .md-button .md-button--sm }
+[:octicons-repo-forked-16: Fork](https://github.com/econith/econith/fork){ .md-button .md-button--sm }
+[:octicons-download-16: Download](https://github.com/econith/econith/archive/stable.zip){ .md-button .md-button--sm }
 
 ## Introduction
 
@@ -22,11 +22,11 @@ ECONITH Quant is a free and open source crypto trading bot written in Python. It
 
     We strongly recommend you to have basic coding skills and Python knowledge. Do not hesitate to read the source code and understand the mechanisms of this bot, algorithms and techniques implemented in it.
 
-![freqtrade screenshot](assets/freqtrade-screenshot.png)
+![econith screenshot](assets/econith-screenshot.png)
 
 ## Features
 
-- Develop your Strategy: Write your strategy in python, using [pandas](https://pandas.pydata.org/). Example strategies to inspire you are available in the [strategy repository](https://github.com/freqtrade/freqtrade-strategies).
+- Develop your Strategy: Write your strategy in python, using [pandas](https://pandas.pydata.org/). Example strategies to inspire you are available in the [strategy repository](https://github.com/econith/econith-strategies).
 - Download market data: Download historical data of the exchange and the markets your may want to trade with.
 - Backtest: Test your strategy on downloaded historical data.
 - Optimize: Find the best parameters for your strategy using hyperoptimization which employs machine learning methods. You can optimize buy, sell, take profit (ROI), stop-loss and trailing stop-loss parameters for your strategy.

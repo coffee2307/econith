@@ -1,187 +1,283 @@
-﻿# ECONITH — Technical Architecture & Operations Manual
+﻿# ECONITH — Quant + World Runtime Architecture
 
-> **BẢN CẬP NHẬT XÁC NHẬN:** 17:05, 02/07/2026 (UTC+7)  
-> **Trạng thái:** Đã ghi trực tiếp vào `README.md` trong workspace hiện tại.
+> Cập nhật: 03/07/2026 (UTC+7)  
+> Trạng thái hiện tại: backend ASGI boot được, dashboard Quant/World hoạt động, cockpit WS đã có, và 3 khoản nợ P0 đã được xử lý: **equity sync**, **mode-gated isolation**, **database failover**.
 
-> **Cập nhật: 07/2026**
->
-> - Backend đã chạy ổn định với Binance API thật (`mock: false`).
-> - Chế độ mặc định an toàn là `QUANT_MODE=REALITY`.
-> - Đã có đầy đủ pipeline huấn luyện A→E trong `training/` + `Makefile`.
-> - Đã có **Last Mile Inference**: Predictor tự nạp model từ `models/registry/active.yaml` (hoặc env override), fallback về heuristic nếu thiếu checkpoint.
+ECONITH là hệ thống nghiên cứu định lượng kết hợp hai miền tách biệt:
 
-## Mục lục kỹ thuật (tiếng Việt)
+- **ECONITH Quant**: ingest dữ liệu thị trường, tạo feature, chạy AI decision, route order intent, kiểm soát rủi ro bằng Sentinel, hiển thị cockpit trading dashboard.
+- **ECONITH World**: mô phỏng kinh tế-vĩ mô-địa chính trị bằng sovereign multi-agent graph để stress-test, tạo kịch bản và nghiên cứu hiệu ứng lan truyền.
 
-- Giới thiệu dự án: Mục `1`
-- Kiến trúc hệ thống: Mục `2`, `3`, `4`, `5`
-- Hướng dẫn nhanh (Quick Start): Mục `13`, `14`, `15`
-- Quy trình huấn luyện và triển khai: Mục `8`, `9`, `12`, `19`
-- Cơ chế vận hành hậu trường (3 chuyên gia + Fusion): Mục `10`, `11`
-- Lộ trình phát triển (Next Steps): Mục `16`
+Mục tiêu của dự án là xây một vòng đời hoàn chỉnh:
+
+```text
+live data -> feature -> signal -> risk gate -> execution/fill -> cockpit telemetry
+                 |
+                 v
+        collect -> label -> train -> verify -> activate -> inference
+```
 
 ---
 
-## 1. Mục tiêu dự án
+## 1. Kiến trúc runtime hiện tại
 
-**ECONITH** là dự án nghiên cứu cá nhân kết hợp hai hệ:
+```text
+main.py (FastAPI ASGI lifespan)
+  |
+  +-- Core Engine
+  |    +-- EventBus                  core/event_bus.py
+  |    +-- TimeEngine                core/engine.py
+  |    +-- 5-phase TickPipeline       SNAPSHOT -> APPLY_EVENTS -> RESOLVE_CONFLICTS -> UPDATE_WORLD -> EMIT_SIGNALS
+  |    +-- QuantMode                 core/mode.py (REALITY | SIMULATION)
+  |
+  +-- Market Data Plane
+  |    +-- BinanceWebSocketStreamer  infrastructure/websocket/streamer.py
+  |    +-- MarketDataPipeline        infrastructure/preprocessing/pipeline.py
+  |    +-- AlternativeDataProvider   infrastructure/alternative/provider.py
+  |    +-- MacroIngestionHub         core/ingestion/macro_hub.py
+  |
+  +-- Quant Brain
+  |    +-- Predictor                 ai/inference/predictor.py
+  |    +-- Regime + desk fusion       ai/regime/, ai/agents/
+  |    +-- AIBridge                  econith_quant/bridge/ai_bridge.py
+  |    +-- QuantExecutionBridge      bridges/quant_bridge.py
+  |    +-- CCXTBinanceBridge         quant/ccxt_bridge.py
+  |
+  +-- Risk + Persistence
+  |    +-- Sentinel                  sentinel/manager.py
+  |    +-- CircuitBreaker            sentinel/circuit_breaker.py
+  |    +-- StateRecorder             infrastructure/storage/recorder.py
+  |    +-- DB failover               config/database.py
+  |
+  +-- World Simulator
+  |    +-- WorldKernel               ai/simulator_engine/world_kernel.py
+  |    +-- SovereignWorldGraph       ai/simulator_engine/sovereign_graph.py
+  |    +-- WorldBridge               bridges/world_bridge.py
+  |
+  +-- User Interfaces
+       +-- MetricsHub                core/telemetry.py
+       +-- CockpitTelemetryHub       core/cockpit/ws.py
+       +-- JournalistLLM             ai/journalist/aggregator.py
+       +-- Next.js Dashboard         dashboard/
+```
 
-- **ECONITH Quant**: hệ thống AI phân tích/tạo tín hiệu giao dịch có kiểm soát rủi ro bằng Sentinel.
-- **ECONITH World**: mô phỏng kinh tế-vĩ mô-địa chính trị để stress-test, nghiên cứu cơ chế lan truyền tác động.
+---
 
-Mục tiêu cốt lõi là đi trọn vòng đời mô hình định lượng:
+## 2. Hai thế giới vận hành: REALITY và SIMULATION
 
-`Dữ liệu thật -> Feature -> Label -> Train -> Verify -> Activate -> Inference live`
+`QUANT_MODE` là ranh giới chủ quyền dữ liệu:
 
-### Giá trị KHKT của đề tài
+| Mode | Ý nghĩa | Data plane | Execution |
+|---|---|---|---|
+| `REALITY` | Chế độ mặc định an toàn | Dữ liệu thị trường thật / Binance / macro thật | Chỉ được dùng live/testnet nếu CCXT đã authenticated; `world.*` bị chặn khỏi domain Quant |
+| `SIMULATION` | Sandbox nghiên cứu | World simulator được phép tác động Quant | CCXT bị air-gap khỏi live socket; fill route sang synthetic simulation |
 
-| Trục đánh giá | ECONITH hiện có | Ý nghĩa đối với giám khảo KHKT |
+### Invariant quan trọng
+
+Trong `REALITY`, Quant và World **không được trộn dữ liệu**. World có thể vẫn chạy để dashboard hiển thị, nhưng mọi event `world.*` hướng vào order-routing domain sẽ bị `EventBus` drop.
+
+Trong `SIMULATION`, Quant có thể ăn synthetic vectors của World, nhưng CCXT không được giữ live network/order socket.
+
+---
+
+## 3. Các P0 đã xử lý
+
+### 3.1 Equity sync: Sentinel và Cockpit dùng cùng execution truth
+
+File chính: `sentinel/manager.py`, `core/cockpit/ws.py`
+
+Trước đây:
+
+- Cockpit Fuel Gauge tính equity từ `quant.fill`.
+- Sentinel tự tính equity từ mock budget `$1,000,000` + price move.
+- Kết quả là hai panel hiển thị hai sổ vốn khác nhau.
+
+Hiện tại:
+
+- Sentinel subscribe trực tiếp `quant.fill`.
+- Sentinel replay fill bằng cùng logic position/PnL với cockpit.
+- `md.ticker` chỉ dùng để mark-to-market open positions và đo latency.
+- Equity của Sentinel và Cockpit Fuel Gauge khớp 1:1.
+
+### 3.2 Mode-gated EventBus
+
+File chính: `core/event_bus.py`, `bridges/quant_bridge.py`, `quant/ccxt_bridge.py`
+
+Đã thêm:
+
+- `DOMAIN_QUANT` cho các handler thuộc order-routing/execution.
+- `EventBus.subscribe(..., domain=DOMAIN_QUANT)`.
+- Khi `QuantMode.REALITY`, event `world.*` bị drop trước khi tới handler domain Quant.
+- `CCXTBinanceBridge` có mode-change guard: rời `REALITY` là dispose live exchange session ngay.
+
+### 3.3 Database failover
+
+File chính: `config/database.py`, `main.py`
+
+Đã thêm:
+
+- `init_database()` probe database primary bằng `SELECT 1` với timeout.
+- Nếu Postgres lỗi/unreachable: log `CRITICAL` và failover sang `sqlite:///econith_fallback.db`.
+- `dispose_database()` chạy lúc ASGI shutdown.
+
+Thông điệp log kỳ vọng khi failover:
+
+```text
+[DATABASE RUNTIME] Primary Postgres connection failed. Deploying local failover instance.
+```
+
+---
+
+## 4. EventBus topic contract
+
+| Topic | Producer | Consumer chính |
 |---|---|---|
-| Tính hệ thống | Tick Engine 5 pha + Event Bus + Sentinel | Chứng minh thiết kế có kiến trúc, không phải script rời rạc |
-| Tính AI | PPO đa tác tử + HMM/GMM regime + World model | Có chiều sâu mô hình và tư duy tổ hợp |
-| Tính thực nghiệm | Pipeline A→E + holdout + early-stop + checksum | Có quy trình kiểm chứng khoa học, có thể lặp lại |
-| Tính an toàn | REALITY/SIMULATION sovereignty + rollback | Hạn chế rủi ro vận hành và sai lệch thực nghiệm |
-
-### Độ mạnh hiện tại của hệ thống
-
-- **Điểm mạnh:** đã có full stack từ dữ liệu thật đến model active trên runtime.
-- **Độ tin cậy kỹ thuật:** có cơ chế kiểm định trước triển khai (`model-verify`) và rollback.
-- **Độ sẵn sàng nghiên cứu:** đủ để trình diễn cả “xây mô hình” và “vận hành mô hình” trong cùng hệ.
+| `md.aggTrade`, `md.depth` | `BinanceWebSocketStreamer` | `MarketDataPipeline` |
+| `md.ticker` | `MarketDataPipeline` | `MetricsHub`, `Sentinel`, `CockpitTelemetryHub`, `QuantExecutionBridge` |
+| `indicator.obi`, `indicator.volume_delta` | `MarketDataPipeline` | `Predictor`, `MetricsHub` |
+| `alt.funding_rate`, `alt.open_interest`, `alt.liquidation` | `AlternativeDataProvider` | `Predictor`, `MetricsHub` |
+| `ai.signal` | `Predictor` | `AIBridge`, telemetry |
+| `order.intent` | AI/execution bridge | `QuantExecutionBridge` |
+| `quant.fill` | `CCXTBinanceBridge` | `CockpitTelemetryHub`, `Sentinel`, `JournalistLLM` |
+| `sentinel.status` | `Sentinel` | `MetricsHub`, `StateRecorder`, dashboard |
+| `sentinel.emergency` | `Sentinel` | telemetry, event log |
+| `core.macro.context` | `MacroIngestionHub` | cockpit, journalist |
+| `world.sovereign`, `world.macro` | World simulator | World dashboard, cockpit macro strip, journalist |
+| `journalist.news` | `JournalistLLM` | future news ticker |
 
 ---
 
-## 2. Kiến trúc tổng quan
+## 5. Dashboard hiện tại
+
+Frontend nằm trong `dashboard/`.
+
+Đã có:
+
+- Landing page nâng cấp animation/scroll effects.
+- Quant Mission Control full-width desktop layout.
+- Right-flank persistent System Event Log.
+- Cockpit HUD qua WS `/api/v1/stream/cockpit`.
+- Widgets cockpit:
+  - PnL Altimeter
+  - Margin Fuel Gauge
+  - Flight Log
+  - Allocation Radar
+- World simulator page.
+
+Các endpoint dashboard dùng:
+
+```text
+GET  /api/v1/health
+GET  /api/v1/metrics
+WS   /api/v1/stream/metrics
+GET  /api/v1/cockpit/snapshot
+WS   /api/v1/stream/cockpit
+GET  /api/v1/world/sovereign
+GET  /api/v1/world/chronology
+GET  /api/v1/macro/snapshot
+GET  /api/v1/journalist/news
+POST /api/v1/mode
+POST /api/v1/world/tariff
+POST /api/v1/world/mutate
+```
+
+---
+
+## 6. Cấu trúc thư mục quan trọng
 
 ```text
 econith/
 ├── ai/
-│   ├── agents/                      # Agent logic + model loaders
-│   ├── inference/predictor.py       # Boardroom inference, phát ai.signal
-│   ├── regime/                      # classifier/switcher/regime loader
-│   ├── reward/                      # anti-greed reward
-│   └── simulator_engine/            # World kernel + causal graph
+│   ├── agents/                       # desk logic + model loaders
+│   ├── inference/predictor.py        # live boardroom inference
+│   ├── journalist/aggregator.py      # event -> financial news synthesis
+│   ├── regime/                       # regime classifier/switcher
+│   └── simulator_engine/             # World kernel + sovereign graph
+├── bridges/
+│   ├── quant_bridge.py               # order.intent -> CCXT/synthetic fill
+│   └── world_bridge.py               # World API bridge
+├── config/
+│   ├── database.py                   # async DB + Postgres->SQLite failover
+│   ├── environment.py                # env parsing
+│   └── settings.py                   # API/app settings
 ├── core/
-│   ├── engine.py                    # Deterministic Tick Engine (5 phase)
-│   ├── event_bus.py                 # Event spine
-│   ├── mode.py                      # REALITY / SIMULATION
-│   └── telemetry.py                 # Snapshot cho dashboard
+│   ├── cockpit/                      # cockpit schemas + WS router
+│   ├── ingestion/                    # macro ingestion hub/adapters
+│   ├── engine.py                     # deterministic 5-phase engine
+│   ├── event_bus.py                  # pub/sub + mode governance gate
+│   ├── mode.py                       # REALITY/SIMULATION singleton
+│   └── telemetry.py                  # dashboard read model
 ├── infrastructure/
-│   ├── websocket/streamer.py        # Binance stream (LIVE/MOCK)
-│   ├── preprocessing/pipeline.py    # OBI + Volume Delta
-│   ├── alternative/provider.py      # Funding/OI/Liquidations
-│   └── feature_store/               # FeatureBuilder/Writer/Loader
+│   ├── alternative/                  # funding/OI/liquidation provider
+│   ├── daemon/                       # VPS telemetry daemon framework
+│   ├── preprocessing/                # OBI/volume-delta pipeline
+│   ├── storage/                      # SQLite recorder/store
+│   └── websocket/                    # Binance WS streamer
+├── quant/
+│   ├── ccxt_bridge.py                # live/synthetic execution bridge
+│   ├── context_slicer.py             # desk context slicing
+│   └── payloads.py                   # execution payload contracts
+├── sentinel/
+│   ├── manager.py                    # execution-truth risk governor
+│   ├── circuit_breaker.py
+│   └── var.py
 ├── training/
-│   ├── collect.py                   # Phase A: data collection
-│   ├── label.py                     # Phase B: labeling
-│   ├── train_ppo.py                 # PPO training
-│   ├── fit_regime.py                # HMM/GMM training
-│   ├── train_world.py               # Neural world model
-│   ├── early_stop.py                # quality inspector
-│   ├── orchestrator.py              # Phase C/D orchestration
-│   └── deploy.py                    # Phase E: verify/activate/rollback
-├── datasets/
-│   ├── raw/
-│   ├── features/
-│   └── processed/
-├── models/
-│   ├── agents/
-│   ├── regime/
-│   ├── world/
-│   └── registry/
-├── Makefile
-└── requirements-train.txt
+│   ├── collect.py
+│   ├── label.py
+│   ├── orchestrator.py
+│   ├── train_ppo.py
+│   ├── fit_regime.py
+│   ├── train_world.py
+│   ├── deploy.py
+│   └── h200/orchestrator.py
+├── dashboard/
+└── main.py
 ```
 
 ---
 
-## 3. Cơ chế vận hành online
+## 7. Khởi chạy nhanh
 
-Luồng chạy runtime:
+### Backend
 
-1. `BinanceWebSocketStreamer` phát `md.aggTrade`, `md.depth`.
-2. `MarketDataPipeline` xử lý và phát:
-   - `md.ticker`
-   - `indicator.obi`
-   - `indicator.volume_delta`
-3. `AlternativeDataProvider` cập nhật:
-   - `alt.funding_rate`
-   - `alt.open_interest`
-   - `alt.liquidation`
-4. `Predictor` lấy feature live -> phân loại regime -> lấy tín hiệu từ 3 agents -> fusion -> phát `ai.signal`.
-5. `AIBridge`/execution nhận tín hiệu.
-6. `Sentinel` có quyền veto cuối cùng.
-7. Dashboard đọc snapshot qua WS `/api/v1/stream/metrics`.
+```powershell
+cd f:\econith
+python main.py
+```
 
-### Sơ đồ luồng dữ liệu thực tế
+Hoặc:
+
+```powershell
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+### Dashboard
+
+```powershell
+cd f:\econith\dashboard
+npm install
+npm run dev
+```
+
+Mở:
 
 ```text
-Binance Stream + Alt Data
-        │
-        ▼
-[Feature Pipeline]
-  - OBI
-  - Volume Delta
-  - Funding/OI/Liquidation
-        │
-        ▼
-[Predictor Boardroom]
-  - Regime Classifier
-  - 3 AI Desks (Trend / Mean Reversion / Scalper)
-        │
-        ▼
-[Regime-weighted Fusion]
-        │
-        ▼
-[Sentinel Risk Gate] ──> veto/allow
-        │
-        ▼
-     ai.signal
+http://localhost:3000
+http://localhost:3000/quant
+http://localhost:3000/world
 ```
 
-### Ẩn dụ kinh tế để hiểu nhanh
+### Health check
 
-- Hệ thống giống một “hội đồng đầu tư”: mỗi chuyên gia có góc nhìn khác nhau.
-- Regime giống “bối cảnh thị trường” (lạm phát cao, biến động mạnh, đi ngang).
-- Fusion giống “bỏ phiếu có trọng số” theo bối cảnh, không ai luôn đúng mọi lúc.
+```powershell
+curl http://localhost:8000/api/v1/health
+```
 
----
-
-## 4. Deterministic Tick Engine (5 phase)
-
-`core/engine.py` chạy 5 phase cố định theo thứ tự:
-
-1. `SNAPSHOT`
-2. `APPLY_EVENTS`
-3. `RESOLVE_CONFLICTS`
-4. `UPDATE_WORLD`
-5. `EMIT_SIGNALS`
-
-Ưu điểm:
-
-- Dễ kiểm chứng logic từng phase.
-- Tránh race condition giữa các bước.
-- Rõ cơ chế conflict/veto (đặc biệt khi Sentinel can thiệp).
-
----
-
-## 5. REALITY vs SIMULATION
-
-`core/mode.py`:
-
-- **REALITY** (mặc định):
-  - Chỉ dùng dữ liệu thật.
-  - Chặn `world.micro_impact` vào Quant.
-  - Khóa anomaly injection.
-- **SIMULATION**:
-  - Mở coupling World->Quant để nghiên cứu kịch bản.
-  - Cho phép inject anomaly để stress-test.
-
-### Health check kỳ vọng khi chạy an toàn
+Kỳ vọng an toàn:
 
 ```json
 {
   "status": "ok",
-  "service": "backend_core",
-  "mock": false,
   "quant_mode": {
     "mode": "REALITY",
     "coupling_enabled": false,
@@ -192,428 +288,166 @@ Binance Stream + Alt Data
 
 ---
 
-## 6. Các mô hình AI cần huấn luyện
+## 8. Mode switching
 
-Pipeline hiện tại tạo 5 artifact chính:
+Chuyển sang sandbox simulation:
 
-1. `models/agents/trend_ppo.zip`
-2. `models/agents/mean_reversion_ppo.zip`
-3. `models/agents/scalper_ppo.zip`
-4. `models/regime/hmm_4state.pkl` (fallback GMM nếu thiếu `hmmlearn`)
-5. `models/world/neural_reaction.pt`
+```powershell
+curl -X POST http://127.0.0.1:8000/api/v1/mode -H "Content-Type: application/json" -d "{\"mode\":\"SIMULATION\"}"
+```
 
-Metadata đi kèm:
+Quay về reality:
 
-- `*.norm.json` cho PPO (đảm bảo train/infer cùng chuẩn hóa)
-- `*.metrics.json` / `*.meta.json`
-- `models/registry/manifest.yaml` (checksum + metadata)
-- `models/registry/active.yaml` (bản active)
-- `models/registry/history/` (rollback)
+```powershell
+curl -X POST http://127.0.0.1:8000/api/v1/mode -H "Content-Type: application/json" -d "{\"mode\":\"REALITY\"}"
+```
+
+Trong `REALITY`, Quant không hiển thị World simulation day và không nhận `world.*` vào execution domain.
 
 ---
 
-## 7. Chuẩn feature schema (train/infer đồng nhất)
+## 9. World scenario API
 
-Feature row từ pipeline:
+Inject tariff shock:
 
-- `symbol`, `price`, `mid`, `best_bid`, `best_ask`
-- `obi`, `bid_volume`, `ask_volume`, `volume_delta`, `buy_volume`, `sell_volume`, `trade_count`
-- `funding_rate`, `time_to_funding_s`, `open_interest`, `oi_change_pct`, `liquidation_notional`
-- `effective_buy`, `effective_sell`
-- `ts_ms` (được thêm trong collector)
+```powershell
+curl -X POST http://127.0.0.1:8000/api/v1/world/tariff -H "Content-Type: application/json" -d "{\"source\":\"USA\",\"target\":\"CHN\",\"value\":0.5}"
+```
 
-Canonical feature list cho PPO desks (`PPO_FEATURE_COLS`):
+Mutate world metric:
 
-- `obi`, `volume_delta`, `buy_volume`, `sell_volume`, `trade_count`
-- `funding_rate`, `time_to_funding_s`, `open_interest`, `oi_change_pct`, `liquidation_notional`
+```powershell
+curl -X POST http://127.0.0.1:8000/api/v1/world/mutate -H "Content-Type: application/json" -d "{\"group\":\"\",\"field\":\"inflation\",\"value\":0.04}"
+```
 
 ---
 
-## 8. Lấy dữ liệu (Phase A)
+## 10. Training pipeline
 
-### 8.1 Collect live
+Pipeline vẫn giữ vòng đời A→E:
 
-```bash
+```text
+collect -> label -> train -> verify -> activate -> rollback
+```
+
+Lệnh chính:
+
+```powershell
 make data-collect
-```
-
-Tương đương:
-
-```bash
-python training/collect.py \
-  --symbol BTCUSDT \
-  --output ./datasets/features \
-  --batch-size 500 \
-  --duration 0
-```
-
-- `duration=0` nghĩa là chạy đến khi dừng tay.
-- Output theo lô: `datasets/features/features_XXXXX.parquet`.
-
-### 8.2 Backfill lịch sử OHLCV
-
-```bash
-make data-collect-backfill
-```
-
-Tương đương:
-
-```bash
-python training/collect.py --backfill \
-  --symbol BTCUSDT \
-  --start 2024-01-01 \
-  --end 2025-12-31 \
-  --intervals 1m,5m \
-  --output ./datasets/raw/binance
-```
-
----
-
-## 9. Pipeline huấn luyện A→E
-
-Pipeline được thiết kế như một **dây chuyền sản xuất khép kín**:
-
-`Mỏ dữ liệu -> Nhà máy tinh luyện nhãn -> Xưởng huấn luyện -> Cổng kiểm định -> Sàn vận hành`
-
-### Phase B — Labeling
-
-```bash
 make data-label
-```
-
-`training/label.py` thực hiện:
-
-- Tính `forward_return_1m`, `forward_return_5m`, `forward_return_15m`.
-- Tính `reward` bằng `breakdown_reward()` anti-greed.
-- Chia dữ liệu theo thời gian 80/20 (không shuffle):
-  - `datasets/processed/quant_labeled.parquet`
-  - `datasets/processed/quant_holdout.parquet`
-
-### Phase C/D — Train + validation
-
-```bash
 make setup-train
 make train-all
-```
-
-`training/orchestrator.py`:
-
-- Lập lịch job theo wave:
-  - **Wave 0**: `trend`, `mean_reversion`, `scalper` + `hmm`
-  - **Wave 1**: `world_neural`
-- Hỗ trợ backend:
-  - `multiprocessing` (mặc định)
-  - `ray`
-- Quản lý song song bằng `--max-gpu-concurrent`.
-- Sinh `models/registry/manifest.yaml` sau khi train.
-- Theo dõi holdout loss qua `training/early_stop.py` để dừng sớm khi mô hình bắt đầu “học vẹt”.
-
-### Phase E — Verify + activate
-
-```bash
 make model-verify
 make model-deploy
 ```
 
-`training/deploy.py`:
+Artifacts chính:
 
-- Verify SHA256 từng model theo manifest.
-- Nếu pass thì cập nhật `active.yaml`.
-- Lưu lịch sử vào `registry/history/`.
-
-Rollback:
-
-```bash
-python training/deploy.py --target ./models --rollback
+```text
+models/agents/trend_ppo.zip
+models/agents/mean_reversion_ppo.zip
+models/agents/scalper_ppo.zip
+models/regime/hmm_4state.pkl
+models/world/neural_reaction.pt
+models/registry/manifest.yaml
+models/registry/active.yaml
 ```
 
-### Bảng dây chuyền huấn luyện - triển khai
-
-| Công đoạn | Tệp chính | Đầu vào | Đầu ra | Lệnh Makefile |
-|---|---|---|---|---|
-| Thu thập dữ liệu | `training/collect.py` | Stream/Backfill Binance | `datasets/features/*.parquet` | `make data-collect`, `make data-collect-backfill` |
-| Gắn nhãn | `training/label.py` | Feature parquet | `quant_labeled.parquet`, `quant_holdout.parquet` | `make data-label` |
-| Huấn luyện song song | `training/orchestrator.py` + workers | Labeled/Holdout | PPO/HMM/World checkpoints + `manifest.yaml` | `make train-all` |
-| Kiểm định | `training/deploy.py` | `manifest.yaml` + checkpoints | Trạng thái pass/fail checksum | `make model-verify` |
-| Kích hoạt | `training/deploy.py` | Artifact đã verify | `active.yaml` + history rollback | `make model-deploy` |
+RunPod/H200 framework nằm ở `training/h200/orchestrator.py`, hiện là khung orchestration cần nối tiếp vào dataset loader/checkpoint store thật.
 
 ---
 
-## 10. Last Mile Inference (đưa “bộ não” lên sàn)
+## 11. Những gì cần làm tiếp theo
 
-### 10.1 Trading desks
+### P0 — Stabilization trước khi thêm feature lớn
 
-`ai/agents/agent_loaders.py`:
+1. **Viết test suite chính thức cho 3 invariant vừa sửa**
+   - `Sentinel` equity phải khớp cockpit sau `quant.fill`.
+   - `EventBus` phải drop `world.*` vào `DOMAIN_QUANT` trong `REALITY`.
+   - `config.database.init_database()` phải failover đúng khi Postgres unreachable.
 
-- Nạp checkpoint PPO từ:
-  1. `models/registry/active.yaml`
-  2. hoặc env override (`TREND_CHECKPOINT`, `MEAN_REV_CHECKPOINT`, `SCALPER_CHECKPOINT`)
-- Nạp sidecar normalize (`*.norm.json`).
-- Nếu thiếu checkpoint hoặc thiếu SB3/torch -> desk offline -> predictor fallback heuristic.
+2. **Tách mode producer rõ hơn**
+   - `REALITY`: ưu tiên Binance/live market stream.
+   - `SIMULATION`: ưu tiên synthetic/world feed.
+   - Mục tiêu: không chỉ drop ở consumer mà còn giảm producer thừa.
 
-### 10.2 Regime forecaster
+3. **Đồng bộ vốn khởi tạo qua config**
+   - Đưa `STARTING_CAPITAL` vào `.env` / settings.
+   - Dùng chung cho `CockpitTelemetryHub`, `Sentinel`, và simulation executor.
 
-`ai/regime/regime.py`:
+### P1 — Production readiness
 
-- Nạp HMM/GMM bundle từ active registry.
-- Classify regime live theo feature vi mô.
-- Nếu thiếu bundle -> fallback heuristic classifier.
+4. **Auth cho API/dashboard**
+   - Bảo vệ `/mode`, `/world/mutate`, `/world/tariff`, order/control endpoints.
+   - Tối thiểu: API key middleware; tốt hơn: operator login/OAuth.
 
-### 10.3 Predictor boardroom
+5. **Rate limit + command guard**
+   - Chặn spam mutate/world scenario.
+   - Thêm audit trail cho mọi operator command.
 
-`ai/inference/predictor.py`:
+6. **Structured logging + observability**
+   - JSON logs.
+   - Prometheus metrics: tick latency, WS reconnects, fills, Sentinel freezes, DB failover.
+   - Grafana dashboard.
 
-- Tự động seat trained desks + trained regime nếu có.
-- Duy trì fallback an toàn nếu model chưa sẵn sàng.
-- `ai.signal` có thêm:
-  - `agent_brain`: `trained | heuristic`
-  - `regime_brain`: `trained | heuristic`
+7. **News ticker UI**
+   - Backend đã có `JournalistLLM` và `/journalist/news`.
+   - Cần widget cockpit hiển thị `journalist.news`.
 
-### Cơ chế “3 chuyên gia” trong thực tế
+8. **LLM backend thật cho Journalist**
+   - Hiện deterministic template backend.
+   - Cần OpenAI/Anthropic/Ollama backend qua env.
 
-| Chuyên gia AI | Vai trò | Khi nào được tăng trọng số |
-|---|---|---|
-| `trend` | Theo xu hướng chính | Khi thị trường có đà rõ (`TRENDING`) |
-| `mean_reversion` | Bắt nhịp hồi về cân bằng | Khi thị trường dao động quanh vùng giá (`MEAN_REVERTING`) |
-| `scalper` | Phản ứng nhanh với nhiễu ngắn hạn | Khi biến động cao (`VOLATILE`) |
+### P2 — Quant capability
 
----
+9. **Multi-symbol portfolio**
+   - Mở rộng khỏi BTCUSDT.
+   - Portfolio-level VaR, exposure per desk, per-asset limits.
 
-## 11. Fusion/Ensemble theo regime
+10. **Backtesting harness**
+   - Reuse SIMULATION mode + historical feed.
+   - Báo cáo hit-rate, drawdown, turnover, profit factor, stability.
 
-`ai/regime/switcher.py`:
+11. **Paper trading campaign**
+   - Chạy Binance testnet/paper đủ dài.
+   - Lưu report trước khi nghĩ tới vốn thật.
 
-- `TRENDING`: `trend=0.70`, `mean_reversion=0.05`, `scalper=0.25`
-- `MEAN_REVERTING`: `trend=0.10`, `mean_reversion=0.70`, `scalper=0.20`
-- `VOLATILE`: `trend=0.20`, `mean_reversion=0.20`, `scalper=0.60`
-- `CALM`: `trend=0.34`, `mean_reversion=0.33`, `scalper=0.33`
+12. **Model governance**
+   - Gắn commit hash, dataset hash, training window, metrics vào `manifest.yaml`.
+   - Dashboard hiển thị active model version.
 
-Fusion tạo quyết định cuối cùng (`LONG`/`SHORT`/`FLAT`) với confidence.
+### P3 — Scaling
 
-### Giải thích fusion theo tư duy đời sống
+13. **H200 training pipeline thật**
+   - Nối `training/h200` với dataset registry, checkpoint store, distributed runner.
 
-- Nếu thị trường đang “có trend”, giống như nền kinh tế đang mở rộng mạnh, ý kiến chuyên gia trend được ưu tiên.
-- Nếu thị trường “đi ngang”, giống giai đoạn cung-cầu quay về cân bằng, chuyên gia mean-reversion có tiếng nói lớn hơn.
-- Nếu thị trường “nhiễu mạnh”, chuyên gia scalper được tăng quyền vì phản ứng nhanh với biến động ngắn.
-- Vì vậy, fusion là cơ chế phân bổ “ngân sách niềm tin” theo bối cảnh, thay vì dùng một mô hình cho mọi tình huống.
+14. **VPS daemon deployment**
+   - Thêm Docker/systemd service cho `infrastructure/daemon/vps_telemetry_daemon.py`.
 
----
-
-## 12. Makefile commands (chuẩn hiện tại)
-
-Các command chính:
-
-- `make setup-train`
-- `make data-collect`
-- `make data-collect-backfill`
-- `make data-label`
-- `make train-all`
-- `make train-single JOB=trend`
-- `make model-verify`
-- `make model-deploy`
-
-Ví dụ override:
-
-```bash
-make train-all BACKEND=ray JOBS=trend,mean_reversion,scalper,hmm,world_neural
-```
+15. **Docker compose production bundle**
+   - Backend + dashboard + Postgres + Redis + Prometheus + Grafana.
 
 ---
 
-## 13. Thiết lập môi trường
-
-### 13.1 Runtime `.env`
-
-```env
-APP_ENV=development
-APP_HOST=0.0.0.0
-APP_PORT=8000
-
-QUANT_MODE=REALITY
-MODEL_DIR=./models
-MODEL_REGISTRY=./models/registry
-
-BINANCE_DATA_API_KEY=...
-BINANCE_DATA_API_SECRET=...
-BINANCE_TRADE_API_KEY=...
-BINANCE_TRADE_API_SECRET=...
-
-# fallback legacy (vẫn support)
-BINANCE_API_KEY=...
-BINANCE_API_SECRET=...
-```
-
-### 13.2 Optional checkpoint override
-
-```env
-TREND_CHECKPOINT=models/agents/trend_ppo.zip
-MEAN_REV_CHECKPOINT=models/agents/mean_reversion_ppo.zip
-SCALPER_CHECKPOINT=models/agents/scalper_ppo.zip
-REGIME_CHECKPOINT=models/regime/hmm_4state.pkl
-WORLD_CHECKPOINT=models/world/neural_reaction.pt
-```
-
----
-
-## 14. Khởi chạy nhanh
-
-### Quick Start (Dev trên máy cá nhân)
-
-| Bước | Mục tiêu | Lệnh |
-|---|---|---|
-| 1 | Cài runtime | `pip install -r requirements.txt` |
-| 2 | Cài phụ thuộc train | `pip install -r requirements-train.txt` |
-| 3 | Chạy backend | `uvicorn main:app --host 0.0.0.0 --port 8000 --reload` |
-| 4 | Chạy dashboard | `cd dashboard && npm install && npm run dev:http` |
-| 5 | Kiểm tra health | `curl http://localhost:8000/api/v1/health` |
-| 6 | Thu dữ liệu | `make data-collect` |
-| 7 | Huấn luyện + kích hoạt | `make data-label && make train-all && make model-deploy` |
-
-### Backend
-
-```bash
-pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-### Dashboard
-
-```bash
-cd dashboard
-npm install
-npm run dev:http
-```
-
-### Kiểm tra health
-
-```bash
-curl http://localhost:8000/api/v1/health
-```
-
-Kỳ vọng:
-
-- `status = ok`
-- `mock = false` (nếu key Binance hợp lệ)
-- `quant_mode.mode = REALITY`
-
----
-
-## 15. Hướng dẫn RunPod H200
-
-### Quy trình A→Z trên RunPod H200
-
-| Bước | Mục tiêu | Lệnh |
-|---|---|---|
-| A | Chuẩn bị môi trường | `cd /workspace/econith` |
-| B | Cài phụ thuộc train | `make setup-train` |
-| C | Label dữ liệu | `make data-label` |
-| D | Huấn luyện song song | `make train-all BACKEND=multiprocessing` |
-| E | Kiểm định artifact | `make model-verify` |
-| F | Kích hoạt model | `make model-deploy` |
-| G | Khởi động backend nạp model mới | `uvicorn main:app --host 0.0.0.0 --port 8000 --reload` |
-
-```bash
-# trên pod
-cd /workspace/econith
-make setup-train
-make train-all BACKEND=multiprocessing
-# hoặc
-make train-all BACKEND=ray
-```
-
-Khuyến nghị thực tế:
-
-- Bắt đầu bằng `multiprocessing` cho 1 H200.
-- Chuyển qua `ray` khi cần scale nhiều node.
-- Theo dõi log để điều chỉnh `max-gpu-concurrent`.
-
----
-
-## 16. “Có nhà nhưng thiếu bộ não” — roadmap tiếp theo
-
-Hiện tại dự án đã có:
-
-- **Nhà**: core engine, data plane, dashboard, Sentinel, mode sovereignty.
-- **Xưởng đào tạo**: đầy đủ pipeline training + deploy gate.
-- **Đường ra sàn**: model loader + active registry + rollback.
-
-Các bước tiếp theo ưu tiên:
-
-1. Tăng dữ liệu chất lượng (collect dài ngày, liên tục).
-2. Thiết lập chu kỳ huấn luyện (daily nhẹ + weekly sâu).
-3. Chuẩn hóa benchmark trước activate (holdout, drawdown, turnover, stability).
-4. Chạy paper trading testnet đủ dài trước khi dùng vốn thật.
-5. Thêm panel dashboard cho `agent_brain`, `regime_brain`, holdout metrics.
-
-### Next Steps đề xuất cho đề tài KHKT
-
-1. **Visualizing Model Confidence**
-   - Vẽ confidence theo thời gian của từng desk và confidence fusion tổng.
-   - Mục tiêu: chứng minh hệ thống “biết khi nào nên tự tin, khi nào nên phòng thủ”.
-2. **Backtesting Comparison Dashboard**
-   - So sánh `trained` vs `heuristic` trên cùng giai đoạn dữ liệu.
-   - Báo cáo các chỉ số: hit-rate, drawdown, turnover, stability.
-3. **Stress Testing với Black Swan Scenarios**
-   - Tạo kịch bản shock thanh khoản, spike funding, liquidation cascade trong `SIMULATION`.
-   - Đánh giá khả năng hệ thống giảm đòn bẩy/rút về `FLAT`.
-4. **Model Governance nâng cao**
-   - Gắn version, commit hash, tập dữ liệu train vào manifest để audit truy xuất đầy đủ.
-5. **Đánh giá đa tài sản**
-   - Mở rộng từ 1 symbol sang nhiều symbol để đánh giá độ bền của kiến trúc fusion.
-
----
-
-## 17. Bảo mật bắt buộc
+## 12. Security rules
 
 - Không commit `.env`.
-- Không chụp/chia sẻ ảnh chứa API key/secret.
-- Nếu nghi lộ key: revoke ngay và tạo key mới.
+- Không chụp màn hình chứa API key/secret.
+- Dùng Binance testnet trước khi bật trade credential thật.
+- Nếu key nghi bị lộ: revoke ngay, tạo key mới, restart backend.
+- Không expose port backend public nếu chưa có auth.
 
 ---
 
-## 18. Tệp mã nguồn tham chiếu quan trọng
+## 13. Current engineering state
 
-- `core/engine.py` — Tick Engine 5 phase
-- `core/mode.py` — REALITY/SIMULATION gates
-- `main.py` — API runtime + health
-- `training/collect.py` — Phase A
-- `training/label.py` — Phase B
-- `training/train_ppo.py` — PPO + normalizer sidecar
-- `training/fit_regime.py` — HMM/GMM
-- `training/train_world.py` — neural world model
-- `training/orchestrator.py` — orchestration + manifest
-- `training/deploy.py` — verify/activate/rollback
-- `ai/agents/agent_loaders.py` — live trading desks
-- `ai/regime/regime.py` — live trained regime loader
-- `ai/inference/predictor.py` — executive inference boardroom
+Hệ thống hiện đã vượt qua giai đoạn "khung demo":
 
----
+- Có runtime event-driven đầy đủ.
+- Có Quant/World mode sovereignty.
+- Có cockpit UI và system event log persistent.
+- Có Sentinel dùng execution-truth equity.
+- Có CCXT live/synthetic execution bridge với air-gap.
+- Có database failover thay vì silent fail.
 
-## 19. Chuỗi lệnh vận hành đề xuất
-
-```bash
-# 1) Thu thập dữ liệu
-make data-collect
-
-# 2) Label + huấn luyện
-make data-label
-make setup-train
-make train-all
-
-# 3) Kiểm định + kích hoạt
-make model-verify
-make model-deploy
-
-# 4) Restart backend để nạp active models
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-Sau restart, kiểm tra telemetry/`ai.signal`:
-
-- `agent_brain` nên chuyển sang `trained` khi PPO checkpoint và runtime stack hợp lệ.
-- `regime_brain` nên là `trained` khi `hmm_4state.pkl` active và load thành công.
-
----
-
-ECONITH hiện đã có đủ khung để đi trọn vòng đời mô hình:
-**dữ liệu thật -> huấn luyện -> kiểm định -> kích hoạt -> suy luận live an toàn**.
+Việc tiếp theo không phải thêm nhiều màn hình hơn, mà là **đóng test, bảo mật, quan sát hệ thống, rồi mới mở rộng multi-symbol và paper campaign**.

@@ -1,6 +1,6 @@
 import pytest
 
-from freqtrade.persistence import FtNoDBContext, PairLocks, Trade
+from econith.persistence import FtNoDBContext, PairLocks, Trade
 
 
 @pytest.mark.parametrize("timeframe", ["", "5m", "1d"])

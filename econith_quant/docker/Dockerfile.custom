@@ -1,11 +1,8 @@
-FROM freqtradeorg/freqtrade:develop
+FROM econith/econith-quant:develop
 
-# Switch user to root if you must install something from apt
-# Don't forget to switch the user back below!
-# USER root
+# Install custom dependencies
+COPY requirements-custom.txt /econith/
 
-# The below dependency - pyti - serves as an example. Please use whatever you need!
-RUN pip install --user pyti
+RUN pip install -r requirements-custom.txt --user --no-cache-dir
 
-# Switch back to user (only if you required root above)
-# USER ftuser
+# USER econithuser

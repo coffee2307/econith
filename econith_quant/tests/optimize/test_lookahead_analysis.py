@@ -5,12 +5,12 @@ from unittest.mock import MagicMock, PropertyMock
 
 import pytest
 
-from freqtrade.commands.optimize_commands import start_lookahead_analysis
-from freqtrade.data.history import get_timerange
-from freqtrade.exceptions import OperationalException
-from freqtrade.optimize.analysis.lookahead import Analysis, LookaheadAnalysis
-from freqtrade.optimize.analysis.lookahead_helpers import LookaheadAnalysisSubFunctions
-from freqtrade.util import get_progress_tracker
+from econith.commands.optimize_commands import start_lookahead_analysis
+from econith.data.history import get_timerange
+from econith.exceptions import OperationalException
+from econith.optimize.analysis.lookahead import Analysis, LookaheadAnalysis
+from econith.optimize.analysis.lookahead_helpers import LookaheadAnalysisSubFunctions
+from econith.util import get_progress_tracker
 from tests.conftest import EXMS, get_args, log_has_re, patch_exchange
 
 
@@ -41,7 +41,7 @@ def test_start_lookahead_analysis(mocker):
     single_mock = MagicMock()
     text_table_mock = MagicMock()
     mocker.patch.multiple(
-        "freqtrade.optimize.analysis.lookahead_helpers.LookaheadAnalysisSubFunctions",
+        "econith.optimize.analysis.lookahead_helpers.LookaheadAnalysisSubFunctions",
         initialize_single_lookahead_analysis=single_mock,
         text_table_lookahead_analysis_instances=text_table_mock,
     )
@@ -128,7 +128,7 @@ def test_lookahead_helper_start(lookahead_conf, mocker, caplog) -> None:
     single_mock = MagicMock()
     text_table_mock = MagicMock()
     mocker.patch.multiple(
-        "freqtrade.optimize.analysis.lookahead_helpers.LookaheadAnalysisSubFunctions",
+        "econith.optimize.analysis.lookahead_helpers.LookaheadAnalysisSubFunctions",
         initialize_single_lookahead_analysis=single_mock,
         text_table_lookahead_analysis_instances=text_table_mock,
     )
@@ -189,7 +189,7 @@ def test_lookahead_helper_start__caption_based_on_indicators(
     single_mock.return_value = lookahead_analysis
     text_table_mock = MagicMock()
     mocker.patch.multiple(
-        "freqtrade.optimize.analysis.lookahead_helpers.LookaheadAnalysisSubFunctions",
+        "econith.optimize.analysis.lookahead_helpers.LookaheadAnalysisSubFunctions",
         initialize_single_lookahead_analysis=single_mock,
         text_table_lookahead_analysis_instances=text_table_mock,
     )
@@ -291,7 +291,7 @@ def test_lookahead_helper_text_table_lookahead_analysis_instances__caption(
 
     print_rich_table_mock = MagicMock()
     mocker.patch(
-        "freqtrade.optimize.analysis.lookahead_helpers.print_rich_table",
+        "econith.optimize.analysis.lookahead_helpers.print_rich_table",
         print_rich_table_mock,
     )
     lookahead_analysis = LookaheadAnalysis(
@@ -429,20 +429,20 @@ def test_lookahead_helper_export_to_csv(lookahead_conf):
 
 
 def test_initialize_single_lookahead_analysis(lookahead_conf, mocker, caplog):
-    mocker.patch("freqtrade.data.history.get_timerange", get_timerange)
+    mocker.patch("econith.data.history.get_timerange", get_timerange)
     mocker.patch(f"{EXMS}.get_fee", return_value=0.0)
     mocker.patch(f"{EXMS}.get_min_pair_stake_amount", return_value=0.00001)
     mocker.patch(f"{EXMS}.get_max_pair_stake_amount", return_value=float("inf"))
     patch_exchange(mocker)
     mocker.patch(
-        "freqtrade.plugins.pairlistmanager.PairListManager.whitelist",
+        "econith.plugins.pairlistmanager.PairListManager.whitelist",
         PropertyMock(return_value=["UNITTEST/BTC"]),
     )
     lookahead_conf["pairs"] = ["UNITTEST/USDT"]
 
     lookahead_conf["timeframe"] = "5m"
     lookahead_conf["timerange"] = "20180119-20180122"
-    start_mock = mocker.patch("freqtrade.optimize.analysis.lookahead.LookaheadAnalysis.start")
+    start_mock = mocker.patch("econith.optimize.analysis.lookahead.LookaheadAnalysis.start")
     strategy_obj = {
         "name": "strategy_test_v3_with_lookahead_bias",
         "location": Path(lookahead_conf["strategy_path"], f"{lookahead_conf['strategy']}.py"),
@@ -460,12 +460,12 @@ def test_initialize_single_lookahead_analysis(lookahead_conf, mocker, caplog):
 @pytest.mark.parametrize("scenario", ["no_bias", "bias1"])
 def test_biased_strategy(lookahead_conf, mocker, caplog, scenario) -> None:
     patch_exchange(mocker)
-    mocker.patch("freqtrade.data.history.get_timerange", get_timerange)
+    mocker.patch("econith.data.history.get_timerange", get_timerange)
     mocker.patch(f"{EXMS}.get_fee", return_value=0.0)
     mocker.patch(f"{EXMS}.get_min_pair_stake_amount", return_value=0.00001)
     mocker.patch(f"{EXMS}.get_max_pair_stake_amount", return_value=float("inf"))
     mocker.patch(
-        "freqtrade.plugins.pairlistmanager.PairListManager.whitelist",
+        "econith.plugins.pairlistmanager.PairListManager.whitelist",
         PropertyMock(return_value=["UNITTEST/BTC"]),
     )
     lookahead_conf["pairs"] = ["UNITTEST/USDT"]
@@ -475,7 +475,7 @@ def test_biased_strategy(lookahead_conf, mocker, caplog, scenario) -> None:
 
     # Patch scenario Parameter to allow for easy selection
     mocker.patch(
-        "freqtrade.strategy.hyper.HyperStrategyMixin.load_params_from_file",
+        "econith.strategy.hyper.HyperStrategyMixin.load_params_from_file",
         return_value={"params": {"buy": {"scenario": scenario}}},
     )
 

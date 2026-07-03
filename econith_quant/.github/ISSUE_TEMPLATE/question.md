@@ -8,7 +8,7 @@ assignees: ''
 ---
 <!-- 
 Have you searched for similar issues before posting it?
-Did you have a VERY good look at the [documentation](https://www.freqtrade.io/) and are sure that the question is not explained there
+Did you have a VERY good look at the [documentation](https://econith/) and are sure that the question is not explained there
 
 Please do not use the question template to report bugs or to request new features.
 
@@ -21,8 +21,8 @@ Please consult the documentation. We'll close such issues and point to the docum
   * Operating system: ____
   * Python Version: _____ (`python -V`)
   * CCXT version: _____ (`pip freeze | grep ccxt`)
-  * ECONITH Quant Version: ____ (`freqtrade -V` or `docker compose run --rm freqtrade -V` for ECONITH Quant running in docker)
+  * ECONITH Quant Version: ____ (`econith -V` or `docker compose run --rm econith -V` for ECONITH Quant running in docker)
   
 ## Your question
 
-*Ask the question you have not been able to find an answer in the [Documentation](https://www.freqtrade.io/)*
+*Ask the question you have not been able to find an answer in the [Documentation](https://econith/)*

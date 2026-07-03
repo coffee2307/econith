@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from freqtrade.commands import Arguments, arguments
-from freqtrade.commands.cli_options import (
+from econith.commands import Arguments, arguments
+from econith.commands.cli_options import (
     AVAILABLE_CLI_OPTIONS,
     check_int_nonzero,
     check_int_positive,

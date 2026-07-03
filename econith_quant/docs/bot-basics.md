@@ -35,7 +35,7 @@ For futures pairs, naming will be `base/quote:settle` (e.g. `ETH/USDT:USDT`).
 
 ## Bot execution logic
 
-Starting freqtrade in dry-run or live mode (using `freqtrade trade`) will start the bot and start the bot iteration loop.
+Starting econith in dry-run or live mode (using `econith trade`) will start the bot and start the bot iteration loop.
 This will also run the `bot_start()` callback.
 
 By default, the bot loop runs every few seconds (`internals.process_throttle_secs`) and performs the following actions:

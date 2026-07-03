@@ -3,7 +3,7 @@
 Simple command line client for Testing/debugging
 a ECONITH Quant bot's message websocket
 
-Should not import anything from freqtrade,
+Should not import anything from econith,
 so it can be used as a standalone script.
 """
 

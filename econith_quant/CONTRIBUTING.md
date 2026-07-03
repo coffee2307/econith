@@ -1,10 +1,10 @@
 # Contributing
 
-## Contribute to freqtrade
+## Contribute to econith
 
 Feel like our bot is missing a feature? We welcome your pull requests! 
 
-Issues labeled [good first issue](https://github.com/freqtrade/freqtrade/labels/good%20first%20issue) can be good first contributions, and will help get you familiar with the codebase.
+Issues labeled [good first issue](https://github.com/econith/econith/labels/good%20first%20issue) can be good first contributions, and will help get you familiar with the codebase.
 
 Few pointers for contributions:
 
@@ -15,11 +15,11 @@ Few pointers for contributions:
 - If you're using AI for your PR, please both mention it in the PR description and do a thorough review of the generated code yourself.  
   The final responsibility for the code with the PR author, not with the AI, which also means that commits must be linked to your (human) account, not some generic AI account.
 
-If you are unsure, discuss the feature on our [discord server](https://discord.gg/p7nuUNVfP7) or in a [issue](https://github.com/freqtrade/freqtrade/issues) before a Pull Request.
+If you are unsure, discuss the feature on our [discord server](https://discord.gg/p7nuUNVfP7) or in a [issue](https://github.com/econith/econith/issues) before a Pull Request.
 
 ## Getting started
 
-Best start by reading the [documentation](https://www.freqtrade.io/) to get a feel for what is possible with the bot, or head straight to the [Developer-documentation](https://www.freqtrade.io/en/latest/developer/) (WIP) which should help you getting started.
+Best start by reading the [documentation](https://econith/) to get a feel for what is possible with the bot, or head straight to the [Developer-documentation](https://econith/en/latest/developer/) (WIP) which should help you getting started.
 
 ## Before sending the PR
 
@@ -79,7 +79,7 @@ ruff format .
 Check your code with mypy to ensure that it follows the type-hinting rules.
 
 ``` bash
-mypy freqtrade
+mypy econith
 ```
 
 ## (Core)-Committer Guide

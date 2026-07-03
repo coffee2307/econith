@@ -3,7 +3,7 @@
 # ECONITH :: Phase 0 :: Step 1a -- Structural rename of the vendored repo folder
 # -----------------------------------------------------------------------------
 # Renames the cloned upstream trading engine directory:
-#     econith/freqtrade/  ->  econith/econith_quant/
+#     econith/econith/  ->  econith/econith_quant/
 #
 # This ONLY renames the top-level folder. It does NOT touch source code yet.
 # Run 02_refactor_strings.py afterwards for the code-level rebrand.
@@ -17,7 +17,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-SRC="freqtrade"
+SRC="econith"
 DST="econith_quant"
 
 echo "==> ECONITH structural rename"

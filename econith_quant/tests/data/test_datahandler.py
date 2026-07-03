@@ -9,18 +9,18 @@ import pytest
 from pandas import DataFrame, Timestamp
 from pandas.testing import assert_frame_equal
 
-from freqtrade.configuration import TimeRange
-from freqtrade.constants import AVAILABLE_DATAHANDLERS
-from freqtrade.data.history.datahandlers.featherdatahandler import FeatherDataHandler
-from freqtrade.data.history.datahandlers.idatahandler import (
+from econith.configuration import TimeRange
+from econith.constants import AVAILABLE_DATAHANDLERS
+from econith.data.history.datahandlers.featherdatahandler import FeatherDataHandler
+from econith.data.history.datahandlers.idatahandler import (
     IDataHandler,
     get_datahandler,
     get_datahandlerclass,
 )
-from freqtrade.data.history.datahandlers.jsondatahandler import JsonDataHandler, JsonGzDataHandler
-from freqtrade.data.history.datahandlers.parquetdatahandler import ParquetDataHandler
-from freqtrade.enums import CandleType, TradingMode
-from freqtrade.exceptions import OperationalException
+from econith.data.history.datahandlers.jsondatahandler import JsonDataHandler, JsonGzDataHandler
+from econith.data.history.datahandlers.parquetdatahandler import ParquetDataHandler
+from econith.enums import CandleType, TradingMode
+from econith.exceptions import OperationalException
 from tests.conftest import log_has, log_has_re
 
 
@@ -364,11 +364,11 @@ def test_generic_datahandler_ohlcv_load_and_resave(
 
     # Try loading a file that exists but errors
     mocker.patch(
-        "freqtrade.data.history.datahandlers.featherdatahandler.read_feather",
+        "econith.data.history.datahandlers.featherdatahandler.read_feather",
         side_effect=Exception("Test"),
     )
     mocker.patch(
-        "freqtrade.data.history.datahandlers.parquetdatahandler.read_parquet",
+        "econith.data.history.datahandlers.parquetdatahandler.read_parquet",
         side_effect=Exception("Test"),
     )
     ohlcv_e = dh1.ohlcv_load("UNITTEST/NEW", timeframe, candle_type=candle_type)
@@ -528,7 +528,7 @@ def test_feather_trades_timerange_pushdown_fallback(
     feather_dh, trades_full, timerange_mid, monkeypatch, caplog
 ):
     # Pushdown filter should fail, so fallback should load the entire file
-    import freqtrade.data.history.datahandlers.featherdatahandler as fdh
+    import econith.data.history.datahandlers.featherdatahandler as fdh
 
     def raise_err(*args, **kwargs):
         raise ValueError("fail")

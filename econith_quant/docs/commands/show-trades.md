@@ -1,5 +1,5 @@
 ``` output
-usage: freqtrade show-trades [-h] [-v] [--no-color] [--logfile FILE] [-V]
+usage: econith show-trades [-h] [-v] [--no-color] [--logfile FILE] [-V]
                              [-c PATH] [-d PATH] [--userdir PATH]
                              [--db-url PATH]
                              [--trade-ids TRADE_IDS [TRADE_IDS ...]]

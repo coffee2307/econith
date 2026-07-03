@@ -1,5 +1,5 @@
 ``` output
-usage: freqtrade hyperopt-list [-h] [-v] [--no-color] [--logfile FILE] [-V]
+usage: econith hyperopt-list [-h] [-v] [--no-color] [--logfile FILE] [-V]
                                [-c PATH] [-d PATH] [--userdir PATH] [--best]
                                [--profitable] [--min-trades INT]
                                [--max-trades INT] [--min-avg-time FLOAT]

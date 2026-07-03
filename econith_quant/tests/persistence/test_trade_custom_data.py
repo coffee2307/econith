@@ -3,15 +3,15 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from freqtrade.data.history.history_utils import get_timerange
-from freqtrade.optimize.backtesting import Backtesting
-from freqtrade.persistence import Trade, disable_database_use, enable_database_use
-from freqtrade.persistence.custom_data import CustomDataWrapper
+from econith.data.history.history_utils import get_timerange
+from econith.optimize.backtesting import Backtesting
+from econith.persistence import Trade, disable_database_use, enable_database_use
+from econith.persistence.custom_data import CustomDataWrapper
 from tests.conftest import (
     EXMS,
     create_mock_trades_usdt,
     generate_test_data,
-    get_patched_freqtradebot,
+    get_patched_econithbot,
     patch_exchange,
 )
 
@@ -59,11 +59,11 @@ def test_trade_custom_data(fee, use_db):
 
 def test_trade_custom_data_strategy_compat(mocker, default_conf_usdt, fee):
     mocker.patch(f"{EXMS}.get_rate", return_value=0.50)
-    mocker.patch("freqtrade.freqtradebot.ECONITH QuantBot.get_real_amount", return_value=None)
-    mocker.patch("freqtrade.freqtradebot.ECONITH QuantBot.handle_cancel_exit", return_value=True)
+    mocker.patch("econith.econithbot.EconithBot.get_real_amount", return_value=None)
+    mocker.patch("econith.econithbot.EconithBot.handle_cancel_exit", return_value=True)
     default_conf_usdt["minimal_roi"] = {"0": 100}
 
-    freqtrade = get_patched_freqtradebot(mocker, default_conf_usdt)
+    econith = get_patched_econithbot(mocker, default_conf_usdt)
     create_mock_trades_usdt(fee)
 
     trade1 = Trade.get_trades_proxy(pair="ADA/USDT")[0]
@@ -77,10 +77,10 @@ def test_trade_custom_data_strategy_compat(mocker, default_conf_usdt, fee):
 
             return f"{custom_val}_{custom_val_i}"
 
-    freqtrade.strategy.custom_exit = custom_exit
-    ff_spy = mocker.spy(freqtrade.strategy, "custom_exit")
+    econith.strategy.custom_exit = custom_exit
+    ff_spy = mocker.spy(econith.strategy, "custom_exit")
     trades = Trade.get_open_trades()
-    freqtrade.exit_positions(trades)
+    econith.exit_positions(trades)
     Trade.commit()
 
     trade_after = Trade.get_trades_proxy(pair="ADA/USDT")[0]
@@ -99,7 +99,7 @@ def test_trade_custom_data_strategy_backtest_compat(mocker, default_conf_usdt, f
     mocker.patch(f"{EXMS}.get_max_pair_stake_amount", return_value=float("inf"))
     mocker.patch(f"{EXMS}.get_max_leverage", return_value=10)
     mocker.patch(f"{EXMS}.get_maintenance_ratio_and_amt", return_value=(0.1, 0.1))
-    mocker.patch("freqtrade.optimize.backtesting.Backtesting._run_funding_fees")
+    mocker.patch("econith.optimize.backtesting.Backtesting._run_funding_fees")
 
     patch_exchange(mocker)
     default_conf_usdt.update(

@@ -4,10 +4,10 @@ from unittest.mock import MagicMock, PropertyMock
 
 import pytest
 
-from freqtrade.enums import CandleType, MarginMode, RunMode, TradingMode
-from freqtrade.exceptions import InvalidOrderException, OperationalException, RetryableOrderError
-from freqtrade.exchange.common import API_RETRY_COUNT
-from freqtrade.util import dt_now, dt_ts, dt_utc
+from econith.enums import CandleType, MarginMode, RunMode, TradingMode
+from econith.exceptions import InvalidOrderException, OperationalException, RetryableOrderError
+from econith.exchange.common import API_RETRY_COUNT
+from econith.util import dt_now, dt_ts, dt_utc
 from tests.conftest import EXMS, get_patched_exchange
 from tests.exchange.test_exchange import ccxt_exceptionhandlers
 
@@ -15,7 +15,7 @@ from tests.exchange.test_exchange import ccxt_exceptionhandlers
 @pytest.mark.usefixtures("init_persistence")
 def test_fetch_stoploss_order_bitget(default_conf, mocker):
     default_conf["dry_run"] = False
-    mocker.patch("freqtrade.exchange.common.time.sleep")
+    mocker.patch("econith.exchange.common.time.sleep")
     api_mock = MagicMock()
 
     exchange = get_patched_exchange(mocker, default_conf, api_mock, exchange="bitget")

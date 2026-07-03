@@ -1,19 +1,19 @@
 # FreqUI
 
-ECONITH Quant provides a builtin webserver, which can serve [FreqUI](https://github.com/freqtrade/frequi), the freqtrade frontend.
+ECONITH Quant provides a builtin webserver, which can serve [FreqUI](https://github.com/econith/frequi), the econith frontend.
 
 By default, the UI is automatically installed as part of the installation (script, docker).
-freqUI can also be manually installed by using the `freqtrade install-ui` command.
+freqUI can also be manually installed by using the `econith install-ui` command.
 This same command can also be used to update freqUI to new releases.
 
-Once the bot is started in trade / dry-run mode (with `freqtrade trade`) - the UI will be available under the configured API port (by default `http://127.0.0.1:8080`).
+Once the bot is started in trade / dry-run mode (with `econith trade`) - the UI will be available under the configured API port (by default `http://127.0.0.1:8080`).
 
 ??? Note "Looking to contribute to freqUI?"
-    Developers should not use this method, but instead clone the corresponding use the method described in the [freqUI repository](https://github.com/freqtrade/frequi) to get the source-code of freqUI. A working installation of node will be required to build the frontend.
+    Developers should not use this method, but instead clone the corresponding use the method described in the [freqUI repository](https://github.com/econith/frequi) to get the source-code of freqUI. A working installation of node will be required to build the frontend.
 
-!!! tip "freqUI is not required to run freqtrade"
-    freqUI is an optional component of freqtrade, and is not required to run the bot.
-    It is a frontend that can be used to monitor the bot and to interact with it - but freqtrade itself will work perfectly fine without it.
+!!! tip "freqUI is not required to run econith"
+    freqUI is an optional component of econith, and is not required to run the bot.
+    It is a frontend that can be used to monitor the bot and to interact with it - but econith itself will work perfectly fine without it.
 
 ## Configuration
 
@@ -53,7 +53,7 @@ If multiple bots are connected, the dashboard will show an overview of all conne
 
 #### Wallet Balance
 
-New in freqtrade 2026.4: This shows the balance of the bot over time.
+New in econith 2026.4: This shows the balance of the bot over time.
 
 Compared to the "cumulative Profit" chart, this chart will show the actual balance of the bot over time, including unrealized profit and losses, as well as deposits and withdrawals.
 
@@ -89,7 +89,7 @@ Things you can change (among others):
 
 ## Webserver mode
 
-when freqtrade is started in [webserver mode](utils.md#webserver-mode) (freqtrade started with `freqtrade webserver`), the webserver will start in a special mode allowing for additional features, for example:
+when econith is started in [webserver mode](utils.md#webserver-mode) (econith started with `econith webserver`), the webserver will start in a special mode allowing for additional features, for example:
 
 * Downloading data
 * Testing pairlists
@@ -98,7 +98,7 @@ when freqtrade is started in [webserver mode](utils.md#webserver-mode) (freqtrad
 
 ### Backtesting
 
-When freqtrade is started in [webserver mode](utils.md#webserver-mode) (freqtrade started with `freqtrade webserver`), the backtesting view becomes available.
+When econith is started in [webserver mode](utils.md#webserver-mode) (econith started with `econith webserver`), the backtesting view becomes available.
 This view allows you to backtest strategies and visualize the results.
 
 You can also load and visualize previous backtest results, as well as compare the results with each other.

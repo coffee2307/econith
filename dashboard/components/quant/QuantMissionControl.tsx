@@ -14,6 +14,7 @@ import {
 import { useMetrics } from "@/components/MetricsProvider";
 import { EventLogTerminal } from "@/components/EventLogTerminal";
 import { QuantControls } from "@/components/QuantControls";
+import { QuantCockpitHUD } from "@/components/quant/cockpit/QuantCockpitHUD";
 import { useLocale } from "@/contexts/LocaleContext";
 import { fmtNum, fmtPct, fmtSigned, fmtUsd } from "@/lib/format";
 import type { ConnectionStatus } from "@/hooks/useMetricsStream";
@@ -63,7 +64,7 @@ export function QuantMissionControl() {
           : t("connection.connecting");
 
   return (
-    <div className="quant-page-shell mx-auto h-full min-h-0 w-full max-w-7xl flex-1 overflow-hidden px-4 py-3 sm:px-6 sm:py-4">
+    <div className="quant-page-shell h-full min-h-0 w-full max-w-[100vw] flex-1 overflow-hidden px-4 py-3 lg:px-6 lg:py-4">
       {/* Status bar */}
       <div className="flex flex-none flex-wrap items-center justify-between gap-3 border-b border-line pb-3">
         <div className="min-w-0">
@@ -112,84 +113,97 @@ export function QuantMissionControl() {
         </div>
       </section>
 
-      {/* Upper deck: AI + Sentinel/controls — equal column height */}
-      <div className="quant-upper-deck grid min-h-0 grid-cols-1 gap-3 lg:grid-cols-2 lg:gap-4">
-        {/* AI */}
-        <section className="panel flex h-full min-h-0 flex-col p-3 sm:p-4">
-          <header className="mb-2 flex shrink-0 items-center justify-between gap-2">
-            <h2 className="flex items-center gap-2 text-sm font-semibold">
-              <FontAwesomeIcon icon={faBrain} className="h-4 w-4 text-accent" />
-              {t("quant.aiDecision")}
-            </h2>
-            <span className="shrink-0 font-mono text-[10px] text-muted">
-              {t("quant.regime")} {ai?.regime ?? "—"} ({fmtPct(ai?.regime_confidence ?? 0, 0)})
-            </span>
-          </header>
-          <div className="grid min-h-0 flex-1 gap-3 text-[11px] lg:grid-cols-[7.5rem_1fr_1fr] lg:items-stretch">
-            <div className="flex flex-col justify-center rounded-lg border border-line bg-elevated px-2 py-3 text-center">
-              <p className="text-[10px] uppercase tracking-wider text-faint">{t("quant.action")}</p>
-              <p
-                className={`text-3xl font-bold leading-none ${
-                  ai?.action === "LONG" ? "text-ok" : ai?.action === "SHORT" ? "text-danger" : "text-muted"
-                }`}
-              >
-                {ai?.action ?? "—"}
-              </p>
-              <p className="mt-1.5 font-mono text-[10px] leading-snug text-muted">
-                {fmtSigned(ai?.direction, 3)} · {fmtPct(ai?.confidence ?? 0, 0)}
-              </p>
-            </div>
-            <MiniTable title={t("quant.agentAllocation")} fill>
-              {ai?.weights
-                ? Object.entries(ai.weights).map(([k, w]) => (
-                    <Row key={k} left={k} right={fmtPct(w, 0)} />
-                  ))
-                : "—"}
-            </MiniTable>
-            <MiniTable title={t("quant.featureAttribution")} fill>
-              {ai?.explain?.attribution
-                ? ai.explain.attribution.slice(0, 4).map((a) => (
-                    <Row
-                      key={a.feature}
-                      left={a.feature}
-                      right={fmtSigned(a.importance, 3)}
-                      rightClass={a.importance >= 0 ? "text-ok" : "text-danger"}
-                    />
-                  ))
-                : "—"}
-            </MiniTable>
+      {/* Wide desktop body: analytics flank (left) + persistent log flank (right) */}
+      <div className="quant-body-grid grid min-h-0 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_22rem] lg:gap-4 xl:grid-cols-[minmax(0,1fr)_26rem]">
+        {/* Left flank — core analytics stack, independent scroll */}
+        <div className="quant-analytics-flank flex min-h-0 flex-col gap-3 overflow-y-auto overflow-x-hidden pr-0 lg:gap-4 lg:pr-1">
+          {/* Aviation cockpit HUD — PnL, margin, fills, allocation */}
+          <div className="quant-cockpit-deck min-h-0 flex-none">
+            <QuantCockpitHUD />
           </div>
-        </section>
 
-        {/* Right column: Sentinel telemetry + mode-gated operator console */}
-        <div className="flex h-full min-h-0 flex-col gap-3 lg:gap-4">
-          <section className="panel shrink-0 p-3 sm:p-4">
-            <header className="mb-2 flex items-center gap-2">
-              <FontAwesomeIcon icon={faShieldHalved} className={`h-4 w-4 ${BREAKER_COLOR[breaker] ?? "text-muted"}`} />
-              <h2 className="text-sm font-semibold">{t("quant.sentinelLayer")}</h2>
-            </header>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <Cell label={t("quant.equity")} value={`$${fmtUsd(sentinel?.equity)}`} />
-              <Cell label={t("quant.drawdown")} value={fmtPct(sentinel?.drawdown)} accent={(sentinel?.drawdown ?? 0) >= 0.03 ? "text-danger" : undefined} />
-              <Cell label={t("quant.var")} value={fmtPct(sentinel?.var)} accent={(sentinel?.var ?? 0) > 0.03 ? "text-warn" : undefined} />
-              <Cell label={t("quant.latency")} value={`${fmtNum(sentinel?.latency_ms, 1)} ms`} accent={(sentinel?.latency_ms ?? 0) > 300 ? "text-danger" : undefined} />
+          {/* AI + Sentinel/controls */}
+          <div className="grid min-h-0 flex-none grid-cols-1 gap-3 xl:grid-cols-2 xl:gap-4">
+            {/* AI */}
+            <section className="panel flex min-h-0 flex-col p-3 sm:p-4">
+              <header className="mb-2 flex shrink-0 items-center justify-between gap-2">
+                <h2 className="flex items-center gap-2 text-sm font-semibold">
+                  <FontAwesomeIcon icon={faBrain} className="h-4 w-4 text-accent" />
+                  {t("quant.aiDecision")}
+                </h2>
+                <span className="shrink-0 font-mono text-[10px] text-muted">
+                  {t("quant.regime")} {ai?.regime ?? "—"} ({fmtPct(ai?.regime_confidence ?? 0, 0)})
+                </span>
+              </header>
+              <div className="grid min-h-0 flex-1 gap-3 text-[11px] sm:grid-cols-[7.5rem_1fr_1fr] sm:items-stretch">
+                <div className="flex flex-col justify-center rounded-lg border border-line bg-elevated px-2 py-3 text-center">
+                  <p className="text-[10px] uppercase tracking-wider text-faint">{t("quant.action")}</p>
+                  <p
+                    className={`text-3xl font-bold leading-none ${
+                      ai?.action === "LONG" ? "text-ok" : ai?.action === "SHORT" ? "text-danger" : "text-muted"
+                    }`}
+                  >
+                    {ai?.action ?? "—"}
+                  </p>
+                  <p className="mt-1.5 font-mono text-[10px] leading-snug text-muted">
+                    {fmtSigned(ai?.direction, 3)} · {fmtPct(ai?.confidence ?? 0, 0)}
+                  </p>
+                </div>
+                <MiniTable title={t("quant.agentAllocation")} fill>
+                  {ai?.weights
+                    ? Object.entries(ai.weights).map(([k, w]) => (
+                        <Row key={k} left={k} right={fmtPct(w, 0)} />
+                      ))
+                    : "—"}
+                </MiniTable>
+                <MiniTable title={t("quant.featureAttribution")} fill>
+                  {ai?.explain?.attribution
+                    ? ai.explain.attribution.slice(0, 4).map((a) => (
+                        <Row
+                          key={a.feature}
+                          left={a.feature}
+                          right={fmtSigned(a.importance, 3)}
+                          rightClass={a.importance >= 0 ? "text-ok" : "text-danger"}
+                        />
+                      ))
+                    : "—"}
+                </MiniTable>
+              </div>
+            </section>
+
+            {/* Sentinel telemetry + mode-gated operator console */}
+            <div className="flex min-h-0 flex-col gap-3 lg:gap-4">
+              <section className="panel shrink-0 p-3 sm:p-4">
+                <header className="mb-2 flex items-center gap-2">
+                  <FontAwesomeIcon icon={faShieldHalved} className={`h-4 w-4 ${BREAKER_COLOR[breaker] ?? "text-muted"}`} />
+                  <h2 className="text-sm font-semibold">{t("quant.sentinelLayer")}</h2>
+                </header>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <Cell label={t("quant.equity")} value={`$${fmtUsd(sentinel?.equity)}`} />
+                  <Cell label={t("quant.drawdown")} value={fmtPct(sentinel?.drawdown)} accent={(sentinel?.drawdown ?? 0) >= 0.03 ? "text-danger" : undefined} />
+                  <Cell label={t("quant.var")} value={fmtPct(sentinel?.var)} accent={(sentinel?.var ?? 0) > 0.03 ? "text-warn" : undefined} />
+                  <Cell label={t("quant.latency")} value={`${fmtNum(sentinel?.latency_ms, 1)} ms`} accent={(sentinel?.latency_ms ?? 0) > 300 ? "text-danger" : undefined} />
+                </div>
+                {sentinel?.breaker_reason ? (
+                  <p className="mt-2 rounded-lg border border-line bg-base px-3 py-2 font-mono text-[11px] text-muted">
+                    <span className="text-faint">{t("quant.reason")} </span>
+                    {sentinel.breaker_reason}
+                  </p>
+                ) : null}
+              </section>
+
+              <div className="min-h-0 flex-1">
+                <QuantControls />
+              </div>
             </div>
-            {sentinel?.breaker_reason ? (
-              <p className="mt-2 rounded-lg border border-line bg-base px-3 py-2 font-mono text-[11px] text-muted">
-                <span className="text-faint">{t("quant.reason")} </span>
-                {sentinel.breaker_reason}
-              </p>
-            ) : null}
-          </section>
-
-          <div className="min-h-0 flex-1">
-            <QuantControls />
           </div>
         </div>
-      </div>
 
-      {/* Bottom terminal dock */}
-      <EventLogTerminal events={events} dock />
+        {/* Right flank — persistent System Event Log, anchored & independently scrollable */}
+        <aside className="quant-log-flank flex min-h-[18rem] flex-col lg:min-h-0">
+          <EventLogTerminal events={events} dock />
+        </aside>
+      </div>
     </div>
   );
 }

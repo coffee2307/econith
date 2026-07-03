@@ -2,16 +2,16 @@
 
 ## Getting data for backtesting and hyperopt
 
-To download data (candles / OHLCV) needed for backtesting and hyperoptimization use the `freqtrade download-data` command.
+To download data (candles / OHLCV) needed for backtesting and hyperoptimization use the `econith download-data` command.
 
-If no additional parameter is specified, freqtrade will download data for `"1m"` and `"5m"` timeframes for the last 30 days.
+If no additional parameter is specified, econith will download data for `"1m"` and `"5m"` timeframes for the last 30 days.
 Exchange and pairs will come from `config.json` (if specified using `-c/--config`).
 Without provided configuration, `--exchange` becomes mandatory.
 
 You can use a relative timerange (`--days 20`) or an absolute starting point (`--timerange 20200101-`). For incremental downloads, the relative approach should be used.
 
 !!! Tip "Tip: Updating existing data"
-    If you already have backtesting data available in your data-directory and would like to refresh this data up to today, freqtrade will automatically calculate the missing timerange for the existing pairs and the download will occur from the latest available point until "now", neither `--days` or `--timerange` parameters are required. ECONITH Quant will keep the available data and only download the missing data.  
+    If you already have backtesting data available in your data-directory and would like to refresh this data up to today, econith will automatically calculate the missing timerange for the existing pairs and the download will occur from the latest available point until "now", neither `--days` or `--timerange` parameters are required. ECONITH Quant will keep the available data and only download the missing data.  
     If you are updating existing data after inserting new pairs that you have no data for, use the `--new-pairs-days xx` parameter. Specified number of days will be downloaded for new pairs while old pairs will be updated with missing data only.  
 
 ### Usage
@@ -20,7 +20,7 @@ You can use a relative timerange (`--days 20`) or an absolute starting point (`-
 
 !!! Tip "Downloading all data for one quote currency"
     Often, you'll want to download data for all pairs of a specific quote-currency. In such cases, you can use the following shorthand:
-    `freqtrade download-data --exchange binance --pairs ".*/USDT" <...>`. The provided "pairs" string will be expanded to contain all active pairs on the exchange.
+    `econith download-data --exchange binance --pairs ".*/USDT" <...>`. The provided "pairs" string will be expanded to contain all active pairs on the exchange.
     To also download data for inactive (delisted) pairs, add `--include-inactive-pairs` to the command.
 
 !!! Note "Startup period"
@@ -33,7 +33,7 @@ You can use a relative timerange (`--days 20`) or an absolute starting point (`-
 A very simple command (assuming an available `config.json` file) can look as follows.
 
 ```bash
-freqtrade download-data --exchange binance
+econith download-data --exchange binance
 ```
 
 This will download historical candle (OHLCV) data for all the currency pairs defined in the configuration.
@@ -41,13 +41,13 @@ This will download historical candle (OHLCV) data for all the currency pairs def
 Alternatively, specify the pairs directly
 
 ```bash
-freqtrade download-data --exchange binance --pairs ETH/USDT XRP/USDT BTC/USDT
+econith download-data --exchange binance --pairs ETH/USDT XRP/USDT BTC/USDT
 ```
 
 or as regex (in this case, to download all active USDT pairs)
 
 ```bash
-freqtrade download-data --exchange binance --pairs ".*/USDT"
+econith download-data --exchange binance --pairs ".*/USDT"
 ```
 
 ### Other Notes
@@ -60,7 +60,7 @@ freqtrade download-data --exchange binance --pairs ".*/USDT"
 * Given starting points are ignored if data is already available, downloading only missing data up to today.
 * Use `--timeframes` to specify what timeframe download the historical candle (OHLCV) data for. Default is `--timeframes 1m 5m` which will download 1-minute and 5-minute data.
 * To use exchange, timeframe and list of pairs as defined in your configuration file, use the `-c/--config` option. With this, the script uses the whitelist defined in the config as the list of currency pairs to download data for and does not require the pairs.json file. You can combine `-c/--config` with most other options.
-* When downloading futures data (`--trading-mode futures` or a configuration specifying futures mode), freqtrade will automatically download the necessary candle types (e.g. `mark` and `funding_rate` candles) unless specified otherwise via `--candle-types`.
+* When downloading futures data (`--trading-mode futures` or a configuration specifying futures mode), econith will automatically download the necessary candle types (e.g. `mark` and `funding_rate` candles) unless specified otherwise via `--candle-types`.
 
 ??? Note "Permission denied errors"
     If your configuration directory `user_data` was made by docker, you may get the following error:
@@ -81,7 +81,7 @@ Assuming you downloaded all data from 2022 (`--timerange 20220101-`) - but you'd
 You can do so by using the `--prepend` flag, combined with `--timerange` - specifying an end-date.
 
 ``` bash
-freqtrade download-data --exchange binance --pairs ETH/USDT XRP/USDT BTC/USDT --prepend --timerange 20210101-20220101
+econith download-data --exchange binance --pairs ETH/USDT XRP/USDT BTC/USDT --prepend --timerange 20210101-20220101
 ```
 
 !!! Note
@@ -134,7 +134,7 @@ Found 6 pair / timeframe combinations.
 Timings have been taken in a not very scientific way with the following command, which forces reading the data into memory.
 
 ``` bash
-time freqtrade list-data --show-timerange --data-format-ohlcv <dataformat>
+time econith list-data --show-timerange --data-format-ohlcv <dataformat>
 ```
 
 |  Format | Size | timing |
@@ -183,11 +183,11 @@ Mixing different stake-currencies is allowed for this file, since it's only used
 
 ### Example converting data
 
-The following command will convert all candle (OHLCV) data available in `~/.freqtrade/data/binance` from json to jsongz, saving diskspace in the process.
+The following command will convert all candle (OHLCV) data available in `~/.econith/data/binance` from json to jsongz, saving diskspace in the process.
 It'll also remove original json data files (`--erase` parameter).
 
 ``` bash
-freqtrade convert-data --format-from json --format-to jsongz --datadir ~/.freqtrade/data/binance -t 5m 15m --erase
+econith convert-data --format-from json --format-to jsongz --datadir ~/.econith/data/binance -t 5m 15m --erase
 ```
 
 ## Sub-command convert trade data
@@ -196,11 +196,11 @@ freqtrade convert-data --format-from json --format-to jsongz --datadir ~/.freqtr
 
 ### Example converting trades
 
-The following command will convert all available trade-data in `~/.freqtrade/data/kraken` from jsongz to json.
+The following command will convert all available trade-data in `~/.econith/data/kraken` from jsongz to json.
 It'll also remove original jsongz data files (`--erase` parameter).
 
 ``` bash
-freqtrade convert-trade-data --format-from jsongz --format-to json --datadir ~/.freqtrade/data/kraken --erase
+econith convert-trade-data --format-from jsongz --format-to json --datadir ~/.econith/data/kraken --erase
 ```
 
 ## Sub-command trades to ohlcv
@@ -213,7 +213,7 @@ This command will allow you to repeat this last step for additional timeframes w
 ### Example trade-to-ohlcv conversion
 
 ``` bash
-freqtrade trades-to-ohlcv --exchange kraken -t 5m 1h 1d --pairs BTC/EUR ETH/EUR
+econith trades-to-ohlcv --exchange kraken -t 5m 1h 1d --pairs BTC/EUR ETH/EUR
 ```
 
 ## Sub-command list-data
@@ -225,7 +225,7 @@ You can get a list of downloaded data using the `list-data` sub-command.
 ### Example list-data
 
 ```bash
-> freqtrade list-data --userdir ~/.freqtrade/user_data/
+> econith list-data --userdir ~/.econith/user_data/
 
               Found 33 pair / timeframe combinations.
 ┏━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━┓
@@ -242,7 +242,7 @@ You can get a list of downloaded data using the `list-data` sub-command.
 Show all trades data including from/to timerange
 
 ``` bash
-> freqtrade list-data --show --trades
+> econith list-data --show --trades
                      Found trades data for 1 pair.                     
 ┏━━━━━━━━━┳━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━┓
 ┃    Pair ┃ Type ┃                From ┃                  To ┃ Trades ┃
@@ -274,7 +274,7 @@ If `--convert` is also provided, the resample step will happen automatically and
 Example call:
 
 ```bash
-freqtrade download-data --exchange kraken --pairs XRP/EUR ETH/EUR --days 20 --dl-trades
+econith download-data --exchange kraken --pairs XRP/EUR ETH/EUR --days 20 --dl-trades
 ```
 
 !!! Note

@@ -49,5 +49,5 @@ jobs:
       with:
         commit_message: "chore(deps): Apply pre-commit types update"
         commit_user_name: ECONITH Quant Bot
-        commit_user_email: 154552126+freqtrade-bot@users.noreply.github.com
-        commit_author: ECONITH Quant Bot <154552126+freqtrade-bot@users.noreply.github.com>
+        commit_user_email: coffee2307.pham@gmail.com
+        commit_author: ECONITH Quant Bot <coffee2307.pham@gmail.com>

@@ -12,12 +12,12 @@ import pytest
 from pandas import DataFrame
 from pandas.testing import assert_frame_equal
 
-from freqtrade.configuration import TimeRange
-from freqtrade.constants import DATETIME_PRINT_FORMAT
-from freqtrade.data.converter import ohlcv_to_dataframe
-from freqtrade.data.history import get_datahandler
-from freqtrade.data.history.datahandlers.jsondatahandler import JsonDataHandler, JsonGzDataHandler
-from freqtrade.data.history.history_utils import (
+from econith.configuration import TimeRange
+from econith.constants import DATETIME_PRINT_FORMAT
+from econith.data.converter import ohlcv_to_dataframe
+from econith.data.history import get_datahandler
+from econith.data.history.datahandlers.jsondatahandler import JsonDataHandler, JsonGzDataHandler
+from econith.data.history.history_utils import (
     _download_all_pairs_history_parallel,
     _download_pair_history,
     _download_trades_history,
@@ -30,11 +30,11 @@ from freqtrade.data.history.history_utils import (
     refresh_data,
     validate_backtest_data,
 )
-from freqtrade.enums import CandleType, TradingMode
-from freqtrade.exchange import timeframe_to_minutes
-from freqtrade.misc import file_dump_json
-from freqtrade.resolvers import StrategyResolver
-from freqtrade.util import dt_ts, dt_utc
+from econith.enums import CandleType, TradingMode
+from econith.exchange import timeframe_to_minutes
+from econith.misc import file_dump_json
+from econith.resolvers import StrategyResolver
+from econith.util import dt_ts, dt_utc
 from tests.conftest import (
     CURRENT_TEST_STRATEGY,
     EXMS,
@@ -76,7 +76,7 @@ def test_load_data_7min_timeframe(caplog, testdatadir) -> None:
     assert ld.empty
     assert log_has(
         "No history for UNITTEST/BTC, spot, 7m found. "
-        "Use `freqtrade download-data` to download the data",
+        "Use `econith download-data` to download the data",
         caplog,
     )
 
@@ -104,7 +104,7 @@ def test_load_data_mark(ohlcv_history, mocker, caplog, testdatadir) -> None:
 
 def test_load_data_startup_candles(mocker, testdatadir) -> None:
     ltfmock = mocker.patch(
-        "freqtrade.data.history.datahandlers.featherdatahandler.FeatherDataHandler._ohlcv_load",
+        "econith.data.history.datahandlers.featherdatahandler.FeatherDataHandler._ohlcv_load",
         MagicMock(return_value=DataFrame()),
     )
     timerange = TimeRange("date", None, 1510639620, 0)
@@ -138,7 +138,7 @@ def test_load_data_with_new_pair_1min(
     assert not file.is_file()
     assert log_has(
         f"No history for MEME/BTC, {candle_type}, 1m found. "
-        "Use `freqtrade download-data` to download the data",
+        "Use `econith download-data` to download the data",
         caplog,
     )
 
@@ -162,25 +162,25 @@ def test_testdata_path(testdatadir) -> None:
 @pytest.mark.parametrize(
     "pair,timeframe,expected_result,candle_type",
     [
-        ("ETH/BTC", "5m", "freqtrade/hello/world/ETH_BTC-5m.json", ""),
-        ("ETH/USDT", "1M", "freqtrade/hello/world/ETH_USDT-1Mo.json", ""),
-        ("Fabric Token/ETH", "5m", "freqtrade/hello/world/Fabric_Token_ETH-5m.json", ""),
-        ("ETHH20", "5m", "freqtrade/hello/world/ETHH20-5m.json", ""),
-        (".XBTBON2H", "5m", "freqtrade/hello/world/_XBTBON2H-5m.json", ""),
-        ("ETHUSD.d", "5m", "freqtrade/hello/world/ETHUSD_d-5m.json", ""),
-        ("ACC_OLD/BTC", "5m", "freqtrade/hello/world/ACC_OLD_BTC-5m.json", ""),
-        ("ETH/BTC", "5m", "freqtrade/hello/world/futures/ETH_BTC-5m-mark.json", "mark"),
-        ("ACC_OLD/BTC", "5m", "freqtrade/hello/world/futures/ACC_OLD_BTC-5m-index.json", "index"),
+        ("ETH/BTC", "5m", "econith/hello/world/ETH_BTC-5m.json", ""),
+        ("ETH/USDT", "1M", "econith/hello/world/ETH_USDT-1Mo.json", ""),
+        ("Fabric Token/ETH", "5m", "econith/hello/world/Fabric_Token_ETH-5m.json", ""),
+        ("ETHH20", "5m", "econith/hello/world/ETHH20-5m.json", ""),
+        (".XBTBON2H", "5m", "econith/hello/world/_XBTBON2H-5m.json", ""),
+        ("ETHUSD.d", "5m", "econith/hello/world/ETHUSD_d-5m.json", ""),
+        ("ACC_OLD/BTC", "5m", "econith/hello/world/ACC_OLD_BTC-5m.json", ""),
+        ("ETH/BTC", "5m", "econith/hello/world/futures/ETH_BTC-5m-mark.json", "mark"),
+        ("ACC_OLD/BTC", "5m", "econith/hello/world/futures/ACC_OLD_BTC-5m-index.json", "index"),
     ],
 )
 def test_json_pair_data_filename(pair, timeframe, expected_result, candle_type):
     fn = JsonDataHandler._pair_data_filename(
-        Path("freqtrade/hello/world"), pair, timeframe, CandleType.from_string(candle_type)
+        Path("econith/hello/world"), pair, timeframe, CandleType.from_string(candle_type)
     )
     assert isinstance(fn, Path)
     assert fn == Path(expected_result)
     fn = JsonGzDataHandler._pair_data_filename(
-        Path("freqtrade/hello/world"),
+        Path("econith/hello/world"),
         pair,
         timeframe,
         candle_type=CandleType.from_string(candle_type),
@@ -192,21 +192,21 @@ def test_json_pair_data_filename(pair, timeframe, expected_result, candle_type):
 @pytest.mark.parametrize(
     "pair,trading_mode,expected_result",
     [
-        ("ETH/BTC", "", "freqtrade/hello/world/ETH_BTC-trades.json"),
-        ("ETH/USDT:USDT", "futures", "freqtrade/hello/world/futures/ETH_USDT_USDT-trades.json"),
-        ("Fabric Token/ETH", "", "freqtrade/hello/world/Fabric_Token_ETH-trades.json"),
-        ("ETHH20", "", "freqtrade/hello/world/ETHH20-trades.json"),
-        (".XBTBON2H", "", "freqtrade/hello/world/_XBTBON2H-trades.json"),
-        ("ETHUSD.d", "", "freqtrade/hello/world/ETHUSD_d-trades.json"),
-        ("ACC_OLD_BTC", "", "freqtrade/hello/world/ACC_OLD_BTC-trades.json"),
+        ("ETH/BTC", "", "econith/hello/world/ETH_BTC-trades.json"),
+        ("ETH/USDT:USDT", "futures", "econith/hello/world/futures/ETH_USDT_USDT-trades.json"),
+        ("Fabric Token/ETH", "", "econith/hello/world/Fabric_Token_ETH-trades.json"),
+        ("ETHH20", "", "econith/hello/world/ETHH20-trades.json"),
+        (".XBTBON2H", "", "econith/hello/world/_XBTBON2H-trades.json"),
+        ("ETHUSD.d", "", "econith/hello/world/ETHUSD_d-trades.json"),
+        ("ACC_OLD_BTC", "", "econith/hello/world/ACC_OLD_BTC-trades.json"),
     ],
 )
 def test_json_pair_trades_filename(pair, trading_mode, expected_result):
-    fn = JsonDataHandler._pair_trades_filename(Path("freqtrade/hello/world"), pair, trading_mode)
+    fn = JsonDataHandler._pair_trades_filename(Path("econith/hello/world"), pair, trading_mode)
     assert isinstance(fn, Path)
     assert fn == Path(expected_result)
 
-    fn = JsonGzDataHandler._pair_trades_filename(Path("freqtrade/hello/world"), pair, trading_mode)
+    fn = JsonGzDataHandler._pair_trades_filename(Path("econith/hello/world"), pair, trading_mode)
     assert isinstance(fn, Path)
     assert fn == Path(expected_result + ".gz")
 
@@ -355,7 +355,7 @@ def test_download_pair_history(
 
 def test_download_pair_history2(mocker, default_conf, testdatadir, ohlcv_history) -> None:
     json_dump_mock = mocker.patch(
-        "freqtrade.data.history.datahandlers.featherdatahandler.FeatherDataHandler.ohlcv_store",
+        "econith.data.history.datahandlers.featherdatahandler.FeatherDataHandler.ohlcv_store",
         return_value=None,
     )
     exchange = get_patched_exchange(mocker, default_conf)
@@ -545,14 +545,14 @@ def test_refresh_backtest_ohlcv_data(
     mocker, default_conf, markets, caplog, testdatadir, trademode, callcount, callcount_parallel
 ):
     caplog.set_level(logging.DEBUG)
-    dl_mock = mocker.patch("freqtrade.data.history.history_utils._download_pair_history")
+    dl_mock = mocker.patch("econith.data.history.history_utils._download_pair_history")
     mocker.patch(f"{EXMS}.verify_candle_type_support", MagicMock())
 
     def parallel_mock(pairs, timeframe, candle_type, **kwargs):
         return {(pair, timeframe, candle_type): DataFrame() for pair in pairs}
 
     parallel_mock = mocker.patch(
-        "freqtrade.data.history.history_utils._download_all_pairs_history_parallel",
+        "econith.data.history.history_utils._download_all_pairs_history_parallel",
         side_effect=parallel_mock,
     )
     mocker.patch(f"{EXMS}.markets", PropertyMock(return_value=markets))
@@ -622,7 +622,7 @@ def test_refresh_backtest_ohlcv_data(
 
 def test_download_data_no_markets(mocker, default_conf, caplog, testdatadir):
     dl_mock = mocker.patch(
-        "freqtrade.data.history.history_utils._download_pair_history", MagicMock()
+        "econith.data.history.history_utils._download_pair_history", MagicMock()
     )
 
     ex = get_patched_exchange(mocker, default_conf)
@@ -646,7 +646,7 @@ def test_download_data_no_markets(mocker, default_conf, caplog, testdatadir):
 
 def test_refresh_backtest_trades_data(mocker, default_conf, markets, caplog, testdatadir):
     dl_mock = mocker.patch(
-        "freqtrade.data.history.history_utils._download_trades_history", MagicMock()
+        "econith.data.history.history_utils._download_trades_history", MagicMock()
     )
     mocker.patch(f"{EXMS}.markets", PropertyMock(return_value=markets))
     mocker.patch.object(Path, "exists", MagicMock(return_value=True))
@@ -869,13 +869,13 @@ def test_download_pair_history_with_pair_candles(mocker, default_conf, tmp_path,
     data_handler_mock.ohlcv_load.return_value = existing_data
     data_handler_mock.ohlcv_store = MagicMock()
     mocker.patch(
-        "freqtrade.data.history.history_utils.get_datahandler", return_value=data_handler_mock
+        "econith.data.history.history_utils.get_datahandler", return_value=data_handler_mock
     )
 
     # Mock _load_cached_data_for_updating to return existing data and since_ms
     since_ms = dt_ts(dt_utc(2018, 1, 10, 10, 5))  # Time of last existing candle
     mocker.patch(
-        "freqtrade.data.history.history_utils._load_cached_data_for_updating",
+        "econith.data.history.history_utils._load_cached_data_for_updating",
         return_value=(existing_data, since_ms, None),
     )
 
@@ -964,13 +964,13 @@ def test_download_pair_history_with_pair_candles_no_overlap(
     data_handler_mock.ohlcv_load.return_value = existing_data
     data_handler_mock.ohlcv_store = MagicMock()
     mocker.patch(
-        "freqtrade.data.history.history_utils.get_datahandler", return_value=data_handler_mock
+        "econith.data.history.history_utils.get_datahandler", return_value=data_handler_mock
     )
 
     # Mock _load_cached_data_for_updating to return existing data and since_ms
     since_ms = dt_ts(dt_utc(2018, 1, 10, 10, 5))  # Time of last existing candle
     mocker.patch(
-        "freqtrade.data.history.history_utils._load_cached_data_for_updating",
+        "econith.data.history.history_utils._load_cached_data_for_updating",
         return_value=(existing_data, since_ms, None),
     )
 

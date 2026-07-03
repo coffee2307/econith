@@ -5,13 +5,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from freqtrade.configuration.directory_operations import (
+from econith.configuration.directory_operations import (
     chown_user_directory,
     copy_sample_files,
     create_datadir,
     create_userdata_dir,
 )
-from freqtrade.exceptions import OperationalException
+from econith.exceptions import OperationalException
 from tests.conftest import log_has, log_has_re
 
 
@@ -48,10 +48,10 @@ def test_create_userdata_dir_and_chown(mocker, tmp_path, caplog) -> None:
     assert path.is_dir()
     assert (path / "data").is_dir()
 
-    os.environ["FT_APP_ENV"] = "docker"
+    os.environ["ECONITH_APP_ENV"] = "docker"
     chown_user_directory(path / "data")
     assert sp_mock.call_count == 1
-    del os.environ["FT_APP_ENV"]
+    del os.environ["ECONITH_APP_ENV"]
 
 
 def test_create_userdata_dir_exists(mocker, tmp_path) -> None:

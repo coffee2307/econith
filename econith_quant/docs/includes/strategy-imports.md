@@ -3,7 +3,7 @@
 When creating a strategy, you will need to import the necessary modules and classes. The following imports are required for a strategy:
 
 By default, we recommend the following imports as a base line for your strategy:
-This will cover all imports necessary for freqtrade functions to work.
+This will cover all imports necessary for econith functions to work.
 Obviously you can add more imports as needed for your strategy.
 
 ``` python
@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from pandas import DataFrame
 from typing import Dict, Optional, Union, Tuple
 
-from freqtrade.strategy import (
+from econith.strategy import (
     IStrategy,
     Trade, 
     Order,

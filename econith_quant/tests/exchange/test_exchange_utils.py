@@ -14,9 +14,9 @@ from ccxt import (
     TRUNCATE,
 )
 
-from freqtrade.enums import RunMode
-from freqtrade.exceptions import OperationalException
-from freqtrade.exchange import (
+from econith.enums import RunMode
+from econith.exceptions import OperationalException
+from econith.exchange import (
     amount_to_contract_precision,
     amount_to_precision,
     date_minus_candles,
@@ -28,8 +28,8 @@ from freqtrade.exchange import (
     timeframe_to_resample_freq,
     timeframe_to_seconds,
 )
-from freqtrade.exchange.check_exchange import check_exchange
-from freqtrade.exchange.exchange_utils import _exchange_has_helper
+from econith.exchange.check_exchange import check_exchange
+from econith.exchange.exchange_utils import _exchange_has_helper
 from tests.conftest import log_has_re
 
 

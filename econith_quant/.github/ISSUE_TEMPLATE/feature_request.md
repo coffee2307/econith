@@ -18,7 +18,7 @@ Have you search for this feature before requesting it? It's highly likely that a
   * Operating system: ____
   * Python Version: _____ (`python -V`)
   * CCXT version: _____ (`pip freeze | grep ccxt`)
-  * ECONITH Quant Version: ____ (`freqtrade -V` or `docker compose run --rm freqtrade -V` for ECONITH Quant running in docker)
+  * ECONITH Quant Version: ____ (`econith -V` or `docker compose run --rm econith -V` for ECONITH Quant running in docker)
 
 
 ## Describe the enhancement

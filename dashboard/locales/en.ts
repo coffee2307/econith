@@ -70,6 +70,24 @@ export const en: Dictionary = {
     researchTitle: "The science under the hood.",
     researchDesc:
       "Eight research tracks drive the platform, from adaptive regime detection to explainable trading AI and overfitting-resistant validation.",
+    stats: {
+      tickEngine: { value: "5-Phase", label: "Deterministic tick engine" },
+      modes: { value: "2", label: "REALITY / SIMULATION modes" },
+      agents: { value: "4×", label: "Sovereign agents per nation" },
+      sources: { value: "5", label: "Zero-cost macro sources" },
+    },
+    pipeline: {
+      eyebrow: "Core Architecture",
+      title: "Every simulated day runs through five strict phases.",
+      desc:
+        "Snapshot → Apply Events → Resolve Conflicts → Update World → Emit Signals. Fully awaited, race-free, reproducible.",
+      steps: ["Snapshot", "Apply Events", "Resolve", "Update World", "Emit Signals"],
+    },
+    cta: {
+      title: "Ready to explore the lab?",
+      desc:
+        "Launch the quant cockpit for live microstructure and AI signals, or step into the sovereign world simulator and steer macro causality in real time.",
+    },
     cards: {
       dataSpine: {
         title: "Low-latency data spine",
@@ -157,6 +175,31 @@ export const en: Dictionary = {
         "Paper execution only. Binance feed is live; orders are simulated. Fund your exchange account and arm live routing when ready for production.",
       wsLabel: "Telemetry link",
       symbolLabel: "Instrument",
+    },
+    cockpit: {
+      title: "Aviation Cockpit HUD",
+      altimeter: "PnL Altimeter",
+      fuelGauge: "Fuel Gauge",
+      flightLog: "Flight Log",
+      radar: "Allocation Radar",
+      noFills: "No matched fills yet",
+      realized: "Realized (session)",
+      unrealized: "Unrealized",
+      winRate: "Win rate",
+      sharpe: "Sharpe",
+      drawdown: "Max DD",
+      equity: "Equity",
+      freeMargin: "Free margin",
+      leverage: "Leverage",
+      liquidation: "Liq. distance",
+      notional: "Gross notional",
+      mode: "Mode",
+      ws: {
+        connecting: "Cockpit connecting",
+        open: "Cockpit live",
+        reconnecting: "Cockpit reconnecting",
+        closed: "Cockpit offline",
+      },
     },
     pipeline: {
       title: "Signal pipeline",

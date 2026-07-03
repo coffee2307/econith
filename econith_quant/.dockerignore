@@ -16,9 +16,9 @@ site/
 CONTRIBUTING.md
 MANIFEST.in
 README.md
-freqtrade.service
-freqtrade.service.watchdog
-freqtrade.egg-info
+econith.service
+econith.service.watchdog
+econith.egg-info
 .venv/
 .env
 

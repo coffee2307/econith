@@ -88,14 +88,14 @@ Make sure that the following 2 lines are available in your docker-compose file:
 
 ### Consuming the API
 
-We advise consuming the API by using the supported `freqtrade-client` package (also available as `scripts/rest_client.py`).
+We advise consuming the API by using the supported `econith-client` package (also available as `scripts/rest_client.py`).
 
-This command can be installed independent of any running freqtrade bot by using `pip install freqtrade-client`.
+This command can be installed independent of any running econith bot by using `pip install econith-client`.
 
-This module is designed to be lightweight, and only depends on the `requests` and `python-rapidjson` modules, skipping all heavy dependencies freqtrade otherwise needs.
+This module is designed to be lightweight, and only depends on the `requests` and `python-rapidjson` modules, skipping all heavy dependencies econith otherwise needs.
 
 ``` bash
-freqtrade-client <command> [optional parameters]
+econith-client <command> [optional parameters]
 ```
 
 By default, the script assumes `127.0.0.1` (localhost) and port `8080` to be used, however you can specify a configuration file to override this behaviour.
@@ -116,23 +116,23 @@ By default, the script assumes `127.0.0.1` (localhost) and port `8080` to be use
 ```
 
 ``` bash
-freqtrade-client --config rest_config.json <command> [optional parameters]
+econith-client --config rest_config.json <command> [optional parameters]
 ```
 
 Commands with many arguments may require keyword arguments (for clarity) - which can be provided as follows:
 
 ``` bash
-freqtrade-client --config rest_config.json forceenter BTC/USDT long enter_tag=GutFeeling
+econith-client --config rest_config.json forceenter BTC/USDT long enter_tag=GutFeeling
 ```
 
 This method will work for all arguments - check the "show" command for a list of available parameters.
 
 ??? Note "Programmatic use"
-    The `freqtrade-client` package (installable independent of freqtrade) can be used in your own scripts to interact with the freqtrade API.
+    The `econith-client` package (installable independent of econith) can be used in your own scripts to interact with the econith API.
     to do so, please use the following:
 
     ``` python
-    from freqtrade_client import FtRestClient
+    from econith_client import FtRestClient
     
 
     client = FtRestClient(server_url, username, password)
@@ -155,10 +155,10 @@ This method will work for all arguments - check the "show" command for a list of
 Possible commands can be listed from the rest-client script using the `help` command.
 
 ``` bash
-freqtrade-client help
+econith-client help
 ```
 
---8<-- "commands/freqtrade-client.md"
+--8<-- "commands/econith-client.md"
 
 
 ### Available endpoints
@@ -219,7 +219,7 @@ All endpoints in the below table need to be prefixed with the base URL of the AP
 
 ### Message WebSocket
 
-The API Server includes a websocket endpoint for subscribing to RPC messages from the freqtrade Bot.
+The API Server includes a websocket endpoint for subscribing to RPC messages from the econith Bot.
 This can be used to consume real-time data from your bot, such as entry/exit fill messages, whitelist changes, populated indicators for pairs, and more.
 
 This is also used to setup [Producer/Consumer mode](producer-consumer.md) in ECONITH Quant.
@@ -269,7 +269,7 @@ Once connected to the WebSocket, the bot will broadcast RPC messages to anyone w
 }
 ```
 
-For a list of message types, please refer to the RPCMessageType enum in `freqtrade/enums/rpcmessagetype.py`
+For a list of message types, please refer to the RPCMessageType enum in `econith/enums/rpcmessagetype.py`
 
 Now anytime those types of RPC messages are sent in the bot, you will receive them through the WebSocket as long as the connection is active. They typically take the same form as the request:
 
@@ -288,7 +288,7 @@ Now anytime those types of RPC messages are sent in the bot, you will receive th
 
 When using [Nginx](https://nginx.org/en/docs/), the following configuration is required for WebSockets to work (Note this configuration is incomplete, it's missing some information and can not be used as is):
 
-Please make sure to replace `<freqtrade_listen_ip>` (and the subsequent port) with the IP and Port matching your configuration/setup.
+Please make sure to replace `<econith_listen_ip>` (and the subsequent port) with the IP and Port matching your configuration/setup.
 
 ```
 http {
@@ -304,7 +304,7 @@ http {
 
         location / {
             proxy_http_version 1.1;
-            proxy_pass http://<freqtrade_listen_ip>:8080;
+            proxy_pass http://<econith_listen_ip>:8080;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection $connection_upgrade;
             proxy_set_header Host $host;
@@ -320,7 +320,7 @@ To properly configure your reverse proxy (securely), please consult it's documen
 
 !!! Tip "SSL certificates"
     You can use tools like certbot to setup ssl certificates to access your bot's UI through encrypted connection by using any of the above reverse proxies.
-    While this will protect your data in transit, we do not recommend to run the freqtrade API outside of your private network (VPN, SSH tunnel).
+    While this will protect your data in transit, we do not recommend to run the econith API outside of your private network (VPN, SSH tunnel).
 
 ### OpenAPI interface
 

@@ -4,10 +4,10 @@ from unittest.mock import MagicMock
 import pandas as pd
 import pytest
 
-from freqtrade.enums import CandleType
-from freqtrade.persistence import KeyValueStore, Order, Trade, WalletHistory
-from freqtrade.util import dt_now, dt_utc
-from freqtrade.util.migrations.migrate_wallet_history import (
+from econith.enums import CandleType
+from econith.persistence import KeyValueStore, Order, Trade, WalletHistory
+from econith.util import dt_now, dt_utc
+from econith.util.migrations.migrate_wallet_history import (
     _migrate_wallet_history,
     _prepare_balance_distribution,
     migrate_wallet_history,
@@ -88,7 +88,7 @@ def test_migrate_wallet_history_skips_when_no_ohlcv_history(mocker, default_conf
     exchange.get_option.return_value = False  # ohlcv_has_history = False
 
     migrate_mock = mocker.patch(
-        "freqtrade.util.migrations.migrate_wallet_history._migrate_wallet_history"
+        "econith.util.migrations.migrate_wallet_history._migrate_wallet_history"
     )
 
     migrate_wallet_history(default_conf_usdt, exchange, 1000.0)
@@ -105,7 +105,7 @@ def test_migrate_wallet_history_skips_when_already_migrated(mocker, default_conf
     exchange.get_option.return_value = True
 
     migrate_mock = mocker.patch(
-        "freqtrade.util.migrations.migrate_wallet_history._migrate_wallet_history"
+        "econith.util.migrations.migrate_wallet_history._migrate_wallet_history"
     )
 
     # Set migration as already completed

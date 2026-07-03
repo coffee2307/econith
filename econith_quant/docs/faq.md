@@ -22,14 +22,14 @@ Futures trading is supported for selected exchanges. Please refer to the [docume
 
 ## ECONITH Quant common questions
 
-### Can freqtrade open multiple positions on the same pair in parallel?
+### Can econith open multiple positions on the same pair in parallel?
 
 No. ECONITH Quant will only open one position per pair at a time.
 You can however use the [`adjust_trade_position()` callback](strategy-callbacks.md#adjust-trade-position) to adjust an open position.
 
 Backtesting provides an option for this in `--eps` - however this is only there to highlight "hidden" signals, and will not work in live.
 
-### Does freqtrade support sandbox accounts?
+### Does econith support sandbox accounts?
 
 No, but you can use dry-run mode to simulate trading without risking real funds.
 
@@ -38,7 +38,7 @@ These markets usually have different order books, liquidity and trading behaviou
 
 ### The bot does not start
 
-Running the bot with `freqtrade trade --config config.json` shows the output `freqtrade: command not found`.
+Running the bot with `econith trade --config config.json` shows the output `econith: command not found`.
 
 This could be caused by the following reasons:
 
@@ -84,8 +84,8 @@ As COIN is trading in full lot sizes (1COIN steps), you cannot sell 0.9 COIN (or
 
 This is not a bot-problem, but will also happen while manual trading.
 
-While freqtrade can handle this (it'll sell 99 COIN), fees are often below the minimum tradable lot-size (you can only trade full COIN, not 0.9 COIN).
-Leaving the dust (0.9 COIN) on the exchange makes usually sense, as the next time freqtrade buys COIN, it'll eat into the remaining small balance, this time selling everything it bought, and therefore slowly declining the dust balance (although it most likely will never reach exactly 0).
+While econith can handle this (it'll sell 99 COIN), fees are often below the minimum tradable lot-size (you can only trade full COIN, not 0.9 COIN).
+Leaving the dust (0.9 COIN) on the exchange makes usually sense, as the next time econith buys COIN, it'll eat into the remaining small balance, this time selling everything it bought, and therefore slowly declining the dust balance (although it most likely will never reach exactly 0).
 
 Where possible (e.g. on binance), the use of the exchange's dedicated fee currency will fix this.
 On binance, it's sufficient to have BNB in your account, and have "Pay fees in BNB" enabled in your profile. Your BNB balance will slowly decline (as it's used to pay fees) - but you'll no longer encounter dust (ECONITH Quant will include the fees in the profit calculations).
@@ -112,19 +112,19 @@ You can use the `/stopentry` command in Telegram to prevent future trade entry, 
 ### I sold the bot's capital and now there's errors in the log
 
 ECONITH Quant assumes that the trades it opens are managed only though the bot.  
-If you happen to (accidentally) sell the bot's capital, freqtrade will try to recover by trying to re-find on-exchange orders.
+If you happen to (accidentally) sell the bot's capital, econith will try to recover by trying to re-find on-exchange orders.
 
-This is a best-effort approach, and will not work in all cases, especially when using order types that are not supported by freqtrade (OCO, iceberg, etc.), or when working with older trades (where the exchange no longer provides full order information).
+This is a best-effort approach, and will not work in all cases, especially when using order types that are not supported by econith (OCO, iceberg, etc.), or when working with older trades (where the exchange no longer provides full order information).
 The exact limits will vary between exchanges - with the details usually being documented in the exchange's API documentation.
 
 ### I want to run multiple bots on the same machine
 
-Please look at the [advanced setup documentation Page](advanced-setup.md#running-multiple-instances-of-freqtrade).
+Please look at the [advanced setup documentation Page](advanced-setup.md#running-multiple-instances-of-econith).
 
 ### I'm getting "Impossible to load Strategy" when starting the bot
 
 This error message is shown when the bot cannot load the strategy.
-Usually, you can use `freqtrade list-strategies` to list all available strategies. 
+Usually, you can use `econith list-strategies` to list all available strategies. 
 The output of this command will also include a status column, showing if the strategy can be loaded.
 
 Please check the following:
@@ -203,22 +203,22 @@ By default, the bot writes its log into stderr stream. This is implemented this 
 
 * In unix shells, this normally can be done as simple as:
 ```shell
-$ freqtrade --some-options 2>&1 >/dev/null | grep 'something'
+$ econith --some-options 2>&1 >/dev/null | grep 'something'
 ```
 (note, `2>&1` and `>/dev/null` should be written in this order)
 
 * Bash interpreter also supports so called process substitution syntax, you can grep the log for a string with it as:
 ```shell
-$ freqtrade --some-options 2> >(grep 'something') >/dev/null
+$ econith --some-options 2> >(grep 'something') >/dev/null
 ```
 or
 ```shell
-$ freqtrade --some-options 2> >(grep -v 'something' 1>&2)
+$ econith --some-options 2> >(grep -v 'something' 1>&2)
 ```
 
 * You can also write the copy of ECONITH Quant log messages to a file with the `--logfile` option:
 ```shell
-$ freqtrade --logfile /path/to/mylogfile.log --some-options
+$ econith --logfile /path/to/mylogfile.log --some-options
 ```
 and then grep it as:
 ```shell
@@ -237,7 +237,7 @@ On Windows, the `--logfile` option is also supported by ECONITH Quant and you ca
 
 ## Hyperopt module
 
-### Why does freqtrade not have GPU support?
+### Why does econith not have GPU support?
 
 First of all, most indicator libraries don't have GPU support - as such, there would be little benefit for indicator calculations.
 The GPU improvements would only apply to pandas-native calculations - or ones written by yourself.
@@ -263,12 +263,12 @@ Since hyperopt uses Bayesian search, running for too many epochs may not produce
 It's therefore recommended to run between 500-1000 epochs over and over until you hit at least 10000 epochs in total (or are satisfied with the result). You can best judge by looking at the results - if the bot keeps discovering better strategies, it's best to keep on going.
 
 ```bash
-freqtrade hyperopt --hyperopt-loss SharpeHyperOptLossDaily --strategy SampleStrategy -e 1000
+econith hyperopt --hyperopt-loss SharpeHyperOptLossDaily --strategy SampleStrategy -e 1000
 ```
 
 ### Why does it take a long time to run hyperopt?
 
-* Discovering a great strategy with Hyperopt takes time. Study www.freqtrade.io, the ECONITH Quant Documentation page, join the ECONITH Quant [discord community](https://discord.gg/p7nuUNVfP7). While you patiently wait for the most advanced, free crypto bot in the world, to hand you a possible golden strategy specially designed just for you.
+* Discovering a great strategy with Hyperopt takes time. Study econith, the ECONITH Quant Documentation page, join the ECONITH Quant [discord community](https://discord.gg/p7nuUNVfP7). While you patiently wait for the most advanced, free crypto bot in the world, to hand you a possible golden strategy specially designed just for you.
 
 * If you wonder why it can take from 20 minutes to days to do 1000 epochs here are some answers:
 
@@ -289,20 +289,20 @@ of the search space, assuming that the bot never tests the same parameters more 
 Example: 4% profit 650 times vs 0,3% profit a trade 10000 times in a year. If we assume you set the --timerange to 365 days.
 
 Example:
-`freqtrade --config config.json --strategy SampleStrategy --hyperopt SampleHyperopt -e 1000 --timerange 20190601-20200601`
+`econith --config config.json --strategy SampleStrategy --hyperopt SampleHyperopt -e 1000 --timerange 20190601-20200601`
 
 ## Official channels
 
 ECONITH Quant is using exclusively the following official channels:
 
 * [ECONITH Quant discord server](https://discord.gg/p7nuUNVfP7)
-* [ECONITH Quant documentation (https://freqtrade.io)](https://freqtrade.io)
-* [ECONITH Quant github organization](https://github.com/freqtrade)
+* [ECONITH Quant documentation (https://econith)](https://econith)
+* [ECONITH Quant github organization](https://github.com/econith)
 
-Nobody affiliated with the freqtrade project will ask you about your exchange keys or anything else exposing your funds to exploitation.
+Nobody affiliated with the econith project will ask you about your exchange keys or anything else exposing your funds to exploitation.
 Should you be asked to expose your exchange keys or send funds to some random wallet, then please don't follow these instructions.
 
-Failing to follow these guidelines will not be responsibility of freqtrade.
+Failing to follow these guidelines will not be responsibility of econith.
 
 ## Support policy
 
@@ -315,4 +315,4 @@ If you're on an older version, please follow the [upgrade instructions](updating
 
 ECONITH Quant does not have a Crypto token offering.
 
-Token offerings you find on the internet referring ECONITH Quant, FreqAI or freqUI must be considered to be a scam, trying to exploit freqtrade's popularity for their own, nefarious gains.
+Token offerings you find on the internet referring ECONITH Quant, FreqAI or freqUI must be considered to be a scam, trying to exploit econith's popularity for their own, nefarious gains.

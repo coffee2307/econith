@@ -2,8 +2,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from freqtrade.enums.marginmode import MarginMode
-from freqtrade.leverage.liquidation_price import update_liquidation_prices
+from econith.enums.marginmode import MarginMode
+from econith.leverage.liquidation_price import update_liquidation_prices
 
 
 @pytest.mark.parametrize("dry_run", [False, True])
@@ -17,7 +17,7 @@ def test_update_liquidation_prices(mocker, margin_mode, dry_run):
     wallets = MagicMock()
     trade_mock = MagicMock()
 
-    mocker.patch("freqtrade.persistence.Trade.get_open_trades", return_value=[trade_mock])
+    mocker.patch("econith.persistence.Trade.get_open_trades", return_value=[trade_mock])
 
     update_liquidation_prices(
         trade=trade_mock,
@@ -38,7 +38,7 @@ def test_update_liquidation_prices(mocker, margin_mode, dry_run):
     trade_mock_2 = MagicMock()
 
     mocker.patch(
-        "freqtrade.persistence.Trade.get_open_trades", return_value=[trade_mock, trade_mock_2]
+        "econith.persistence.Trade.get_open_trades", return_value=[trade_mock, trade_mock_2]
     )
 
     update_liquidation_prices(

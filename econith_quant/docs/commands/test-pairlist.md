@@ -1,5 +1,5 @@
 ``` output
-usage: freqtrade test-pairlist [-h] [--userdir PATH] [-v] [-c PATH]
+usage: econith test-pairlist [-h] [--userdir PATH] [-v] [-c PATH]
                                [--quote QUOTE_CURRENCY [QUOTE_CURRENCY ...]]
                                [-1] [--print-json] [--exchange EXCHANGE]
 

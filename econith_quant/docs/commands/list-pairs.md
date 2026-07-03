@@ -1,5 +1,5 @@
 ``` output
-usage: freqtrade list-pairs [-h] [-v] [--no-color] [--logfile FILE] [-V]
+usage: econith list-pairs [-h] [-v] [--no-color] [--logfile FILE] [-V]
                             [-c PATH] [-d PATH] [--userdir PATH]
                             [--exchange EXCHANGE] [--print-list]
                             [--print-json] [-1] [--print-csv]

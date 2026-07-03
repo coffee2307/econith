@@ -1,10 +1,10 @@
 ---
 services:
-  freqtrade:
-    image: freqtradeorg/freqtrade:stable
-    # image: freqtradeorg/freqtrade:develop
+  econith:
+    image: econith/econith-quant:stable
+    # image: econith/econith-quant:develop
     # Use plotting image
-    # image: freqtradeorg/freqtrade:develop_plot
+    # image: econith/econith-quant:develop_plot
     # # Enable GPU Image and GPU Resources (only relevant for freqAI)
     # # Make sure to uncomment the whole deploy section
     # deploy:
@@ -19,18 +19,18 @@ services:
     #   context: .
     #   dockerfile: "./docker/Dockerfile.custom"
     restart: unless-stopped
-    container_name: freqtrade
+    container_name: econith
     volumes:
-      - "./user_data:/freqtrade/user_data"
+      - "./user_data:/econith/user_data"
     # Expose api on port 8080 (localhost only)
-    # Please read the https://www.freqtrade.io/en/stable/rest-api/ documentation
+    # Please read the https://econith/en/stable/rest-api/ documentation
     # for more information.
     ports:
       - "127.0.0.1:8080:8080"
     # Default command used when running `docker compose up`
     command: >
       trade
-      --logfile /freqtrade/user_data/logs/freqtrade.log
-      --db-url sqlite:////freqtrade/user_data/tradesv3.sqlite
-      --config /freqtrade/user_data/config.json
+      --logfile /econith/user_data/logs/econith.log
+      --db-url sqlite:////econith/user_data/tradesv3.sqlite
+      --config /econith/user_data/config.json
       --strategy SampleStrategy

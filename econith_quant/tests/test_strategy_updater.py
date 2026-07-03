@@ -4,8 +4,8 @@ import re
 import shutil
 from pathlib import Path
 
-from freqtrade.commands.strategy_utils_commands import start_strategy_update
-from freqtrade.strategy.strategyupdater import StrategyUpdater
+from econith.commands.strategy_utils_commands import start_strategy_update
+from econith.strategy.strategyupdater import StrategyUpdater
 from tests.conftest import get_args
 
 
@@ -197,7 +197,7 @@ def test_strategy_updater_comments(default_conf, caplog) -> None:
 # This is the 1st comment
 import talib.abstract as ta
 # This is the 2nd comment
-import freqtrade.vendor.qtpylib.indicators as qtpylib
+import econith.vendor.qtpylib.indicators as qtpylib
 
 
 class someStrategy(IStrategy):

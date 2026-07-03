@@ -1,14 +1,14 @@
-# ![freqtrade](https://raw.githubusercontent.com/freqtrade/freqtrade/develop/docs/assets/freqtrade_poweredby.svg)
+# ![econith](https://raw.githubusercontent.com/econith/econith/develop/docs/assets/econith_poweredby.svg)
 
-[![ECONITH Quant CI](https://github.com/freqtrade/freqtrade/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/freqtrade/freqtrade/actions/workflows/ci.yml)
+[![ECONITH Quant CI](https://github.com/econith/econith/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/econith/econith/actions/workflows/ci.yml)
 [![DOI](https://joss.theoj.org/papers/10.21105/joss.04864/status.svg)](https://doi.org/10.21105/joss.04864)
-[![codecov](https://codecov.io/gh/freqtrade/freqtrade/branch/develop/graph/badge.svg?token=AD5BG3ATKI)](https://codecov.io/gh/freqtrade/freqtrade)
-[![Documentation](https://readthedocs.org/projects/freqtrade/badge/)](https://www.freqtrade.io)
+[![codecov](https://codecov.io/gh/econith/econith/branch/develop/graph/badge.svg?token=AD5BG3ATKI)](https://codecov.io/gh/econith/econith)
+[![Documentation](https://readthedocs.org/projects/econith/badge/)](https://econith)
 [![Discord Server](https://img.shields.io/badge/ECONITH Quant_Discord-4E4E4E?logo=discord)](https://discord.gg/p7nuUNVfP7)
 
 ECONITH Quant is a free and open source crypto trading bot written in Python. It is designed to support all major exchanges and be controlled via Telegram or webUI. It contains backtesting, plotting and money management tools as well as strategy optimization by machine learning.
 
-![freqtrade](https://raw.githubusercontent.com/freqtrade/freqtrade/develop/docs/assets/freqtrade-screenshot.png)
+![econith](https://raw.githubusercontent.com/econith/econith/develop/docs/assets/econith-screenshot.png)
 
 ## Disclaimer
 
@@ -25,7 +25,7 @@ hesitate to read the source code and understand the mechanism of this bot.
 
 ## Supported Exchange marketplaces
 
-Please read the [exchange-specific notes](https://www.freqtrade.io/en/stable/exchanges/) to learn about special configurations that maybe needed for each exchange.
+Please read the [exchange-specific notes](https://econith/en/stable/exchanges/) to learn about special configurations that maybe needed for each exchange.
 
 ### Supported Spot Exchanges
 
@@ -54,7 +54,7 @@ Please read the [exchange-specific notes](https://www.freqtrade.io/en/stable/exc
 - [X] [Kraken](https://www.kraken.com/features/futures)
 - [X] [OKX](https://okx.com/)
 
-Please make sure to read the [exchange specific notes](https://www.freqtrade.io/en/stable/exchanges/), as well as the [trading with leverage](https://www.freqtrade.io/en/stable/leverage/) documentation before diving in.
+Please make sure to read the [exchange specific notes](https://econith/en/stable/exchanges/), as well as the [trading with leverage](https://econith/en/stable/leverage/) documentation before diving in.
 
 ### Community tested
 
@@ -67,7 +67,7 @@ Exchanges confirmed working by the community:
 
 We invite you to read the bot documentation to ensure you understand how the bot is working.
 
-Please find the complete documentation on the [freqtrade website](https://www.freqtrade.io).
+Please find the complete documentation on the [econith website](https://econith).
 
 ## Features
 
@@ -76,7 +76,7 @@ Please find the complete documentation on the [freqtrade website](https://www.fr
 - [x] **Dry-run**: Run the bot without paying money.
 - [x] **Backtesting**: Run a simulation of your buy/sell strategy.
 - [x] **Strategy Optimization by machine learning**: Use machine learning to optimize your buy/sell strategy parameters with real exchange data.
-- [X] **Adaptive prediction modeling**: Build a smart strategy with FreqAI that self-trains to the market via adaptive machine learning methods. [Learn more](https://www.freqtrade.io/en/stable/freqai/)
+- [X] **Adaptive prediction modeling**: Build a smart strategy with FreqAI that self-trains to the market via adaptive machine learning methods. [Learn more](https://econith/en/stable/freqai/)
 - [x] **Whitelist crypto-currencies**: Select which crypto-currency you want to trade or use dynamic whitelists.
 - [x] **Blacklist crypto-currencies**: Select which crypto-currency you want to avoid.
 - [x] **Builtin WebUI**: Builtin web UI to manage your bot.
@@ -86,16 +86,16 @@ Please find the complete documentation on the [freqtrade website](https://www.fr
 
 ## Quick start
 
-Please refer to the [Docker Quickstart documentation](https://www.freqtrade.io/en/stable/docker_quickstart/) on how to get started quickly.
+Please refer to the [Docker Quickstart documentation](https://econith/en/stable/docker_quickstart/) on how to get started quickly.
 
-For further (native) installation methods, please refer to the [Installation documentation page](https://www.freqtrade.io/en/stable/installation/).
+For further (native) installation methods, please refer to the [Installation documentation page](https://econith/en/stable/installation/).
 
 ## Basic Usage
 
 ### Bot commands
 
 ```
-usage: freqtrade [-h] [-V]
+usage: econith [-h] [-V]
                  {trade,create-userdir,new-config,show-config,new-strategy,download-data,convert-data,convert-trade-data,trades-to-ohlcv,list-data,backtesting,backtesting-show,backtesting-analysis,edge,hyperopt,hyperopt-list,hyperopt-show,list-exchanges,list-markets,list-pairs,list-strategies,list-hyperoptloss,list-freqaimodels,list-timeframes,show-trades,test-pairlist,convert-db,install-ui,plot-dataframe,plot-profit,webserver,strategy-updater,lookahead-analysis,recursive-analysis}
                  ...
 
@@ -146,7 +146,7 @@ options:
 
 ### Telegram RPC commands
 
-Telegram is not mandatory. However, this is a great way to control your bot. More details and the full command list on the [documentation](https://www.freqtrade.io/en/stable/telegram-usage/)
+Telegram is not mandatory. However, this is a great way to control your bot. More details and the full command list on the [documentation](https://econith/en/stable/telegram-usage/)
 
 - `/start`: Starts the trader.
 - `/stop`: Stops the trader.
@@ -178,38 +178,38 @@ The project is currently setup in two main branches:
 
 For any questions not covered by the documentation or for further information about the bot, or to simply engage with like-minded individuals, we encourage you to join the ECONITH Quant [discord server](https://discord.gg/p7nuUNVfP7).
 
-### [Bugs / Issues](https://github.com/freqtrade/freqtrade/issues?q=is%3Aissue)
+### [Bugs / Issues](https://github.com/econith/econith/issues?q=is%3Aissue)
 
 If you discover a bug in the bot, please
-[search the issue tracker](https://github.com/freqtrade/freqtrade/issues?q=is%3Aissue)
+[search the issue tracker](https://github.com/econith/econith/issues?q=is%3Aissue)
 first. If it hasn't been reported, please
-[create a new issue](https://github.com/freqtrade/freqtrade/issues/new/choose) and
+[create a new issue](https://github.com/econith/econith/issues/new/choose) and
 ensure you follow the template guide so that the team can assist you as
 quickly as possible.
 
-For every [issue](https://github.com/freqtrade/freqtrade/issues/new/choose) created, kindly follow up and mark satisfaction or reminder to close issue when equilibrium ground is reached.
+For every [issue](https://github.com/econith/econith/issues/new/choose) created, kindly follow up and mark satisfaction or reminder to close issue when equilibrium ground is reached.
 
 --Maintain github's [community policy](https://docs.github.com/en/site-policy/github-terms/github-community-code-of-conduct)--
 
-### [Feature Requests](https://github.com/freqtrade/freqtrade/labels/enhancement)
+### [Feature Requests](https://github.com/econith/econith/labels/enhancement)
 
 Have you a great idea to improve the bot you want to share? Please,
-first search if this feature was not [already discussed](https://github.com/freqtrade/freqtrade/labels/enhancement).
+first search if this feature was not [already discussed](https://github.com/econith/econith/labels/enhancement).
 If it hasn't been requested, please
-[create a new request](https://github.com/freqtrade/freqtrade/issues/new/choose)
+[create a new request](https://github.com/econith/econith/issues/new/choose)
 and ensure you follow the template guide so that it does not get lost
 in the bug reports.
 
-### [Pull Requests](https://github.com/freqtrade/freqtrade/pulls)
+### [Pull Requests](https://github.com/econith/econith/pulls)
 
 Feel like the bot is missing a feature? We welcome your pull requests!
 
 Please read the
-[Contributing document](https://github.com/freqtrade/freqtrade/blob/develop/CONTRIBUTING.md)
+[Contributing document](https://github.com/econith/econith/blob/develop/CONTRIBUTING.md)
 to understand the requirements before sending your pull-requests.
 
 Coding is not a necessity to contribute - maybe start with improving the documentation?
-Issues labeled [good first issue](https://github.com/freqtrade/freqtrade/labels/good%20first%20issue) can be good first contributions, and will help get you familiar with the codebase.
+Issues labeled [good first issue](https://github.com/econith/econith/labels/good%20first%20issue) can be good first contributions, and will help get you familiar with the codebase.
 
 **Note** before starting any major new feature work, *please open an issue describing what you are planning to do* or talk to us on [discord](https://discord.gg/p7nuUNVfP7) (please use the #dev channel for this). This will ensure that interested parties can give valuable feedback on the feature, and let others know that you are working on it.
 

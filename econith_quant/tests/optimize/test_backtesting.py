@@ -11,23 +11,23 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from freqtrade import constants
-from freqtrade.commands.optimize_commands import setup_optimize_configuration, start_backtesting
-from freqtrade.configuration import TimeRange
-from freqtrade.data import history
-from freqtrade.data.btanalysis import BT_DATA_COLUMNS, evaluate_result_multi
-from freqtrade.data.converter import clean_ohlcv_dataframe, ohlcv_fill_up_missing_data
-from freqtrade.data.dataprovider import DataProvider
-from freqtrade.data.history import get_timerange
-from freqtrade.enums import CandleType, ExitType, RunMode
-from freqtrade.exceptions import DependencyException, OperationalException
-from freqtrade.exchange import timeframe_to_next_date, timeframe_to_prev_date
-from freqtrade.exchange.exchange_utils import DECIMAL_PLACES, TICK_SIZE
-from freqtrade.optimize.backtest_caching import get_backtest_metadata_filename, get_strategy_run_id
-from freqtrade.optimize.backtesting import DATE_IDX, HEADERS, Backtesting
-from freqtrade.persistence import LocalTrade, Trade
-from freqtrade.resolvers import StrategyResolver
-from freqtrade.util import dt_now, dt_utc
+from econith import constants
+from econith.commands.optimize_commands import setup_optimize_configuration, start_backtesting
+from econith.configuration import TimeRange
+from econith.data import history
+from econith.data.btanalysis import BT_DATA_COLUMNS, evaluate_result_multi
+from econith.data.converter import clean_ohlcv_dataframe, ohlcv_fill_up_missing_data
+from econith.data.dataprovider import DataProvider
+from econith.data.history import get_timerange
+from econith.enums import CandleType, ExitType, RunMode
+from econith.exceptions import DependencyException, OperationalException
+from econith.exchange import timeframe_to_next_date, timeframe_to_prev_date
+from econith.exchange.exchange_utils import DECIMAL_PLACES, TICK_SIZE
+from econith.optimize.backtest_caching import get_backtest_metadata_filename, get_strategy_run_id
+from econith.optimize.backtesting import DATE_IDX, HEADERS, Backtesting
+from econith.persistence import LocalTrade, Trade
+from econith.resolvers import StrategyResolver
+from econith.util import dt_now, dt_utc
 from tests.conftest import (
     CURRENT_TEST_STRATEGY,
     EXMS,
@@ -178,7 +178,7 @@ def test_setup_optimize_configuration_without_arguments(mocker, default_conf, ca
 
 def test_setup_bt_configuration_with_arguments(mocker, default_conf, caplog) -> None:
     patched_configuration_load_config_file(mocker, default_conf)
-    mocker.patch("freqtrade.configuration.configuration.create_datadir", lambda c, x: x)
+    mocker.patch("econith.configuration.configuration.create_datadir", lambda c, x: x)
 
     args = [
         "backtesting",
@@ -267,7 +267,7 @@ def test_start(mocker, fee, default_conf, caplog) -> None:
     start_mock = MagicMock()
     mocker.patch(f"{EXMS}.get_fee", fee)
     patch_exchange(mocker)
-    mocker.patch("freqtrade.optimize.backtesting.Backtesting.start", start_mock)
+    mocker.patch("econith.optimize.backtesting.Backtesting.start", start_mock)
     patched_configuration_load_config_file(mocker, default_conf)
 
     args = [
@@ -279,7 +279,7 @@ def test_start(mocker, fee, default_conf, caplog) -> None:
     ]
     pargs = get_args(args)
     start_backtesting(pargs)
-    assert log_has("Starting freqtrade in Backtesting mode", caplog)
+    assert log_has("Starting econith in Backtesting mode", caplog)
     assert start_mock.call_count == 1
 
 
@@ -395,14 +395,14 @@ def test_backtesting_start(default_conf, mocker, caplog) -> None:
     def get_timerange(input1):
         return dt_utc(2017, 11, 14, 21, 17), dt_utc(2017, 11, 14, 22, 59)
 
-    mocker.patch("freqtrade.data.history.get_timerange", get_timerange)
+    mocker.patch("econith.data.history.get_timerange", get_timerange)
     patch_exchange(mocker)
-    mocker.patch("freqtrade.optimize.backtesting.Backtesting.backtest")
-    mocker.patch("freqtrade.optimize.backtesting.generate_backtest_stats")
-    mocker.patch("freqtrade.optimize.backtesting.show_backtest_results")
-    sbs = mocker.patch("freqtrade.optimize.backtesting.store_backtest_results")
+    mocker.patch("econith.optimize.backtesting.Backtesting.backtest")
+    mocker.patch("econith.optimize.backtesting.generate_backtest_stats")
+    mocker.patch("econith.optimize.backtesting.show_backtest_results")
+    sbs = mocker.patch("econith.optimize.backtesting.store_backtest_results")
     mocker.patch(
-        "freqtrade.plugins.pairlistmanager.PairListManager.whitelist",
+        "econith.plugins.pairlistmanager.PairListManager.whitelist",
         PropertyMock(return_value=["UNITTEST/BTC"]),
     )
 
@@ -432,14 +432,14 @@ def test_backtesting_start_no_data(default_conf, mocker, caplog, testdatadir) ->
         return dt_utc(2017, 11, 14, 21, 17), dt_utc(2017, 11, 14, 22, 59)
 
     mocker.patch(
-        "freqtrade.data.history.history_utils.load_pair_history",
+        "econith.data.history.history_utils.load_pair_history",
         MagicMock(return_value=pd.DataFrame()),
     )
-    mocker.patch("freqtrade.data.history.get_timerange", get_timerange)
+    mocker.patch("econith.data.history.get_timerange", get_timerange)
     patch_exchange(mocker)
-    mocker.patch("freqtrade.optimize.backtesting.Backtesting.backtest")
+    mocker.patch("econith.optimize.backtesting.Backtesting.backtest")
     mocker.patch(
-        "freqtrade.plugins.pairlistmanager.PairListManager.whitelist",
+        "econith.plugins.pairlistmanager.PairListManager.whitelist",
         PropertyMock(return_value=["UNITTEST/BTC"]),
     )
 
@@ -456,14 +456,14 @@ def test_backtesting_start_no_data(default_conf, mocker, caplog, testdatadir) ->
 def test_backtesting_no_pair_left(default_conf, mocker) -> None:
     mocker.patch(f"{EXMS}.exchange_has", MagicMock(return_value=True))
     mocker.patch(
-        "freqtrade.data.history.history_utils.load_pair_history",
+        "econith.data.history.history_utils.load_pair_history",
         MagicMock(return_value=pd.DataFrame()),
     )
-    mocker.patch("freqtrade.data.history.get_timerange", get_timerange)
+    mocker.patch("econith.data.history.get_timerange", get_timerange)
     patch_exchange(mocker)
-    mocker.patch("freqtrade.optimize.backtesting.Backtesting.backtest")
+    mocker.patch("econith.optimize.backtesting.Backtesting.backtest")
     mocker.patch(
-        "freqtrade.plugins.pairlistmanager.PairListManager.whitelist", PropertyMock(return_value=[])
+        "econith.plugins.pairlistmanager.PairListManager.whitelist", PropertyMock(return_value=[])
     )
 
     default_conf["timeframe"] = "1m"
@@ -490,14 +490,14 @@ def test_backtesting_pairlist_list(default_conf, mocker, tickers) -> None:
     mocker.patch(f"{EXMS}.exchange_has", MagicMock(return_value=True))
     mocker.patch(f"{EXMS}.get_tickers", tickers)
     mocker.patch(f"{EXMS}.price_to_precision", lambda s, x, y: y)
-    mocker.patch("freqtrade.data.history.get_timerange", get_timerange)
+    mocker.patch("econith.data.history.get_timerange", get_timerange)
     patch_exchange(mocker)
-    mocker.patch("freqtrade.optimize.backtesting.Backtesting.backtest")
+    mocker.patch("econith.optimize.backtesting.Backtesting.backtest")
     mocker.patch(
-        "freqtrade.plugins.pairlistmanager.PairListManager.whitelist",
+        "econith.plugins.pairlistmanager.PairListManager.whitelist",
         PropertyMock(return_value=["XRP/BTC"]),
     )
-    mocker.patch("freqtrade.plugins.pairlistmanager.PairListManager.refresh_pairlist")
+    mocker.patch("econith.plugins.pairlistmanager.PairListManager.refresh_pairlist")
 
     default_conf["ticker_interval"] = "1m"
     default_conf["export"] = "none"
@@ -596,10 +596,10 @@ def test_backtest__enter_trade_futures(default_conf_usdt, fee, mocker) -> None:
     mocker.patch(f"{EXMS}.get_min_pair_stake_amount", return_value=0.00001)
     mocker.patch(f"{EXMS}.get_max_pair_stake_amount", return_value=float("inf"))
     mocker.patch(
-        "freqtrade.persistence.trade_model.price_to_precision", lambda p, *args, **kwargs: p
+        "econith.persistence.trade_model.price_to_precision", lambda p, *args, **kwargs: p
     )
     mocker.patch(f"{EXMS}.get_max_leverage", return_value=100)
-    mocker.patch("freqtrade.optimize.backtesting.price_to_precision", lambda p, *args: p)
+    mocker.patch("econith.optimize.backtesting.price_to_precision", lambda p, *args: p)
     patch_exchange(mocker)
     default_conf_usdt["stake_amount"] = 300
     default_conf_usdt["max_open_trades"] = 2
@@ -609,7 +609,7 @@ def test_backtest__enter_trade_futures(default_conf_usdt, fee, mocker) -> None:
     default_conf_usdt["exchange"]["pair_whitelist"] = [".*"]
     backtesting = Backtesting(default_conf_usdt)
     backtesting._set_strategy(backtesting.strategylist[0])
-    mocker.patch("freqtrade.optimize.backtesting.Backtesting._run_funding_fees")
+    mocker.patch("econith.optimize.backtesting.Backtesting._run_funding_fees")
     pair = "ETH/USDT:USDT"
     row = [
         pd.Timestamp(year=2020, month=1, day=1, hour=5, minute=0),
@@ -643,7 +643,7 @@ def test_backtest__enter_trade_futures(default_conf_usdt, fee, mocker) -> None:
     #   = ((wb + cum_b) - (side_1 * position * ep1)) / ((position * mmr_b) - (side_1 * position))
     #   = ((300 + 0.01) - (1 * 15000 * 0.1)) / ((15000 * 0.01) - (1 * 15000))
     #   = 0.0008080740740740741
-    # freqtrade_liquidation_price = liq + (abs(open_rate - liq) * liq_buffer * side_1)
+    # econith_liquidation_price = liq + (abs(open_rate - liq) * liq_buffer * side_1)
     #   = 0.08080740740740741 + ((0.1 - 0.08080740740740741) * 0.05 * 1)
     #   = 0.08176703703703704
 
@@ -655,7 +655,7 @@ def test_backtest__enter_trade_futures(default_conf_usdt, fee, mocker) -> None:
     #   = ((wb + cum_b) - (side_1 * position * ep1)) / ((position * mmr_b) - (side_1 * position))
     #   = ((300 + 0.01) - ((-1) * 15000 * 0.1)) / ((15000 * 0.01) - ((-1) * 15000))
     #   = 0.0011881254125412541
-    # freqtrade_liquidation_price = liq + (abs(open_rate - liq) * liq_buffer * side_1)
+    # econith_liquidation_price = liq + (abs(open_rate - liq) * liq_buffer * side_1)
     #   = 0.11881254125412541 + (abs(0.1 - 0.11881254125412541) * 0.05 * -1)
     #   = 0.11787191419141915
 
@@ -674,7 +674,7 @@ def test_backtest__enter_trade_futures(default_conf_usdt, fee, mocker) -> None:
 
     # Stake-amount throwing error
     mocker.patch(
-        "freqtrade.wallets.Wallets.get_trade_stake_amount", side_effect=DependencyException
+        "econith.wallets.Wallets.get_trade_stake_amount", side_effect=DependencyException
     )
 
     trade = backtesting._enter_trade(pair, row=row, direction="long")
@@ -1071,7 +1071,7 @@ def test_backtest_one_detail_futures(
     mocker.patch(f"{EXMS}.get_min_pair_stake_amount", return_value=0.00001)
     mocker.patch(f"{EXMS}.get_max_pair_stake_amount", return_value=float("inf"))
     mocker.patch(
-        "freqtrade.plugins.pairlistmanager.PairListManager.whitelist",
+        "econith.plugins.pairlistmanager.PairListManager.whitelist",
         PropertyMock(return_value=["XRP/USDT:USDT"]),
     )
     mocker.patch(f"{EXMS}.get_maintenance_ratio_and_amt", return_value=(0.01, 0.01))
@@ -1195,7 +1195,7 @@ def test_backtest_one_detail_futures_funding_fees(
     mocker.patch(f"{EXMS}.get_min_pair_stake_amount", return_value=0.00001)
     mocker.patch(f"{EXMS}.get_max_pair_stake_amount", return_value=float("inf"))
     mocker.patch(
-        "freqtrade.plugins.pairlistmanager.PairListManager.whitelist",
+        "econith.plugins.pairlistmanager.PairListManager.whitelist",
         PropertyMock(return_value=["XRP/USDT:USDT"]),
     )
     mocker.patch(f"{EXMS}.get_maintenance_ratio_and_amt", return_value=(0.01, 0.01))
@@ -1971,7 +1971,7 @@ def test_backtest_multi_pair_long_short_switch(
         default_conf_usdt["timeframe_detail"] = "1m"
 
     mocker.patch(
-        "freqtrade.optimize.backtesting.price_to_precision", lambda price, *args, **kwargs: price
+        "econith.optimize.backtesting.price_to_precision", lambda price, *args, **kwargs: price
     )
     mocker.patch(f"{EXMS}.get_min_pair_stake_amount", return_value=0.00001)
     mocker.patch(f"{EXMS}.get_max_pair_stake_amount", return_value=float("inf"))
@@ -2040,11 +2040,11 @@ def test_backtest_multi_pair_long_short_switch(
 
 def test_backtest_start_timerange(default_conf, mocker, caplog, testdatadir):
     patch_exchange(mocker)
-    mocker.patch("freqtrade.optimize.backtesting.Backtesting.backtest")
-    mocker.patch("freqtrade.optimize.backtesting.generate_backtest_stats")
-    mocker.patch("freqtrade.optimize.backtesting.show_backtest_results")
+    mocker.patch("econith.optimize.backtesting.Backtesting.backtest")
+    mocker.patch("econith.optimize.backtesting.generate_backtest_stats")
+    mocker.patch("econith.optimize.backtesting.show_backtest_results")
     mocker.patch(
-        "freqtrade.plugins.pairlistmanager.PairListManager.whitelist",
+        "econith.plugins.pairlistmanager.PairListManager.whitelist",
         PropertyMock(return_value=["UNITTEST/BTC"]),
     )
     patched_configuration_load_config_file(mocker, default_conf)
@@ -2105,22 +2105,22 @@ def test_backtest_start_multi_strat(default_conf, mocker, caplog, testdatadir):
         }
     )
     mocker.patch(
-        "freqtrade.plugins.pairlistmanager.PairListManager.whitelist",
+        "econith.plugins.pairlistmanager.PairListManager.whitelist",
         PropertyMock(return_value=["UNITTEST/BTC"]),
     )
-    mocker.patch("freqtrade.optimize.backtesting.Backtesting.backtest", backtestmock)
+    mocker.patch("econith.optimize.backtesting.Backtesting.backtest", backtestmock)
     text_table_mock = MagicMock()
     tag_metrics_mock = MagicMock()
     strattable_mock = MagicMock()
     strat_summary = MagicMock()
 
     mocker.patch.multiple(
-        "freqtrade.optimize.optimize_reports.bt_output",
+        "econith.optimize.optimize_reports.bt_output",
         text_table_bt_results=text_table_mock,
         text_table_strategy=strattable_mock,
     )
     mocker.patch.multiple(
-        "freqtrade.optimize.optimize_reports.optimize_reports",
+        "econith.optimize.optimize_reports.optimize_reports",
         generate_pair_metrics=MagicMock(),
         generate_tag_metrics=tag_metrics_mock,
         generate_strategy_comparison=strat_summary,
@@ -2257,10 +2257,10 @@ def test_backtest_start_multi_strat_nomock(default_conf, mocker, caplog, testdat
         ]
     )
     mocker.patch(
-        "freqtrade.plugins.pairlistmanager.PairListManager.whitelist",
+        "econith.plugins.pairlistmanager.PairListManager.whitelist",
         PropertyMock(return_value=["UNITTEST/BTC"]),
     )
-    mocker.patch("freqtrade.optimize.backtesting.Backtesting.backtest", backtestmock)
+    mocker.patch("econith.optimize.backtesting.Backtesting.backtest", backtestmock)
 
     patched_configuration_load_config_file(mocker, default_conf)
 
@@ -2327,10 +2327,10 @@ def test_backtest_start_futures_noliq(default_conf_usdt, mocker, caplog, testdat
     patch_exchange(mocker)
 
     mocker.patch(
-        "freqtrade.plugins.pairlistmanager.PairListManager.whitelist",
+        "econith.plugins.pairlistmanager.PairListManager.whitelist",
         PropertyMock(return_value=["HULUMULU/USDT", "XRP/USDT:USDT"]),
     )
-    # mocker.patch('freqtrade.optimize.backtesting.Backtesting.backtest', backtestmock)
+    # mocker.patch('econith.optimize.backtesting.Backtesting.backtest', backtestmock)
 
     patched_configuration_load_config_file(mocker, default_conf_usdt)
 
@@ -2442,10 +2442,10 @@ def test_backtest_start_nomock_futures(default_conf_usdt, mocker, caplog, testda
         ]
     )
     mocker.patch(
-        "freqtrade.plugins.pairlistmanager.PairListManager.whitelist",
+        "econith.plugins.pairlistmanager.PairListManager.whitelist",
         PropertyMock(return_value=["XRP/USDT:USDT"]),
     )
-    mocker.patch("freqtrade.optimize.backtesting.Backtesting.backtest", backtestmock)
+    mocker.patch("econith.optimize.backtesting.Backtesting.backtest", backtestmock)
 
     patched_configuration_load_config_file(mocker, default_conf_usdt)
 
@@ -2573,10 +2573,10 @@ def test_backtest_start_multi_strat_nomock_detail(
         ]
     )
     mocker.patch(
-        "freqtrade.plugins.pairlistmanager.PairListManager.whitelist",
+        "econith.plugins.pairlistmanager.PairListManager.whitelist",
         PropertyMock(return_value=["XRP/ETH"]),
     )
-    mocker.patch("freqtrade.optimize.backtesting.Backtesting.backtest", backtestmock)
+    mocker.patch("econith.optimize.backtesting.Backtesting.backtest", backtestmock)
 
     patched_configuration_load_config_file(mocker, default_conf)
 
@@ -2648,11 +2648,11 @@ def test_backtest_start_multi_strat_caching(
         }
     )
     mocker.patch(
-        "freqtrade.plugins.pairlistmanager.PairListManager.whitelist",
+        "econith.plugins.pairlistmanager.PairListManager.whitelist",
         PropertyMock(return_value=["UNITTEST/BTC"]),
     )
-    mocker.patch("freqtrade.optimize.backtesting.Backtesting.backtest", backtestmock)
-    mocker.patch("freqtrade.optimize.backtesting.show_backtest_results", MagicMock())
+    mocker.patch("econith.optimize.backtesting.Backtesting.backtest", backtestmock)
+    mocker.patch("econith.optimize.backtesting.show_backtest_results", MagicMock())
 
     now = min_backtest_date = datetime.now(tz=UTC)
     start_time = now - timedelta(**start_delta) + timedelta(hours=1)
@@ -2691,11 +2691,11 @@ def test_backtest_start_multi_strat_caching(
         ],
     )
     mocker.patch.multiple(
-        "freqtrade.data.btanalysis.bt_fileutils",
+        "econith.data.btanalysis.bt_fileutils",
         load_backtest_metadata=load_backtest_metadata,
         load_backtest_stats=load_backtest_stats,
     )
-    mocker.patch("freqtrade.optimize.backtesting.get_strategy_run_id", side_effect=["1", "2", "2"])
+    mocker.patch("econith.optimize.backtesting.get_strategy_run_id", side_effect=["1", "2", "2"])
 
     patched_configuration_load_config_file(mocker, default_conf)
 
@@ -2816,7 +2816,7 @@ def test_time_pair_generator_refresh_pairlist(mocker, default_conf, dynamic_pair
     assert backtesting.dynamic_pairlist == dynamic_pairlist
 
     refresh_mock = mocker.patch(
-        "freqtrade.plugins.pairlistmanager.PairListManager.refresh_pairlist"
+        "econith.plugins.pairlistmanager.PairListManager.refresh_pairlist"
     )
 
     # Simulate 2 candles
@@ -2866,7 +2866,7 @@ def test_time_pair_generator_open_trades_first(mocker, default_conf, dynamic_pai
         # Simulate shuffle
         self._whitelist = pairs[::-1]  # ['ETH/BTC', 'NEO/BTC', 'LTC/BTC', 'XRP/BTC']
 
-    mocker.patch("freqtrade.plugins.pairlistmanager.PairListManager.refresh_pairlist", mock_refresh)
+    mocker.patch("econith.plugins.pairlistmanager.PairListManager.refresh_pairlist", mock_refresh)
 
     processed_pairs = []
     for _, pair, _, _, _ in backtesting.time_pair_generator(start_date, end_date, pairs, data):
@@ -2905,7 +2905,7 @@ def test_time_pair_generator_dynamic_pairlist_no_stale_replay(mocker, default_co
         calls["n"] += 1
         self._whitelist = ["A/BTC"] if calls["n"] in absent else ["A/BTC", "B/BTC"]
 
-    mocker.patch("freqtrade.plugins.pairlistmanager.PairListManager.refresh_pairlist", mock_refresh)
+    mocker.patch("econith.plugins.pairlistmanager.PairListManager.refresh_pairlist", mock_refresh)
 
     end = start + tf * n
     a_rows, b_rows = [], []

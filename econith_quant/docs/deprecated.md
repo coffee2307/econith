@@ -9,20 +9,20 @@ and are no longer supported. Please avoid their usage in your configuration.
 ### the `--refresh-pairs-cached` command line option
 
 `--refresh-pairs-cached` in the context of backtesting, hyperopt and edge allows to refresh candle data for backtesting.
-Since this leads to much confusion, and slows down backtesting (while not being part of backtesting) this has been singled out as a separate freqtrade sub-command `freqtrade download-data`.
+Since this leads to much confusion, and slows down backtesting (while not being part of backtesting) this has been singled out as a separate econith sub-command `econith download-data`.
 
 This command line option was deprecated in 2019.7-dev (develop branch) and removed in 2019.9.
 
 ### The **--dynamic-whitelist** command line option
 
-This command line option was deprecated in 2018 and removed freqtrade 2019.6-dev (develop branch) and in freqtrade 2019.7.
+This command line option was deprecated in 2018 and removed econith 2019.6-dev (develop branch) and in econith 2019.7.
 Please refer to [pairlists](plugins.md#pairlists-and-pairlist-handlers) instead.
 
 ### the `--live` command line option
 
 `--live` in the context of backtesting allowed to download the latest tick data for backtesting.
 Did only download the latest 500 candles, so was ineffective in getting good backtest data.
-Removed in 2019-7-dev (develop branch) and in freqtrade 2019.8.
+Removed in 2019-7-dev (develop branch) and in econith 2019.8.
 
 ### `ticker_interval` (now `timeframe`)
 
@@ -52,7 +52,7 @@ Please switch to the new [Parametrized Strategies](hyperopt.md) to benefit from 
 
 Isolated Futures / short trading was introduced in 2022.4. This required major changes to configuration settings, strategy interfaces, ...
 
-We have put a great effort into keeping compatibility with existing strategies, so if you just want to continue using freqtrade in spot markets, there are no changes necessary.
+We have put a great effort into keeping compatibility with existing strategies, so if you just want to continue using econith in spot markets, there are no changes necessary.
 While we may drop support for the current interface sometime in the future, we will announce this separately and have an appropriate transition period.
 
 Please follow the [Strategy migration](strategy_migration.md) guide to migrate your strategy to the new format to start using the new functionalities.
@@ -105,14 +105,14 @@ With version 2025.12, the handling of dynamic funding rates has been adjusted to
 As a consequence, the mark and funding rate timeframes have been changed to 1h for every supported futures exchange.
 
 As the timeframe for both mark and funding_fee candles has changed (usually from 8h to 1h) - already downloaded data will have to be adjusted or partially re-downloaded.
-You can either re-download everything (`freqtrade download-data [...] --erase` - :warning: can take a long time) - or download the updated data selectively.
+You can either re-download everything (`econith download-data [...] --erase` - :warning: can take a long time) - or download the updated data selectively.
 
 ### Strategy
 
 Most strategies should not need adjustments to continue to work as expected - however, strategies using `@informative("8h", candle_type="funding_rate")` or similar will have to switch the timeframe to 1h.
 The same is true for `dp.get_pair_dataframe(metadata["pair"], "8h", candle_type="funding_rate")` - which will need to be switched to 1h.
 
-freqtrade will auto-adjust the timeframe and return `funding_rates` despite the wrongly given timeframe. It'll issue a warning - and may still break your strategy.
+econith will auto-adjust the timeframe and return `funding_rates` despite the wrongly given timeframe. It'll issue a warning - and may still break your strategy.
 
 ### Selective data re-download
 
@@ -124,12 +124,12 @@ rm user_data/data/<exchange>/futures/*-mark*
 rm user_data/data/<exchange>/futures/*-funding_rate*
 
 # download new data (only required once to fix the mark and funding fee data)
-freqtrade download-data -t 1h --trading-mode futures --candle-types funding_rate mark [...] --timerange <full timerange you've got other data for>
+econith download-data -t 1h --trading-mode futures --candle-types funding_rate mark [...] --timerange <full timerange you've got other data for>
 
 ```
 
 The result of the above will be that your funding_rates and mark data will have the 1h timeframe.
-you can verify this with `freqtrade list-data --exchange <yourexchange> --show`.
+you can verify this with `econith list-data --exchange <yourexchange> --show`.
 
 !!! Note "Additional arguments"
     Additional arguments to the above commands may be necessary, like configuration files or explicit user_data if they deviate from the default.
@@ -142,6 +142,6 @@ CatBoost models have been removed with version 2025.12 and are no longer activel
 If you have existing bots using CatBoost models, you can still use them in your custom models by copy/pasting them from the git history (as linked below) and installing the Catboost library manually.
 We do however recommend switching to other supported model libraries like LightGBM or XGBoost for better support and future compatibility.
 
-* [CatboostRegressor](https://github.com/freqtrade/freqtrade/blob/c6f3b0081927e161a16b116cc47fb663f7831d30/freqtrade/freqai/prediction_models/CatboostRegressor.py)
-* [CatboostClassifier](https://github.com/freqtrade/freqtrade/blob/c6f3b0081927e161a16b116cc47fb663f7831d30/freqtrade/freqai/prediction_models/CatboostClassifier.py)
-* [CatboostClassifierMultiTarget](https://github.com/freqtrade/freqtrade/blob/c6f3b0081927e161a16b116cc47fb663f7831d30/freqtrade/freqai/prediction_models/CatboostClassifierMultiTarget.py)
+* [CatboostRegressor](https://github.com/econith/econith/blob/c6f3b0081927e161a16b116cc47fb663f7831d30/econith/freqai/prediction_models/CatboostRegressor.py)
+* [CatboostClassifier](https://github.com/econith/econith/blob/c6f3b0081927e161a16b116cc47fb663f7831d30/econith/freqai/prediction_models/CatboostClassifier.py)
+* [CatboostClassifierMultiTarget](https://github.com/econith/econith/blob/c6f3b0081927e161a16b116cc47fb663f7831d30/econith/freqai/prediction_models/CatboostClassifierMultiTarget.py)

@@ -1,5 +1,5 @@
 {
-    "name": "freqtrade Dev container image builder",
+    "name": "econith Dev container image builder",
     "build": {
         "dockerfile": "Dockerfile",
         "context": "../../"

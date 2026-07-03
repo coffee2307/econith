@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import time_machine
 
-from freqtrade.util import (
+from econith.util import (
     dt_floor_day,
     dt_from_ts,
     dt_humanize_delta,

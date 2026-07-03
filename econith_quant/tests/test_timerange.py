@@ -3,8 +3,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from freqtrade.configuration import TimeRange
-from freqtrade.exceptions import OperationalException
+from econith.configuration import TimeRange
+from econith.exceptions import OperationalException
 
 
 def test_parse_timerange_incorrect():

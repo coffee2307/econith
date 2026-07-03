@@ -10,16 +10,16 @@ import joblib
 import pandas as pd
 import pytest
 
-from freqtrade.configuration import TimeRange
-from freqtrade.constants import BACKTEST_BREAKDOWNS, DATETIME_PRINT_FORMAT, LAST_BT_RESULT_FN
-from freqtrade.data import history
-from freqtrade.data.btanalysis import (
+from econith.configuration import TimeRange
+from econith.constants import BACKTEST_BREAKDOWNS, DATETIME_PRINT_FORMAT, LAST_BT_RESULT_FN
+from econith.data import history
+from econith.data.btanalysis import (
     get_latest_backtest_filename,
     load_backtest_data,
     load_backtest_stats,
 )
-from freqtrade.enums import ExitType
-from freqtrade.optimize.optimize_reports import (
+from econith.enums import ExitType
+from econith.optimize.optimize_reports import (
     generate_backtest_stats,
     generate_daily_stats,
     generate_pair_metrics,
@@ -32,16 +32,16 @@ from freqtrade.optimize.optimize_reports import (
     text_table_bt_results,
     text_table_strategy,
 )
-from freqtrade.optimize.optimize_reports.bt_output import text_table_tags
-from freqtrade.optimize.optimize_reports.optimize_reports import (
+from econith.optimize.optimize_reports.bt_output import text_table_tags
+from econith.optimize.optimize_reports.optimize_reports import (
     _get_resample_from_period,
     calc_streak,
     generate_tag_metrics,
     generate_wallet_stats,
 )
-from freqtrade.resolvers.strategy_resolver import StrategyResolver
-from freqtrade.util import dt_ts, format_duration
-from freqtrade.util.datetime_helpers import dt_from_ts, dt_utc
+from econith.resolvers.strategy_resolver import StrategyResolver
+from econith.util import dt_ts, format_duration
+from econith.util.datetime_helpers import dt_from_ts, dt_utc
 from tests.conftest import CURRENT_TEST_STRATEGY, log_has_re
 from tests.data.test_history import _clean_test_file
 
@@ -264,8 +264,8 @@ def test_generate_backtest_stats(default_conf, testdatadir, tmp_path):
 
 
 def test_store_backtest_results(testdatadir, mocker):
-    dump_mock = mocker.patch("freqtrade.optimize.optimize_reports.bt_storage.file_dump_json")
-    zip_mock = mocker.patch("freqtrade.optimize.optimize_reports.bt_storage.ZipFile")
+    dump_mock = mocker.patch("econith.optimize.optimize_reports.bt_storage.file_dump_json")
+    zip_mock = mocker.patch("econith.optimize.optimize_reports.bt_storage.ZipFile")
     data = {"metadata": {}, "strategy": {}, "strategy_comparison": []}
     store_backtest_results(
         {"exportdirectory": testdatadir, "original_config": {}}, data, "2022_01_01_15_05_13"

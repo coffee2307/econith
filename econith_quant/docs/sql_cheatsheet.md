@@ -3,7 +3,7 @@
 This page contains some help if you want to query your sqlite db.
 
 !!! Tip "Other Database systems"
-    To use other Database Systems like PostgreSQL or MariaDB, you can use the same queries, but you need to use the respective client for the database system. [Click here](advanced-setup.md#use-a-different-database-system) to learn how to setup a different database system with freqtrade.
+    To use other Database Systems like PostgreSQL or MariaDB, you can use the same queries, but you need to use the respective client for the database system. [Click here](advanced-setup.md#use-a-different-database-system) to learn how to setup a different database system with econith.
 
 !!! Warning
     If you are not familiar with SQL, you should be very careful when running queries on your database.  
@@ -22,10 +22,10 @@ sudo apt-get install sqlite3
 
 ### Using sqlite3 via docker
 
-The freqtrade docker image does contain sqlite3, so you can edit the database without having to install anything on the host system.
+The econith docker image does contain sqlite3, so you can edit the database without having to install anything on the host system.
 
 ``` bash
-docker compose exec freqtrade /bin/bash
+docker compose exec econith /bin/bash
 sqlite3 <database-file>.sqlite
 ```
 
@@ -59,7 +59,7 @@ SELECT * FROM trades;
 ## Destructive queries
 
 Queries that write to the database.
-These queries should usually not be necessary as freqtrade tries to handle all database operations itself - or exposes them via API or telegram commands.
+These queries should usually not be necessary as econith tries to handle all database operations itself - or exposes them via API or telegram commands.
 
 !!! Warning
     Please make sure you have a backup of your database before running any of the below queries.

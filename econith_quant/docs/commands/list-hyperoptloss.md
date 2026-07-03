@@ -1,5 +1,5 @@
 ``` output
-usage: freqtrade list-hyperoptloss [-h] [-v] [--no-color] [--logfile FILE]
+usage: econith list-hyperoptloss [-h] [-v] [--no-color] [--logfile FILE]
                                    [-V] [-c PATH] [-d PATH] [--userdir PATH]
                                    [--hyperopt-path PATH] [-1]
 

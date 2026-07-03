@@ -1,5 +1,5 @@
 ``` output
-usage: freqtrade new-config [-h] [-c PATH]
+usage: econith new-config [-h] [-c PATH]
 
 options:
   -h, --help         show this help message and exit

@@ -1,5 +1,5 @@
 ``` output
-usage: freqtrade show-config [-h] [--userdir PATH] [-c PATH]
+usage: econith show-config [-h] [--userdir PATH] [-c PATH]
                              [--show-sensitive]
 
 options:

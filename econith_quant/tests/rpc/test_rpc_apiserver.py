@@ -22,23 +22,23 @@ from fastapi.testclient import TestClient
 from requests.auth import _basic_auth_str
 from sqlalchemy import select
 
-from freqtrade.__init__ import __version__
-from freqtrade.enums import CandleType, RunMode, State, TradingMode
-from freqtrade.exceptions import (
+from econith.__init__ import __version__
+from econith.enums import CandleType, RunMode, State, TradingMode
+from econith.exceptions import (
     ConfigurationError,
     DependencyException,
     ExchangeError,
     OperationalException,
 )
-from freqtrade.loggers import setup_logging, setup_logging_pre
-from freqtrade.optimize.backtesting import Backtesting
-from freqtrade.persistence import CustomDataWrapper, Trade
-from freqtrade.rpc import RPC
-from freqtrade.rpc.api_server import ApiServer
-from freqtrade.rpc.api_server.api_auth import create_token, get_user_from_token
-from freqtrade.rpc.api_server.uvicorn_threaded import UvicornServer
-from freqtrade.rpc.api_server.webserver_bgwork import ApiBG
-from freqtrade.util.datetime_helpers import format_date
+from econith.loggers import setup_logging, setup_logging_pre
+from econith.optimize.backtesting import Backtesting
+from econith.persistence import CustomDataWrapper, Trade
+from econith.rpc import RPC
+from econith.rpc.api_server import ApiServer
+from econith.rpc.api_server.api_auth import create_token, get_user_from_token
+from econith.rpc.api_server.uvicorn_threaded import UvicornServer
+from econith.rpc.api_server.webserver_bgwork import ApiBG
+from econith.util.datetime_helpers import format_date
 from tests.conftest import (
     CURRENT_TEST_STRATEGY,
     EXMS,
@@ -46,7 +46,7 @@ from tests.conftest import (
     create_mock_trades_usdt,
     generate_test_data,
     get_mock_coro,
-    get_patched_freqtradebot,
+    get_patched_econithbot,
     log_has,
     log_has_re,
     patch_get_signal,
@@ -80,9 +80,9 @@ def botclient(default_conf, mocker):
         }
     )
 
-    ftbot = get_patched_freqtradebot(mocker, default_conf)
+    ftbot = get_patched_econithbot(mocker, default_conf)
     rpc = RPC(ftbot)
-    mocker.patch("freqtrade.rpc.api_server.ApiServer.start_api", MagicMock())
+    mocker.patch("econith.rpc.api_server.ApiServer.start_api", MagicMock())
     apiserver = None
     try:
         apiserver = ApiServer(default_conf)
@@ -172,7 +172,7 @@ def test_api_ui_fallback(botclient, mocker):
 
     rc = client_get(client, "/fallback_file.html")
     assert rc.status_code == 200
-    assert "`freqtrade install-ui`" in rc.text
+    assert "`econith install-ui`" in rc.text
 
     # Forwarded to fallback_html or index.html (depending if it's installed or not)
     rc = client_get(client, "/something")
@@ -185,20 +185,20 @@ def test_api_ui_fallback(botclient, mocker):
     rc = client_get(client, "%2F%2F%2Fetc/passwd")
     assert rc.status_code == 200
     # Allow both fallback or real UI
-    assert "`freqtrade install-ui`" in rc.text or "<!DOCTYPE html>" in rc.text
+    assert "`econith install-ui`" in rc.text or "<!DOCTYPE html>" in rc.text
 
     for test_string in ["%2F%2F%2Fetc/passwd", "assets%2F..%2F..%2F..%2Fdeps.py"]:
         with patch.object(Path, "is_file", MagicMock(side_effect=[True, False])):
             rc = client_get(client, test_string)
             assert rc.status_code == 200
 
-            assert "`freqtrade install-ui`" in rc.text
+            assert "`econith install-ui`" in rc.text
 
 
 def test_api_ui_version(botclient, mocker):
     _ftbot, client = botclient
 
-    mocker.patch("freqtrade.commands.deploy_ui.read_ui_version", return_value="0.1.2")
+    mocker.patch("econith.commands.deploy_ui.read_ui_version", return_value="0.1.2")
     rc = client_get(client, "/ui_version")
     assert rc.status_code == 200
     assert rc.json()["version"] == "0.1.2"
@@ -361,20 +361,20 @@ def test_api__init__(default_conf, mocker):
             }
         }
     )
-    mocker.patch("freqtrade.rpc.telegram.Telegram._init")
-    mocker.patch("freqtrade.rpc.api_server.webserver.ApiServer.start_api", MagicMock())
+    mocker.patch("econith.rpc.telegram.Telegram._init")
+    mocker.patch("econith.rpc.api_server.webserver.ApiServer.start_api", MagicMock())
     apiserver = ApiServer(default_conf)
-    apiserver.add_rpc_handler(RPC(get_patched_freqtradebot(mocker, default_conf)))
+    apiserver.add_rpc_handler(RPC(get_patched_econithbot(mocker, default_conf)))
     assert apiserver._config == default_conf
     with pytest.raises(OperationalException, match=r"RPC Handler already attached\."):
-        apiserver.add_rpc_handler(RPC(get_patched_freqtradebot(mocker, default_conf)))
+        apiserver.add_rpc_handler(RPC(get_patched_econithbot(mocker, default_conf)))
 
     apiserver.cleanup()
     ApiServer.shutdown()
 
 
 def test_api_UvicornServer(mocker):
-    thread_mock = mocker.patch("freqtrade.rpc.api_server.uvicorn_threaded.threading.Thread")
+    thread_mock = mocker.patch("econith.rpc.api_server.uvicorn_threaded.threading.Thread")
     s = UvicornServer(uvicorn.Config(MagicMock(), port=8080, host="127.0.0.1"))
     assert thread_mock.call_count == 0
 
@@ -389,7 +389,7 @@ def test_api_UvicornServer(mocker):
 
 def test_api_UvicornServer_run(mocker):
     serve_mock = mocker.patch(
-        "freqtrade.rpc.api_server.uvicorn_threaded.UvicornServer.serve", get_mock_coro(None)
+        "econith.rpc.api_server.uvicorn_threaded.UvicornServer.serve", get_mock_coro(None)
     )
     s = UvicornServer(uvicorn.Config(MagicMock(), port=8080, host="127.0.0.1"))
     assert serve_mock.call_count == 0
@@ -402,7 +402,7 @@ def test_api_UvicornServer_run(mocker):
 
 def test_api_UvicornServer_run_no_uvloop(mocker, import_fails):
     serve_mock = mocker.patch(
-        "freqtrade.rpc.api_server.uvicorn_threaded.UvicornServer.serve", get_mock_coro(None)
+        "econith.rpc.api_server.uvicorn_threaded.UvicornServer.serve", get_mock_coro(None)
     )
     asyncio.set_event_loop(asyncio.new_event_loop())
     s = UvicornServer(uvicorn.Config(MagicMock(), port=8080, host="127.0.0.1"))
@@ -426,16 +426,16 @@ def test_api_run(default_conf, mocker, caplog):
             }
         }
     )
-    mocker.patch("freqtrade.rpc.telegram.Telegram._init")
+    mocker.patch("econith.rpc.telegram.Telegram._init")
 
     server_inst_mock = MagicMock()
     server_inst_mock.run_in_thread = MagicMock()
     server_inst_mock.run = MagicMock()
     server_mock = MagicMock(return_value=server_inst_mock)
-    mocker.patch("freqtrade.rpc.api_server.webserver.UvicornServer", server_mock)
+    mocker.patch("econith.rpc.api_server.webserver.UvicornServer", server_mock)
 
     apiserver = ApiServer(default_conf)
-    apiserver.add_rpc_handler(RPC(get_patched_freqtradebot(mocker, default_conf)))
+    apiserver.add_rpc_handler(RPC(get_patched_econithbot(mocker, default_conf)))
 
     assert server_mock.call_count == 1
     assert apiserver._config == default_conf
@@ -501,7 +501,7 @@ def test_api_run(default_conf, mocker, caplog):
     # Test crashing API server
     caplog.clear()
     mocker.patch(
-        "freqtrade.rpc.api_server.webserver.UvicornServer", MagicMock(side_effect=Exception)
+        "econith.rpc.api_server.webserver.UvicornServer", MagicMock(side_effect=Exception)
     )
     apiserver.start_api()
     assert log_has("Api server failed to start.", caplog)
@@ -521,14 +521,14 @@ def test_api_cleanup(default_conf, mocker, caplog):
             }
         }
     )
-    mocker.patch("freqtrade.rpc.telegram.Telegram._init")
+    mocker.patch("econith.rpc.telegram.Telegram._init")
 
     server_mock = MagicMock()
     server_mock.cleanup = MagicMock()
-    mocker.patch("freqtrade.rpc.api_server.webserver.UvicornServer", server_mock)
+    mocker.patch("econith.rpc.api_server.webserver.UvicornServer", server_mock)
 
     apiserver = ApiServer(default_conf)
-    apiserver.add_rpc_handler(RPC(get_patched_freqtradebot(mocker, default_conf)))
+    apiserver.add_rpc_handler(RPC(get_patched_econithbot(mocker, default_conf)))
 
     apiserver.cleanup()
     assert apiserver._server.cleanup.call_count == 1
@@ -694,7 +694,7 @@ def test_api_show_config(botclient):
     assert response["timeframe_ms"] == 300000
     assert response["timeframe_min"] == 5
     assert response["state"] == "running"
-    assert response["bot_name"] == "freqtrade"
+    assert response["bot_name"] == "econith"
     assert response["trading_mode"] == "spot"
     assert response["strategy_version"] is None
     assert not response["trailing_stop"]
@@ -1491,7 +1491,7 @@ def test_api_historic_balance_int_bot_managed(botclient, mocker):
             "bot_managed": [1],
         }
     ).astype({"bot_managed": "int64"})
-    mocker.patch("freqtrade.rpc.rpc.read_sql", return_value=one_row)
+    mocker.patch("econith.rpc.rpc.read_sql", return_value=one_row)
     rc = client_get(client, f"{BASE_URI}/historic_balance")
     assert_response(rc, 200)
     assert rc.json()["length"] == 1
@@ -1506,7 +1506,7 @@ def test_api_historic_balance_int_bot_managed(botclient, mocker):
             "bot_managed": [0, 1],
         }
     ).astype({"bot_managed": "int64"})
-    mocker.patch("freqtrade.rpc.rpc.read_sql", return_value=two_rows)
+    mocker.patch("econith.rpc.rpc.read_sql", return_value=two_rows)
     rc = client_get(client, f"{BASE_URI}/historic_balance")
     assert_response(rc, 200)
     assert rc.json()["length"] == 1
@@ -1830,7 +1830,7 @@ def test_api_force_entry(botclient, mocker, fee, endpoint):
     ftbot.config["force_entry_enable"] = True
 
     fbuy_mock = MagicMock(return_value=None)
-    mocker.patch("freqtrade.rpc.rpc.RPC._rpc_force_entry", fbuy_mock)
+    mocker.patch("econith.rpc.rpc.RPC._rpc_force_entry", fbuy_mock)
     rc = client_post(client, f"{BASE_URI}/{endpoint}", data={"pair": "ETH/BTC"})
     assert_response(rc)
     assert rc.json() == {"status": "Error entering long trade for pair ETH/BTC."}
@@ -1856,7 +1856,7 @@ def test_api_force_entry(botclient, mocker, fee, endpoint):
             trading_mode=TradingMode.SPOT,
         )
     )
-    mocker.patch("freqtrade.rpc.rpc.RPC._rpc_force_entry", fbuy_mock)
+    mocker.patch("econith.rpc.rpc.RPC._rpc_force_entry", fbuy_mock)
 
     rc = client_post(client, f"{BASE_URI}/{endpoint}", data={"pair": "ETH/BTC"})
     assert_response(rc)
@@ -2358,7 +2358,7 @@ def test_api_pair_history(botclient, tmp_path, mocker):
     _ftbot.config["user_data_dir"] = tmp_path
 
     timeframe = "5m"
-    lfm = mocker.patch("freqtrade.strategy.interface.IStrategy.load_freqAI_model")
+    lfm = mocker.patch("econith.strategy.interface.IStrategy.load_freqAI_model")
     # Wrong mode
     rc = client_get(
         client,
@@ -2533,10 +2533,10 @@ def test_api_pair_history_live_mode(botclient, tmp_path, mocker):
     _ftbot.config["user_data_dir"] = tmp_path
     _ftbot.config["runmode"] = RunMode.WEBSERVER
 
-    mocker.patch("freqtrade.strategy.interface.IStrategy.load_freqAI_model")
+    mocker.patch("econith.strategy.interface.IStrategy.load_freqAI_model")
     # no strategy, live data
     gho = mocker.patch(
-        "freqtrade.exchange.binance.Binance.get_historic_ohlcv",
+        "econith.exchange.binance.Binance.get_historic_ohlcv",
         return_value=generate_test_data("1h", 100),
     )
     rc = client_post(
@@ -2626,7 +2626,7 @@ def test_api_plot_config(botclient, mocker, tmp_path):
     assert_response(rc, 502)
     assert rc.json()["detail"] is not None
 
-    mocker.patch("freqtrade.rpc.api_server.api_v1.get_rpc_optional", return_value=None)
+    mocker.patch("econith.rpc.api_server.api_v1.get_rpc_optional", return_value=None)
 
     rc = client_get(client, f"{BASE_URI}/plot_config")
     assert_response(rc)
@@ -2713,7 +2713,7 @@ def test_api_strategy(botclient, tmp_path, mocker):
     rc = client_get(client, f"{BASE_URI}/strategy/xx:cHJpbnQoImhlbGxvIHdvcmxkIik=")
     assert_response(rc, 422)
     mocker.patch(
-        "freqtrade.resolvers.strategy_resolver.StrategyResolver._load_strategy",
+        "econith.resolvers.strategy_resolver.StrategyResolver._load_strategy",
         side_effect=Exception("Test"),
     )
 
@@ -2832,7 +2832,7 @@ def test_api_freqaimodels(botclient, tmp_path, mocker):
     ftbot.config["runmode"] = RunMode.WEBSERVER
 
     mocker.patch(
-        "freqtrade.resolvers.freqaimodel_resolver.FreqaiModelResolver.search_all_objects",
+        "econith.resolvers.freqaimodel_resolver.FreqaiModelResolver.search_all_objects",
         return_value=[
             {"name": "LightGBMClassifier"},
             {"name": "LightGBMClassifierMultiTarget"},
@@ -2992,7 +2992,7 @@ def test_api_pairlists_evaluate(botclient, tmp_path, mocker):
     ]
     assert response["result"]["length"] == 2
     # Patch __run_pairlists
-    plm = mocker.patch("freqtrade.rpc.api_server.api_pairlists.__run_pairlist", return_value=None)
+    plm = mocker.patch("econith.rpc.api_server.api_pairlists.__run_pairlist", return_value=None)
     body = {
         "pairlists": [
             {
@@ -3268,7 +3268,7 @@ def test_api_backtesting(botclient, mocker, fee, caplog, tmp_path):
         data["stake_amount"] = 101
 
         mocker.patch(
-            "freqtrade.optimize.backtesting.Backtesting.backtest_one_strategy",
+            "econith.optimize.backtesting.Backtesting.backtest_one_strategy",
             side_effect=ConfigurationError("DeadBeef22"),
         )
         rc = client_post(client, f"{BASE_URI}/backtest", data=data)
@@ -3276,7 +3276,7 @@ def test_api_backtesting(botclient, mocker, fee, caplog, tmp_path):
 
         data["stake_amount"] = 102
         mocker.patch(
-            "freqtrade.optimize.backtesting.Backtesting.backtest_one_strategy",
+            "econith.optimize.backtesting.Backtesting.backtest_one_strategy",
             side_effect=DependencyException("DeadBeef"),
         )
         rc = client_post(client, f"{BASE_URI}/backtest", data=data)
@@ -3308,7 +3308,7 @@ def test_api_backtesting(botclient, mocker, fee, caplog, tmp_path):
 def test_api_backtest_history(botclient, mocker, testdatadir):
     ftbot, client = botclient
     mocker.patch(
-        "freqtrade.data.btanalysis.bt_fileutils._get_backtest_files",
+        "econith.data.btanalysis.bt_fileutils._get_backtest_files",
         return_value=[
             testdatadir / "backtest_results/backtest-result_multistrat.json",
             testdatadir / "backtest_results/backtest-result.json",
@@ -3564,7 +3564,7 @@ def test_api_ws_subscribe(botclient, mocker):
     _ftbot, client = botclient
     ws_url = f"/api/v1/message/ws?token={_TEST_WS_TOKEN}"
 
-    sub_mock = mocker.patch("freqtrade.rpc.api_server.ws.WebSocketChannel.set_subscriptions")
+    sub_mock = mocker.patch("econith.rpc.api_server.ws.WebSocketChannel.set_subscriptions")
 
     with client.websocket_connect(ws_url) as ws:
         ws.send_json({"type": "subscribe", "data": ["whitelist"]})
@@ -3613,7 +3613,7 @@ def test_api_ws_requests(botclient, caplog):
     assert response["type"] == "analyzed_df"
 
 
-def test_channel_reader_handles_freqtrade_exception(botclient):
+def test_channel_reader_handles_econith_exception(botclient):
     _ftbot, client = botclient
     ws_url = f"/api/v1/message/ws?token={_TEST_WS_TOKEN}"
 
@@ -3642,10 +3642,10 @@ def test_api_ws_send_msg(default_conf, mocker, caplog):
                 }
             }
         )
-        mocker.patch("freqtrade.rpc.telegram.Telegram._init")
-        mocker.patch("freqtrade.rpc.api_server.ApiServer.start_api")
+        mocker.patch("econith.rpc.telegram.Telegram._init")
+        mocker.patch("econith.rpc.api_server.ApiServer.start_api")
         apiserver = ApiServer(default_conf)
-        apiserver.add_rpc_handler(RPC(get_patched_freqtradebot(mocker, default_conf)))
+        apiserver.add_rpc_handler(RPC(get_patched_econithbot(mocker, default_conf)))
 
         # Start test client context manager to run lifespan events
         with TestClient(apiserver.app):
@@ -3691,7 +3691,7 @@ def test_api_download_data(botclient, mocker, tmp_path):
 
     # Test successful download
     mocker.patch(
-        "freqtrade.data.history.history_utils.download_data",
+        "econith.data.history.history_utils.download_data",
         return_value=None,
     )
 
@@ -3719,7 +3719,7 @@ def test_api_download_data(botclient, mocker, tmp_path):
     # Test error case
     ApiBG.download_data_running = False
     mocker.patch(
-        "freqtrade.data.history.history_utils.download_data",
+        "econith.data.history.history_utils.download_data",
         side_effect=OperationalException("Download error"),
     )
     rc = client_post(client, f"{BASE_URI}/download_data", body)
@@ -3774,7 +3774,7 @@ def test_api_lookahead_analysis(botclient, mocker, tmp_path):
         ),
     )
     mocker.patch(
-        "freqtrade.optimize.analysis.lookahead_helpers."
+        "econith.optimize.analysis.lookahead_helpers."
         "LookaheadAnalysisSubFunctions.initialize_single_lookahead_analysis",
         return_value=fake_instance,
     )
@@ -3809,7 +3809,7 @@ def test_api_lookahead_analysis(botclient, mocker, tmp_path):
     # Error case
     ApiBG.analysis_running = False
     mocker.patch(
-        "freqtrade.optimize.analysis.lookahead_helpers."
+        "econith.optimize.analysis.lookahead_helpers."
         "LookaheadAnalysisSubFunctions.initialize_single_lookahead_analysis",
         side_effect=OperationalException("Analysis error"),
     )
@@ -3858,7 +3858,7 @@ def test_api_recursive_analysis(botclient, mocker, tmp_path):
         dict_recursive={"rsi": {"199": 0.01234, "399": 0.0}},
     )
     mocker.patch(
-        "freqtrade.optimize.analysis.recursive_helpers."
+        "econith.optimize.analysis.recursive_helpers."
         "RecursiveAnalysisSubFunctions.initialize_single_recursive_analysis",
         return_value=fake_instance,
     )

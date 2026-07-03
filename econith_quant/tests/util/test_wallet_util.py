@@ -1,6 +1,6 @@
 import pytest
 
-from freqtrade.util import get_dry_run_wallet
+from econith.util import get_dry_run_wallet
 
 
 @pytest.mark.parametrize(

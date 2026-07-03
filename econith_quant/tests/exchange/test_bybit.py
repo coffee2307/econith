@@ -4,8 +4,8 @@ from unittest.mock import MagicMock, PropertyMock
 
 import pytest
 
-from freqtrade.enums import MarginMode, RunMode, TradingMode
-from freqtrade.util import dt_utc
+from econith.enums import MarginMode, RunMode, TradingMode
+from econith.util import dt_utc
 from tests.conftest import EXMS, get_mock_coro, get_patched_exchange, log_has
 from tests.exchange.test_exchange import ccxt_exceptionhandlers
 

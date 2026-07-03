@@ -2,16 +2,16 @@ from unittest.mock import MagicMock, PropertyMock
 
 import pytest
 
-from freqtrade.configuration.config_setup import setup_utils_configuration
-from freqtrade.data.history.history_utils import download_data_main
-from freqtrade.enums import RunMode
-from freqtrade.exceptions import OperationalException
+from econith.configuration.config_setup import setup_utils_configuration
+from econith.data.history.history_utils import download_data_main
+from econith.enums import RunMode
+from econith.exceptions import OperationalException
 from tests.conftest import EXMS, log_has_re, patch_exchange
 
 
 def test_download_data_main_no_markets(mocker, caplog):
     dl_mock = mocker.patch(
-        "freqtrade.data.history.history_utils.refresh_backtest_ohlcv_data",
+        "econith.data.history.history_utils.refresh_backtest_ohlcv_data",
         MagicMock(return_value=["ETH/BTC", "XRP/BTC"]),
     )
     patch_exchange(mocker, exchange="binance")
@@ -25,7 +25,7 @@ def test_download_data_main_no_markets(mocker, caplog):
 
 def test_download_data_main_all_pairs(mocker, markets):
     dl_mock = mocker.patch(
-        "freqtrade.data.history.history_utils.refresh_backtest_ohlcv_data",
+        "econith.data.history.history_utils.refresh_backtest_ohlcv_data",
         MagicMock(return_value=["ETH/BTC", "XRP/BTC"]),
     )
     patch_exchange(mocker)
@@ -48,11 +48,11 @@ def test_download_data_main_all_pairs(mocker, markets):
 
 def test_download_data_main_trades(mocker):
     dl_mock = mocker.patch(
-        "freqtrade.data.history.history_utils.refresh_backtest_trades_data",
+        "econith.data.history.history_utils.refresh_backtest_trades_data",
         MagicMock(return_value=[]),
     )
     convert_mock = mocker.patch(
-        "freqtrade.data.history.history_utils.convert_trades_to_ohlcv", MagicMock(return_value=[])
+        "econith.data.history.history_utils.convert_trades_to_ohlcv", MagicMock(return_value=[])
     )
     patch_exchange(mocker)
     mocker.patch(f"{EXMS}.get_markets", return_value={"ETH/BTC": {}, "XRP/BTC": {}})

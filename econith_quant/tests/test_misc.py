@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pandas as pd
 import pytest
 
-from freqtrade.misc import (
+from econith.misc import (
     dataframe_to_json,
     deep_merge_dicts,
     file_dump_json,
@@ -24,12 +24,12 @@ from freqtrade.misc import (
 
 
 def test_file_dump_json(mocker) -> None:
-    file_open = mocker.patch("freqtrade.misc.Path.open", MagicMock())
+    file_open = mocker.patch("econith.misc.Path.open", MagicMock())
     json_dump = mocker.patch("rapidjson.dump", MagicMock())
     file_dump_json(Path("somefile"), [1, 2, 3])
     assert file_open.call_count == 1
     assert json_dump.call_count == 1
-    file_open = mocker.patch("freqtrade.misc.gzip.open", MagicMock())
+    file_open = mocker.patch("econith.misc.gzip.open", MagicMock())
     json_dump = mocker.patch("rapidjson.dump", MagicMock())
     file_dump_json(Path("somefile"), [1, 2, 3], True)
     assert file_open.call_count == 1
@@ -225,8 +225,8 @@ def test_plural() -> None:
             "postgresql+psycopg://host/dbname",
         ),
         (
-            "sqlite:////freqtrade/user_data/tradesv3.sqlite",
-            "sqlite:////freqtrade/user_data/tradesv3.sqlite",
+            "sqlite:////econith/user_data/tradesv3.sqlite",
+            "sqlite:////econith/user_data/tradesv3.sqlite",
         ),
     ],
 )

@@ -1,5 +1,5 @@
 ``` output
-usage: freqtrade list-data [-h] [-v] [--no-color] [--logfile FILE] [-V]
+usage: econith list-data [-h] [-v] [--no-color] [--logfile FILE] [-V]
                            [-c PATH] [-d PATH] [--userdir PATH]
                            [--exchange EXCHANGE]
                            [--data-format-ohlcv {json,jsongz,feather,parquet}]

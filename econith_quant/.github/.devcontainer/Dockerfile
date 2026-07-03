@@ -1,10 +1,10 @@
-FROM freqtradeorg/freqtrade:develop_freqairl
+FROM econith/econith-quant:develop_freqairl
 
 USER root
 # Install dependencies
-COPY requirements-dev.txt /freqtrade/
+COPY requirements-dev.txt /econith/
 
-ARG USERNAME=ftuser
+ARG USERNAME=econithuser
 
 RUN apt-get update \
     && apt-get -y install --no-install-recommends apt-utils dialog git ssh vim build-essential zsh \
@@ -13,7 +13,7 @@ RUN apt-get update \
     && chown ${USERNAME}:${USERNAME} -R /home/${USERNAME}/.local/ \
     && chown ${USERNAME}: -R /home/${USERNAME}/
 
-USER ftuser
+USER econithuser
 
 RUN pip install --user autopep8 -r docs/requirements-docs.txt -r requirements-dev.txt --no-cache-dir
 

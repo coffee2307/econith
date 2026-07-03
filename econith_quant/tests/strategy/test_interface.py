@@ -8,21 +8,21 @@ from unittest.mock import MagicMock
 import pytest
 from pandas import DataFrame, concat
 
-from freqtrade.configuration import TimeRange
-from freqtrade.constants import CUSTOM_TAG_MAX_LENGTH
-from freqtrade.data.dataprovider import DataProvider
-from freqtrade.data.history import load_data
-from freqtrade.enums import ExitCheckTuple, ExitType, SignalDirection
-from freqtrade.exceptions import DependencyException, OperationalException, StrategyError
-from freqtrade.persistence import PairLocks, Trade
-from freqtrade.resolvers import StrategyResolver
-from freqtrade.strategy.hyper import detect_all_parameters
-from freqtrade.strategy.parameters import (
+from econith.configuration import TimeRange
+from econith.constants import CUSTOM_TAG_MAX_LENGTH
+from econith.data.dataprovider import DataProvider
+from econith.data.history import load_data
+from econith.enums import ExitCheckTuple, ExitType, SignalDirection
+from econith.exceptions import DependencyException, OperationalException, StrategyError
+from econith.persistence import PairLocks, Trade
+from econith.resolvers import StrategyResolver
+from econith.strategy.hyper import detect_all_parameters
+from econith.strategy.parameters import (
     IntParameter,
 )
-from freqtrade.strategy.strategy_validation import StrategyResultValidator
-from freqtrade.util import dt_now
-from freqtrade.util.datetime_helpers import dt_now_no_micro
+from econith.strategy.strategy_validation import StrategyResultValidator
+from econith.util import dt_now
+from econith.util.datetime_helpers import dt_now_no_micro
 from tests.conftest import CURRENT_TEST_STRATEGY, TRADE_SIDES, log_has, log_has_re
 
 from .strats.strategy_test_v3 import StrategyTestV3
@@ -119,7 +119,7 @@ def test_returns_latest_signal(ohlcv_history):
 def test_analyze_pair_empty(mocker, caplog, ohlcv_history):
     mocker.patch.object(_STRATEGY.dp, "ohlcv", return_value=ohlcv_history)
     mocker.patch.object(_STRATEGY, "_analyze_ticker_internal", return_value=DataFrame([]))
-    mocker.patch("freqtrade.strategy.interface.StrategyResultValidator.assert_df")
+    mocker.patch("econith.strategy.interface.StrategyResultValidator.assert_df")
 
     _STRATEGY.analyze_pair("ETH/BTC")
 
@@ -169,7 +169,7 @@ def test_get_signal_old_dataframe(default_conf, mocker, caplog, ohlcv_history):
     mocked_history.loc[1, "enter_long"] = 1
 
     caplog.set_level(logging.INFO)
-    mocker.patch("freqtrade.strategy.interface.StrategyResultValidator.assert_df")
+    mocker.patch("econith.strategy.interface.StrategyResultValidator.assert_df")
 
     assert (None, None) == _STRATEGY.get_latest_candle(
         "xyz", default_conf["timeframe"], mocked_history
@@ -190,7 +190,7 @@ def test_get_signal_no_sell_column(default_conf, mocker, caplog, ohlcv_history):
 
     caplog.set_level(logging.INFO)
     mocker.patch(
-        "freqtrade.strategy.interface.StrategyResultValidator.assert_df",
+        "econith.strategy.interface.StrategyResultValidator.assert_df",
     )
 
     assert (SignalDirection.LONG, None) == _STRATEGY.get_entry_signal(
@@ -235,7 +235,7 @@ def test_assert_df_raise(mocker, caplog, ohlcv_history):
     mocker.patch.object(_STRATEGY.dp, "ohlcv", return_value=ohlcv_history)
     mocker.patch.object(_STRATEGY.dp, "get_analyzed_dataframe", return_value=(mocked_history, 0))
     mocker.patch(
-        "freqtrade.strategy.interface.StrategyResultValidator.assert_df",
+        "econith.strategy.interface.StrategyResultValidator.assert_df",
         side_effect=StrategyError("Dataframe returned..."),
     )
     _STRATEGY.analyze_pair("xyz")
@@ -301,7 +301,7 @@ def test_freqai_not_initialized(default_conf) -> None:
 
 def test_advise_all_indicators_copy(mocker, default_conf, testdatadir) -> None:
     strategy = StrategyResolver.load_strategy(default_conf)
-    aimock = mocker.patch("freqtrade.strategy.interface.IStrategy.advise_indicators")
+    aimock = mocker.patch("econith.strategy.interface.IStrategy.advise_indicators")
     timerange = TimeRange.parse_timerange("1510694220-1510700340")
     data = load_data(testdatadir, "1m", ["UNITTEST/BTC"], timerange=timerange, fill_up_missing=True)
     strategy.advise_all_indicators(data)
@@ -892,7 +892,7 @@ def test_analyze_ticker_default(ohlcv_history, mocker, caplog) -> None:
     entry_mock = MagicMock(side_effect=lambda x, meta: x)
     exit_mock = MagicMock(side_effect=lambda x, meta: x)
     mocker.patch.multiple(
-        "freqtrade.strategy.interface.IStrategy",
+        "econith.strategy.interface.IStrategy",
         advise_indicators=ind_mock,
         advise_entry=entry_mock,
         advise_exit=exit_mock,
@@ -922,7 +922,7 @@ def test__analyze_ticker_internal_skip_analyze(ohlcv_history, mocker, caplog) ->
     entry_mock = MagicMock(side_effect=lambda x, meta: x)
     exit_mock = MagicMock(side_effect=lambda x, meta: x)
     mocker.patch.multiple(
-        "freqtrade.strategy.interface.IStrategy",
+        "econith.strategy.interface.IStrategy",
         advise_indicators=ind_mock,
         advise_entry=entry_mock,
         advise_exit=exit_mock,
@@ -1104,7 +1104,7 @@ def test_auto_hyperopt_interface_loadparams(default_conf, mocker, caplog):
             "roi": {"0": 0.2, "1200": 0.01},
         },
     }
-    mocker.patch("freqtrade.strategy.hyper.HyperoptTools.load_params", return_value=expected_result)
+    mocker.patch("econith.strategy.hyper.HyperoptTools.load_params", return_value=expected_result)
     PairLocks.timeframe = default_conf["timeframe"]
     strategy = StrategyResolver.load_strategy(default_conf)
     assert strategy.stoploss == -0.05
@@ -1120,12 +1120,12 @@ def test_auto_hyperopt_interface_loadparams(default_conf, mocker, caplog):
         },
     }
 
-    mocker.patch("freqtrade.strategy.hyper.HyperoptTools.load_params", return_value=expected_result)
+    mocker.patch("econith.strategy.hyper.HyperoptTools.load_params", return_value=expected_result)
     with pytest.raises(OperationalException, match=r"Invalid parameter file provided\."):
         StrategyResolver.load_strategy(default_conf)
 
     mocker.patch(
-        "freqtrade.strategy.hyper.HyperoptTools.load_params", MagicMock(side_effect=ValueError())
+        "econith.strategy.hyper.HyperoptTools.load_params", MagicMock(side_effect=ValueError())
     )
 
     StrategyResolver.load_strategy(default_conf)

@@ -18,6 +18,24 @@ from infrastructure.storage.parquet import ParquetStore
 logger = logging.getLogger("econith.feature_store.writer")
 
 
+def next_partition_index(root: Path | str, dataset: str = "features") -> int:
+    """Scan ``root`` for ``{dataset}_NNNNN.parquet`` files and return the next index.
+
+    Restarting a live collector reuses this so new batches append after the highest
+    existing partition instead of overwriting ``features_00000.parquet``.
+    """
+    root_path = Path(root)
+    if not root_path.exists():
+        return 0
+    prefix = f"{dataset}_"
+    max_idx = -1
+    for path in root_path.glob(f"{prefix}*.parquet"):
+        suffix = path.stem[len(prefix):]
+        if len(suffix) == 5 and suffix.isdigit():
+            max_idx = max(max_idx, int(suffix))
+    return max_idx + 1
+
+
 class FeatureWriter:
     """Batches feature rows and flushes them to the Parquet Feature Store."""
 
@@ -32,7 +50,20 @@ class FeatureWriter:
         self._batch_size = batch_size
         self._buffer: list[dict[str, Any]] = []
         self._written = 0
-        self._partition = 0
+        self._partition = next_partition_index(self._store.root, dataset)
+        if self._partition > 0:
+            logger.info(
+                "resuming feature store at %s/%s_%05d (%d partition(s) on disk)",
+                self._store.root,
+                dataset,
+                self._partition,
+                self._partition,
+            )
+
+    @property
+    def next_partition(self) -> int:
+        """Index of the partition file the next flush will create."""
+        return self._partition
 
     @property
     def buffered(self) -> int:

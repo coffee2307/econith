@@ -8,16 +8,16 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from ccxt import NotSupported
 
-from freqtrade.enums import CandleType
-from freqtrade.exceptions import TemporaryError
-from freqtrade.exchange.exchange_ws import ExchangeWS
+from econith.enums import CandleType
+from econith.exceptions import TemporaryError
+from econith.exchange.exchange_ws import ExchangeWS
 from ft_client.test_client.test_rest_client import log_has_re
 
 
 def test_exchangews_init(mocker):
     config = MagicMock()
     ccxt_object = MagicMock()
-    mocker.patch("freqtrade.exchange.exchange_ws.ExchangeWS._start_forever", MagicMock())
+    mocker.patch("econith.exchange.exchange_ws.ExchangeWS._start_forever", MagicMock())
 
     exchange_ws = ExchangeWS(config, ccxt_object)
     sleep(0.1)
@@ -38,7 +38,7 @@ def test_exchangews_cleanup_error(mocker, caplog):
     config = MagicMock()
     ccxt_object = MagicMock()
     ccxt_object.close = AsyncMock(side_effect=Exception("Test"))
-    mocker.patch("freqtrade.exchange.exchange_ws.ExchangeWS._start_forever", MagicMock())
+    mocker.patch("econith.exchange.exchange_ws.ExchangeWS._start_forever", MagicMock())
 
     exchange_ws = ExchangeWS(config, ccxt_object)
     patch_eventloop_threading(exchange_ws)
@@ -54,7 +54,7 @@ def test_exchangews_cleanup_error(mocker, caplog):
 def test_exchangews_reset_connections_timeout_and_exception(mocker, caplog):
     config = MagicMock()
     ccxt_object = MagicMock()
-    mocker.patch("freqtrade.exchange.exchange_ws.ExchangeWS._start_forever", MagicMock())
+    mocker.patch("econith.exchange.exchange_ws.ExchangeWS._start_forever", MagicMock())
 
     exchange_ws = ExchangeWS(config, ccxt_object)
     exchange_ws._loop = MagicMock()
@@ -75,7 +75,7 @@ def test_exchangews_reset_connections_timeout_and_exception(mocker, caplog):
     fake_run_coroutine_threadsafe.calls = 0
 
     mock_run = mocker.patch(
-        "freqtrade.exchange.exchange_ws.asyncio.run_coroutine_threadsafe",
+        "econith.exchange.exchange_ws.asyncio.run_coroutine_threadsafe",
         side_effect=fake_run_coroutine_threadsafe,
     )
 
@@ -96,7 +96,7 @@ def test_exchangews_reset_connections_timeout_and_exception(mocker, caplog):
 def test_exchangews_cleanup_thread_timeout_warning(mocker, caplog):
     config = MagicMock()
     ccxt_object = MagicMock()
-    mocker.patch("freqtrade.exchange.exchange_ws.ExchangeWS._start_forever", MagicMock())
+    mocker.patch("econith.exchange.exchange_ws.ExchangeWS._start_forever", MagicMock())
 
     exchange_ws = ExchangeWS(config, ccxt_object)
     exchange_ws._loop = MagicMock()
@@ -115,8 +115,8 @@ def test_exchangews_cleanup_thread_timeout_warning(mocker, caplog):
 def test_exchangews_schedule_ohlcv_loop_not_ready(mocker, caplog):
     config = MagicMock()
     ccxt_object = MagicMock()
-    mocker.patch("freqtrade.exchange.exchange_ws.ExchangeWS._start_forever", MagicMock())
-    run_threadsafe = mocker.patch("freqtrade.exchange.exchange_ws.asyncio.run_coroutine_threadsafe")
+    mocker.patch("econith.exchange.exchange_ws.ExchangeWS._start_forever", MagicMock())
+    run_threadsafe = mocker.patch("econith.exchange.exchange_ws.asyncio.run_coroutine_threadsafe")
 
     exchange_ws = ExchangeWS(config, ccxt_object)
     exchange_ws.schedule_ohlcv("ETH/BTC", "1m", CandleType.SPOT)
@@ -171,7 +171,7 @@ async def test_exchangews_ohlcv(mocker, time_machine, caplog):
     ccxt_object.close = AsyncMock()
     time_machine.move_to("2024-11-01 01:00:02 +00:00")
 
-    mocker.patch("freqtrade.exchange.exchange_ws.ExchangeWS._start_forever", MagicMock())
+    mocker.patch("econith.exchange.exchange_ws.ExchangeWS._start_forever", MagicMock())
 
     exchange_ws = ExchangeWS(config, ccxt_object)
     patch_eventloop_threading(exchange_ws)
@@ -258,7 +258,7 @@ async def test_exchangews_get_ohlcv(mocker, caplog):
             ],
         }
     }
-    mocker.patch("freqtrade.exchange.exchange_ws.ExchangeWS._start_forever", MagicMock())
+    mocker.patch("econith.exchange.exchange_ws.ExchangeWS._start_forever", MagicMock())
 
     exchange_ws = ExchangeWS(config, ccxt_object)
     exchange_ws._klines_last_refresh = {
@@ -323,7 +323,7 @@ async def test_exchangews_get_ohlcv_missing_refresh_date(mocker, caplog):
             ]
         }
     }
-    mocker.patch("freqtrade.exchange.exchange_ws.ExchangeWS._start_forever", MagicMock())
+    mocker.patch("econith.exchange.exchange_ws.ExchangeWS._start_forever", MagicMock())
 
     exchange_ws = ExchangeWS(config, ccxt_object)
     exchange_ws._klines_last_refresh = {}
@@ -346,7 +346,7 @@ def test_exchangews_ohlcvs_deepcopy_and_retry(mocker):
             "1m": [[1, 2, 3, 4, 5, 6]],
         }
     }
-    mocker.patch("freqtrade.exchange.exchange_ws.ExchangeWS._start_forever", MagicMock())
+    mocker.patch("econith.exchange.exchange_ws.ExchangeWS._start_forever", MagicMock())
 
     exchange_ws = ExchangeWS(config, ccxt_object)
 
@@ -358,7 +358,7 @@ def test_exchangews_ohlcvs_deepcopy_and_retry(mocker):
             raise RuntimeError("copy failed")
         return [candle.copy() for candle in value]
 
-    mocker.patch("freqtrade.exchange.exchange_ws.deepcopy", deepcopy_side_effect)
+    mocker.patch("econith.exchange.exchange_ws.deepcopy", deepcopy_side_effect)
 
     result = exchange_ws.ohlcvs("ETH/USDT", "1m")
 
@@ -367,7 +367,7 @@ def test_exchangews_ohlcvs_deepcopy_and_retry(mocker):
     assert result is not ccxt_object.ohlcvs["ETH/USDT"]["1m"]
 
     # Fail all the time
-    mocker.patch("freqtrade.exchange.exchange_ws.deepcopy", side_effect=RuntimeError("copy failed"))
+    mocker.patch("econith.exchange.exchange_ws.deepcopy", side_effect=RuntimeError("copy failed"))
     with pytest.raises(TemporaryError, match=r"Error deepcopying: copy failed"):
         exchange_ws.ohlcvs("ETH/USDT", "1m")
 
@@ -377,7 +377,7 @@ def test_exchangews_ohlcvs_deepcopy_and_retry(mocker):
 def test_exchangews_get_ohlcv_with_refresh(mocker):
     config = MagicMock()
     ccxt_object = MagicMock()
-    mocker.patch("freqtrade.exchange.exchange_ws.ExchangeWS._start_forever", MagicMock())
+    mocker.patch("econith.exchange.exchange_ws.ExchangeWS._start_forever", MagicMock())
 
     exchange_ws = ExchangeWS(config, ccxt_object)
     ohlcvs_mock = mocker.patch.object(
@@ -412,7 +412,7 @@ def test_exchangews_continuous_stopped_task_exception(mocker, caplog):
             ]
         }
     }
-    mocker.patch("freqtrade.exchange.exchange_ws.ExchangeWS._start_forever", MagicMock())
+    mocker.patch("econith.exchange.exchange_ws.ExchangeWS._start_forever", MagicMock())
 
     exchange_ws = ExchangeWS(config, ccxt_object)
     exchange_ws._loop = MagicMock()
@@ -435,7 +435,7 @@ def test_exchangews_continuous_stopped_task_exception(mocker, caplog):
         return completed_future
 
     run_threadsafe = mocker.patch(
-        "freqtrade.exchange.exchange_ws.asyncio.run_coroutine_threadsafe",
+        "econith.exchange.exchange_ws.asyncio.run_coroutine_threadsafe",
         side_effect=side_effect,
     )
 

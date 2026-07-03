@@ -10,8 +10,8 @@ from unittest.mock import MagicMock
 import pytest
 import websockets
 
-from freqtrade.data.dataprovider import DataProvider
-from freqtrade.rpc.external_message_consumer import ExternalMessageConsumer
+from econith.data.dataprovider import DataProvider
+from econith.rpc.external_message_consumer import ExternalMessageConsumer
 from tests.conftest import log_has, log_has_re, log_has_when
 
 
@@ -181,7 +181,7 @@ async def test_emc_create_connection_success(default_conf, caplog, mocker):
     )
 
     mocker.patch(
-        "freqtrade.rpc.external_message_consumer.ExternalMessageConsumer.start", MagicMock()
+        "econith.rpc.external_message_consumer.ExternalMessageConsumer.start", MagicMock()
     )
     dp = DataProvider(default_conf, None, None, None)
     emc = ExternalMessageConsumer(default_conf, dp)
@@ -227,8 +227,8 @@ async def test_emc_create_connection_invalid_url(default_conf, caplog, mocker, h
 
     dp = DataProvider(default_conf, None, None, None)
     # Handle start explicitly to avoid messing with threading in tests
-    mocker.patch("freqtrade.rpc.external_message_consumer.ExternalMessageConsumer.start")
-    mocker.patch("freqtrade.rpc.api_server.ws.channel.create_channel")
+    mocker.patch("econith.rpc.external_message_consumer.ExternalMessageConsumer.start")
+    mocker.patch("econith.rpc.api_server.ws.channel.create_channel")
     emc = ExternalMessageConsumer(default_conf, dp)
 
     try:
@@ -295,7 +295,7 @@ async def test_emc_receive_messages_valid(default_conf, caplog, mocker):
     )
 
     mocker.patch(
-        "freqtrade.rpc.external_message_consumer.ExternalMessageConsumer.start", MagicMock()
+        "econith.rpc.external_message_consumer.ExternalMessageConsumer.start", MagicMock()
     )
 
     lock = asyncio.Lock()
@@ -342,7 +342,7 @@ async def test_emc_receive_messages_invalid(default_conf, caplog, mocker):
     )
 
     mocker.patch(
-        "freqtrade.rpc.external_message_consumer.ExternalMessageConsumer.start", MagicMock()
+        "econith.rpc.external_message_consumer.ExternalMessageConsumer.start", MagicMock()
     )
 
     lock = asyncio.Lock()
@@ -389,7 +389,7 @@ async def test_emc_receive_messages_timeout(default_conf, caplog, mocker):
     )
 
     mocker.patch(
-        "freqtrade.rpc.external_message_consumer.ExternalMessageConsumer.start", MagicMock()
+        "econith.rpc.external_message_consumer.ExternalMessageConsumer.start", MagicMock()
     )
 
     lock = asyncio.Lock()
@@ -440,7 +440,7 @@ async def test_emc_receive_messages_handle_error(default_conf, caplog, mocker):
     )
 
     mocker.patch(
-        "freqtrade.rpc.external_message_consumer.ExternalMessageConsumer.start", MagicMock()
+        "econith.rpc.external_message_consumer.ExternalMessageConsumer.start", MagicMock()
     )
 
     lock = asyncio.Lock()

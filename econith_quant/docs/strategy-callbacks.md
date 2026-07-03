@@ -180,7 +180,7 @@ The absolute value of the return value is used (the sign is ignored), so returni
 Returning `None` will be interpreted as "no desire to change", and is the only safe way to return when you'd like to not modify the stoploss.
 `NaN` and `inf` values are considered invalid and will be ignored (identical to `None`).
 
-Stoploss on exchange works similar to `trailing_stop`, and the stoploss on exchange is updated as configured in `stoploss_on_exchange_interval` ([More details about stoploss on exchange](stoploss.md#stop-loss-on-exchangefreqtrade)).
+Stoploss on exchange works similar to `trailing_stop`, and the stoploss on exchange is updated as configured in `stoploss_on_exchange_interval` ([More details about stoploss on exchange](stoploss.md#stop-loss-on-exchangeeconith)).
 
 If you're on futures markets, please take note of the [stoploss and leverage](stoploss.md#stoploss-and-leverage) section, as the stoploss value returned from `custom_stoploss` is the risk for this trade - not the relative price movement.
 
@@ -193,7 +193,7 @@ If you're on futures markets, please take note of the [stoploss and leverage](st
 ### Adjust stoploss after position adjustments
 
 Depending on your strategy, you may encounter the need to adjust the stoploss in both directions after a [position adjustment](#adjust-trade-position).
-For this, freqtrade will make an additional call with `after_fill=True` after an order fills, which will allow the strategy to move the stoploss in any direction (also widening the gap between stoploss and current price, which is otherwise forbidden).
+For this, econith will make an additional call with `after_fill=True` after an order fills, which will allow the strategy to move the stoploss in any direction (also widening the gap between stoploss and current price, which is otherwise forbidden).
 
 !!! Note "backwards compatibility"
     This call will only be made if the `after_fill` parameter is part of the function definition of your `custom_stoploss` function.
@@ -225,7 +225,7 @@ class AwesomeStrategy(IStrategy):
         e.g. returning -0.05 would create a stoploss 5% below current_rate.
         The custom stoploss can never be below self.stoploss, which serves as a hard maximum loss.
 
-        For full documentation please go to https://www.freqtrade.io/en/stable/strategy-advanced/
+        For full documentation please go to https://econith/en/stable/strategy-advanced/
 
         When not implemented by a strategy, returns the initial stoploss value.
         Only called when use_custom_stoploss is set to True.
@@ -634,7 +634,7 @@ class AwesomeStrategy(IStrategy):
 
 ## Custom order price rules
 
-By default, freqtrade use the orderbook to automatically set an order price ([Relevant documentation](configuration.md#prices-used-for-orders)), you also have the option to create custom order prices based on your strategy.
+By default, econith use the orderbook to automatically set an order price ([Relevant documentation](configuration.md#prices-used-for-orders)), you also have the option to create custom order prices based on your strategy.
 
 You can use this feature by creating a `custom_entry_price()` function in your strategy file to customize entry prices and `custom_exit_price()` for exits.
 
@@ -690,7 +690,7 @@ class AwesomeStrategy(IStrategy):
 
 Simple, time-based order-timeouts can be configured either via strategy or in the configuration in the `unfilledtimeout` section.
 
-However, freqtrade also offers a custom callback for both order types, which allows you to decide based on custom criteria if an order did time out or not.
+However, econith also offers a custom callback for both order types, which allows you to decide based on custom criteria if an order did time out or not.
 
 !!! Note
     Backtesting fills orders if their price falls within the candle's low/high range.
@@ -808,7 +808,7 @@ class AwesomeStrategy(IStrategy):
         Timing for this function is critical, so avoid doing heavy computations or
         network requests in this method.
 
-        For full documentation please go to https://www.freqtrade.io/en/stable/strategy-advanced/
+        For full documentation please go to https://econith/en/stable/strategy-advanced/
 
         When not implemented by a strategy, returns True (always confirming).
 
@@ -856,7 +856,7 @@ class AwesomeStrategy(IStrategy):
         Timing for this function is critical, so avoid doing heavy computations or
         network requests in this method.
 
-        For full documentation please go to https://www.freqtrade.io/en/stable/strategy-advanced/
+        For full documentation please go to https://econith/en/stable/strategy-advanced/
 
         When not implemented by a strategy, returns True (always confirming).
 
@@ -891,7 +891,7 @@ class AwesomeStrategy(IStrategy):
 ## Adjust trade position
 
 The `position_adjustment_enable` strategy property enables the usage of `adjust_trade_position()` callback in the strategy.
-For performance reasons, it's disabled by default and freqtrade will show a warning message on startup if enabled.
+For performance reasons, it's disabled by default and econith will show a warning message on startup if enabled.
 `adjust_trade_position()` can be used to perform additional orders, for example to manage risk with DCA (Dollar Cost Averaging) or to increase or decrease positions.
 
 Additional orders also result in additional fees and those orders don't count towards `max_open_trades`.
@@ -994,7 +994,7 @@ class DigDeeperStrategy(IStrategy):
         This means extra entry or exit orders with additional fees.
         Only called when `position_adjustment_enable` is set to True.
 
-        For full documentation please go to https://www.freqtrade.io/en/stable/strategy-advanced/
+        For full documentation please go to https://econith/en/stable/strategy-advanced/
 
         When not implemented by a strategy, returns None
 
@@ -1121,7 +1121,7 @@ class AwesomeStrategy(IStrategy):
         This only executes when a order was already placed, still open (unfilled fully or partially)
         and not timed out on subsequent candles after entry trigger.
 
-        For full documentation please go to https://www.freqtrade.io/en/stable/strategy-callbacks/
+        For full documentation please go to https://econith/en/stable/strategy-callbacks/
 
         When not implemented by a strategy, returns current_order_rate as default.
         If current_order_rate is returned then the existing order is maintained.
