@@ -4,12 +4,14 @@
  * ECONITH Quant — focused trading control deck.
  * Live market + AI decision + Sentinel risk + operator actions + event log.
  */
+import { useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faShieldHalved,
   faBrain,
   faLock,
   faCircleDot,
+  faSatelliteDish,
 } from "@fortawesome/free-solid-svg-icons";
 import { useMetrics } from "@/components/MetricsProvider";
 import { EventLogTerminal } from "@/components/EventLogTerminal";
@@ -18,6 +20,7 @@ import { QuantCockpitHUD } from "@/components/quant/cockpit/QuantCockpitHUD";
 import { useLocale } from "@/contexts/LocaleContext";
 import { fmtNum, fmtPct, fmtSigned, fmtUsd } from "@/lib/format";
 import type { ConnectionStatus } from "@/hooks/useMetricsStream";
+import { useExecutionStatus, type ExecutionRouting } from "@/hooks/useExecutionStatus";
 
 const BREAKER_COLOR: Record<string, string> = {
   CLOSED: "text-ok",
@@ -36,9 +39,17 @@ const CONN_COLOR: Record<ConnectionStatus, string> = {
   closed: "text-danger",
 };
 
+const EXEC_STYLE: Record<ExecutionRouting, { color: string; bg: string; border: string; pulse: boolean }> = {
+  LIVE: { color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/40", pulse: true },
+  SYNTHETIC: { color: "text-sky-400", bg: "bg-sky-500/10", border: "border-sky-500/40", pulse: false },
+  DEGRADED: { color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/40", pulse: true },
+  OFFLINE: { color: "text-red-400", bg: "bg-red-500/10", border: "border-red-500/40", pulse: true },
+};
+
 export function QuantMissionControl() {
   const { snapshot, status, attempts } = useMetrics();
   const { t } = useLocale();
+  const { execution } = useExecutionStatus();
 
   const market = snapshot?.market;
   const sentinel = snapshot?.sentinel;
@@ -90,6 +101,13 @@ export function QuantMissionControl() {
             className={quantMode === "REALITY" ? "text-ok" : "text-warn"}
             pulse={quantMode === "SIMULATION"}
           />
+          {execution ? (
+            <ExecutionBadge
+              routing={execution.execution_routing}
+              detail={execution.detail}
+              testnet={execution.testnet}
+            />
+          ) : null}
         </div>
       </div>
 
@@ -289,6 +307,48 @@ function Row({
     <div className="flex justify-between gap-2 font-mono">
       <span className="truncate text-muted">{left}</span>
       <span className={`shrink-0 ${rightClass}`}>{right}</span>
+    </div>
+  );
+}
+
+function ExecutionBadge({
+  routing,
+  detail,
+  testnet,
+}: {
+  routing: ExecutionRouting;
+  detail: string;
+  testnet: boolean;
+}) {
+  const [showDetail, setShowDetail] = useState(false);
+  const style = EXEC_STYLE[routing] ?? EXEC_STYLE.OFFLINE;
+  const label = testnet && routing === "LIVE" ? "TESTNET LIVE" : routing;
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setShowDetail((v) => !v)}
+        onMouseEnter={() => setShowDetail(true)}
+        onMouseLeave={() => setShowDetail(false)}
+        className={`rounded-lg border px-2.5 py-1 transition-colors ${style.bg} ${style.border}`}
+      >
+        <p className="text-[9px] uppercase tracking-wider text-faint">
+          <FontAwesomeIcon icon={faSatelliteDish} className="mr-1 h-2.5 w-2.5" />
+          EXEC
+        </p>
+        <p className={`flex items-center gap-1 text-xs font-semibold ${style.color}`}>
+          {style.pulse ? (
+            <FontAwesomeIcon icon={faCircleDot} className="h-2 w-2 animate-pulse" />
+          ) : null}
+          <span className="whitespace-nowrap">{label}</span>
+        </p>
+      </button>
+      {showDetail && detail ? (
+        <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border border-line bg-surface p-2.5 font-mono text-[10px] leading-relaxed text-muted shadow-lg">
+          {detail}
+        </div>
+      ) : null}
     </div>
   );
 }

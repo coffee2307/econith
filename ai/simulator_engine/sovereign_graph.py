@@ -231,7 +231,9 @@ class GovernmentAgent(SovereignAgent):
                            f"with a {retaliation*100:.0f}% counter-tariff"),
             ))
         # Counter-cyclical fiscal loosening when growth stalls.
-        if state.gdp_growth < 0.01:
+        # Only fires once: when growth first drops below 1% AND the government
+        # hasn't already cut taxes below 10% (prevents infinite stimulus loop).
+        if state.gdp_growth < 0.01 and state.corporate_tax > 0.10:
             proposals.append(PolicyProposal(
                 role=self.role, code=state.code, field="corporate_tax",
                 delta=-0.01, reason="fiscal_stimulus",
@@ -561,7 +563,7 @@ class SovereignWorldGraph:
                 self.trade_matrix.set_tariff(src, tgt, self.trade_matrix.tariff(src, tgt) + prop.delta)
             if prop.field not in ("__tariff__",):
                 target.state.apply(prop.field, prop.delta)
-            if prop.narrative:
+            if prop.narrative and prop.narrative not in self._tick_facts:
                 self._tick_facts.append(prop.narrative)
         # Secondary macro physics: growth responds to rates & export index.
         for node in self.nodes.values():

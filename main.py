@@ -37,6 +37,7 @@ from pydantic import BaseModel
 
 from ai.inference.predictor import Predictor
 from ai.journalist import JournalistLLM
+from ai.meta import CoreAIOrchestrator
 from ai.simulator_engine.llm_scenario import LLMScenarioEngine
 from ai.simulator_engine.sovereign_graph import SovereignWorldGraph, default_world
 from ai.simulator_engine.world_kernel import WorldKernel
@@ -93,7 +94,14 @@ async def lifespan(app: FastAPI):
     recorder = StateRecorder(engine.bus)
     recorder.register()
 
-    sentinel = Sentinel(engine.bus, starting_capital=settings.starting_capital)
+    sentinel = Sentinel(
+        engine.bus,
+        starting_capital=settings.starting_capital,
+        max_drawdown_pct=env.sentinel_max_drawdown_pct,
+        var_limit_pct=env.sentinel_var_limit_pct,
+        latency_limit_ms=env.sentinel_latency_limit_ms,
+        freeze_cooldown_s=env.sentinel_freeze_cooldown_s,
+    )
     sentinel.register()
 
     # --- Advanced read-models (CORE / cockpit / journalist) --------------
@@ -106,6 +114,11 @@ async def lifespan(app: FastAPI):
 
     journalist = JournalistLLM(engine.bus)
     journalist.register()
+
+    # Core AI orchestrator: fuses HF micro + LF macro context and broadcasts
+    # meta.quant.directive / meta.risk.directive so sub-agents recalibrate.
+    core_ai = CoreAIOrchestrator(engine.bus)
+    core_ai.register()
 
     # --- AI Quant layer (Phase 2 + Phase 4) ------------------------------
     predictor = Predictor(engine.bus)
@@ -155,6 +168,7 @@ async def lifespan(app: FastAPI):
     await streamer.start()
     await macro_hub.start()      # launches one scheduler task per macro source
     await journalist.start()     # starts the narrative synthesis flush loop
+    await core_ai.start()        # starts the cross-asset context fusion loop
     await ccxt_bridge.connect()  # authenticates only in REALITY mode
 
     # Mount the cockpit router (GET /cockpit/snapshot + WS /stream/cockpit).
@@ -170,6 +184,7 @@ async def lifespan(app: FastAPI):
         macro_hub=macro_hub,
         cockpit_hub=cockpit_hub,
         journalist=journalist,
+        core_ai=core_ai,
         predictor=predictor,
         ai_bridge=ai_bridge,
         exchange_bridge=exchange_bridge,
@@ -199,6 +214,7 @@ async def lifespan(app: FastAPI):
         await ccxt_bridge.close()
         await macro_hub.stop()
         await journalist.stop()
+        await core_ai.stop()
         await predictor.stop()
         await sentinel.stop()
         await engine.shutdown()   # stops TimeEngine + EventBus last
@@ -303,12 +319,14 @@ def _macro_hub() -> MacroIngestionHub:
 @app.get(f"{settings.api_prefix}/health")
 async def health() -> dict:
     streamer = components.get("streamer")
+    ccxt = components.get("ccxt_bridge")
     return {
         "status": "ok",
         "service": "backend_core",
         "version": settings.app_version,
         "mock": getattr(streamer, "is_mock", None),
         "quant_mode": get_mode_manager().snapshot(),
+        "execution": ccxt.execution_status() if ccxt else None,
         "subsystems": sorted(components.keys()),
     }
 

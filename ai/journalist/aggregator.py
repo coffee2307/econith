@@ -138,6 +138,8 @@ class JournalistLLM:
         self._category = "MACRO"
         self._level = "info"
         self._logs: deque[NewsLog] = deque(maxlen=history)
+        self._fact_seen: dict[str, float] = {}
+        self._fact_cooldown_s: float = 120.0
         self._task: asyncio.Task[None] | None = None
         self._running = False
 
@@ -219,11 +221,23 @@ class JournalistLLM:
         fact = event.payload.get("fact")
         if not fact:
             return
+        fact_str = str(fact)
+        now = asyncio.get_event_loop().time()
+        last_seen = self._fact_seen.get(fact_str, 0.0)
+        if now - last_seen < self._fact_cooldown_s:
+            return
+        self._fact_seen[fact_str] = now
+        # Prune stale entries to prevent unbounded memory growth.
+        if len(self._fact_seen) > 500:
+            cutoff = now - self._fact_cooldown_s * 2
+            self._fact_seen = {
+                k: v for k, v in self._fact_seen.items() if v > cutoff
+            }
         log = NewsLog(
             ts=datetime.now(timezone.utc),
             category=self._category,
             level=self._level,
-            message=str(fact),
+            message=fact_str,
         )
         self._logs.appendleft(log)
         await self._bus.publish("journalist.news", **log.to_cockpit())

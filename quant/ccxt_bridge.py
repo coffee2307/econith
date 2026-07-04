@@ -231,6 +231,30 @@ class CCXTBinanceBridge:
         """True only when a live, markets-loaded CCXT session is active."""
         return self._live and self._exchange is not None
 
+    def execution_status(self) -> dict[str, object]:
+        """Structured read-model so the health API / cockpit can surface degradation."""
+        mode = current_mode().value
+        if self.is_live:
+            routing = "LIVE"
+            detail = "authenticated exchange session active"
+        elif mode == "SIMULATION":
+            routing = "SYNTHETIC"
+            detail = "SIMULATION mode — fills are synthetic by design"
+        elif not self._credentialed:
+            routing = "SYNTHETIC"
+            detail = "no real Binance credentials configured"
+        else:
+            routing = "DEGRADED"
+            detail = "REALITY mode but exchange unreachable — fills degraded to synthetic"
+        return {
+            "quant_mode": mode,
+            "execution_routing": routing,
+            "exchange_live": self.is_live,
+            "credentialed": self._credentialed,
+            "testnet": self._testnet,
+            "detail": detail,
+        }
+
     # -- synthetic marks (SIMULATION) -----------------------------------------
     def update_sim_mark(self, symbol: str, price: float) -> None:
         """Feed a synthetic mark price from the WORLD engine."""

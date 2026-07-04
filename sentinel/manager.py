@@ -88,6 +88,13 @@ class Sentinel:
         self._cooldown = freeze_cooldown_s
         self._status_interval = status_interval_s
 
+        # Operator-configured baselines. The Core AI orchestrator may nudge the
+        # live thresholds within a bounded envelope around these; the baselines
+        # are the floor/ceiling so a bad directive can never fully disarm risk.
+        self._base_max_dd = max_drawdown_pct
+        self._base_var_limit = var_limit_pct
+        self._base_latency = latency_limit_ms
+
         self._risk = HistoricalSimulationVaR()
         self._breaker = CircuitBreaker(
             name="sentinel",
@@ -123,7 +130,42 @@ class Sentinel:
         self._bus.subscribe("quant.fill", self._on_fill)
         # Mark-to-market + latency heartbeat only (never fabricates equity).
         self._bus.subscribe("md.ticker", self._on_ticker)
-        logger.info("sentinel registered to execution (quant.fill) + market feed")
+        # Core AI dynamic threshold recalibration (advisory, bounded).
+        self._bus.subscribe("meta.risk.directive", self._on_risk_directive)
+        logger.info(
+            "sentinel registered to execution (quant.fill) + market feed + meta directives"
+        )
+
+    async def _on_risk_directive(self, event: Event) -> None:
+        """Apply a Core AI risk directive, clamped to a safe envelope.
+
+        The orchestrator can only *tighten* toward the baseline or loosen up to a
+        bounded ceiling; it can never disable a limit. This keeps the Sentinel
+        the ultimate authority while letting the meta-brain adapt to volatility.
+        """
+        p = event.payload
+        self._max_dd = self._clamp_threshold(
+            p.get("max_drawdown_pct"), self._base_max_dd, lo_factor=0.3, hi_factor=1.0
+        )
+        self._var_limit = self._clamp_threshold(
+            p.get("var_limit_pct"), self._base_var_limit, lo_factor=0.3, hi_factor=1.0
+        )
+        self._latency_limit = self._clamp_threshold(
+            p.get("latency_limit_ms"), self._base_latency, lo_factor=0.5, hi_factor=1.5
+        )
+
+    @staticmethod
+    def _clamp_threshold(
+        value: object, baseline: float, *, lo_factor: float, hi_factor: float
+    ) -> float:
+        try:
+            v = float(value)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return baseline
+        if not (v == v) or v in (float("inf"), float("-inf")):  # NaN / Inf guard
+            return baseline
+        lo, hi = baseline * lo_factor, baseline * hi_factor
+        return max(lo, min(hi, v))
 
     async def start(self) -> None:
         if self._running:

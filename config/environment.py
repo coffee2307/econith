@@ -63,6 +63,14 @@ class Environment(BaseSettings):
     )
     redis_url: str = Field(default="redis://redis:6379/0", alias="REDIS_URL")
 
+    # --- Sentinel risk governance ----------------------------------------
+    # Tunable thresholds. Defaults are strict (production). For local dev
+    # where latency is naturally higher and equity is synthetic, loosen these.
+    sentinel_latency_limit_ms: float = Field(default=500.0, alias="SENTINEL_LATENCY_LIMIT_MS")
+    sentinel_max_drawdown_pct: float = Field(default=0.10, alias="SENTINEL_MAX_DRAWDOWN_PCT")
+    sentinel_var_limit_pct: float = Field(default=0.05, alias="SENTINEL_VAR_LIMIT_PCT")
+    sentinel_freeze_cooldown_s: float = Field(default=30.0, alias="SENTINEL_FREEZE_COOLDOWN_S")
+
     # --- Execution / capital ---------------------------------------------
     # Single source of truth for the principal equity base. Bound natively into
     # CockpitTelemetryHub, the Sentinel risk governor, and simulation runners so
