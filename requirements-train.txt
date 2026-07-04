@@ -14,6 +14,8 @@ pyarrow==18.1.0
 numpy==1.26.4
 PyYAML==6.0.2
 joblib==1.4.2
+# high-performance engine for the multi-frequency feature_pipeline glue tier
+polars==1.12.0
 
 # --- regime models (CPU) ----------------------------------------------------
 scikit-learn==1.5.2

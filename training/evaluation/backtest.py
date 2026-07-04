@@ -277,3 +277,103 @@ class BacktestEngine:
         else:
             frame = pd.read_parquet(p)
         return self.run_frame(frame, signal_fn)
+
+
+# ---------------------------------------------------------------------------
+# Baseline signals + CLI (for ``make backtest-baseline``)
+# ---------------------------------------------------------------------------
+def momentum_signal(frame: Any) -> Any:
+    """A look-ahead-free baseline: take the sign of the *previous* price move.
+
+    Position at row ``i`` is decided from information available up to ``i-1``
+    only (the prior bar's price change), so this never peeks at the realised
+    forward return it is graded against. It is a plumbing/sanity baseline, not a
+    real strategy.
+    """
+    import numpy as np
+
+    if "price" in frame.columns:
+        price = _safe(frame["price"].to_numpy(), np)
+    else:
+        price = _safe(frame.get("mid", frame.iloc[:, 0]).to_numpy(), np)
+    if price.size == 0:
+        return np.zeros(0, dtype="float64")
+    step = np.sign(np.diff(price, prepend=price[0]))
+    pos = np.empty_like(step)
+    pos[0] = 0.0
+    pos[1:] = step[:-1]        # shift by one bar -> no look-ahead
+    return pos
+
+
+def flat_signal(frame: Any) -> Any:
+    """A zero-exposure control baseline (net return must be ~0)."""
+    import numpy as np
+
+    return np.zeros(len(frame), dtype="float64")
+
+
+def long_signal(frame: Any) -> Any:
+    """An always-long baseline that surfaces the raw net-of-cost asset drift."""
+    import numpy as np
+
+    return np.ones(len(frame), dtype="float64")
+
+
+_BASELINES: dict[str, SignalFn] = {
+    "momentum": momentum_signal,
+    "flat": flat_signal,
+    "long": long_signal,
+}
+
+
+def build_parser() -> "argparse.ArgumentParser":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="backtest.py",
+        description="ECONITH baseline backtest verification over a labeled feature set",
+    )
+    parser.add_argument(
+        "--labeled",
+        default="datasets/processed/quant_labeled.parquet",
+        help="labeled parquet file or a directory of feature shards",
+    )
+    parser.add_argument(
+        "--baseline",
+        default="momentum",
+        choices=sorted(_BASELINES.keys()),
+        help="baseline signal to grade the plumbing with",
+    )
+    parser.add_argument("--fee-bps", type=float, default=4.0)
+    parser.add_argument("--slippage-bps", type=float, default=1.0)
+    parser.add_argument("--spread-bps", type=float, default=2.0)
+    return parser
+
+
+def main(argv: Optional[list[str]] = None) -> None:
+    import json as _json
+
+    args = build_parser().parse_args(argv)
+    config = BacktestConfig(
+        fee_bps=args.fee_bps,
+        slippage_bps=args.slippage_bps,
+        spread_bps=args.spread_bps,
+    )
+    engine = BacktestEngine(config)
+    result = engine.run_parquet(args.labeled, _BASELINES[args.baseline])
+    report = {
+        "input": str(args.labeled),
+        "baseline": args.baseline,
+        "rows": result.rows,
+        "metrics": result.metrics.to_dict(),
+    }
+    print(_json.dumps(report, indent=2))
+    logger.info(
+        "backtest baseline '%s' complete: %d rows, sharpe=%.3f, max_dd=%.4f",
+        args.baseline, result.rows,
+        result.metrics.annualized_sharpe, result.metrics.max_drawdown,
+    )
+
+
+if __name__ == "__main__":
+    main()

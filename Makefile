@@ -1,87 +1,100 @@
 # ============================================================================
-#  ECONITH :: Makefile  --  one-word entry points for the whole model factory
+#  ECONITH :: Makefile  --  one-word entry points for the data + model factory
 # ----------------------------------------------------------------------------
-#  Economic analogy: this file is the "control panel" of the factory. Each label
-#  (data-collect, train-all, model-deploy...) is a big button that runs a whole
-#  department for you, so you never have to remember the long raw commands.
+#  This control panel now fronts the institutional 4-tier data pipeline:
 #
-#  Usage:
-#     make setup-train           # install the training toolbox
-#     make data-collect          # PHASE A: mine live data from Binance
-#     make data-collect-backfill # PHASE A: buy the historical "price history book"
-#     make data-label            # PHASE B: grade the data (returns + reward)
-#     make train-all             # PHASE C/D: run all model smelters in parallel
-#     make train-single JOB=trend
-#     make model-deploy          # PHASE E: ship trained models to production
-#     make model-verify          # checksum audit of the model registry
+#     collectors/  (raw lake)  ->  feature_pipeline (glue)  ->  label_symbol
+#                              ->  backtest  ->  H200 training  ->  registry
 #
-#  Windows note: install "make" (e.g. `choco install make`) or just run the
-#  underlying `python training/...` commands shown in each recipe by hand.
+#  Primary workflow (new institutional path):
+#     make data-pipeline     # PHASE A  run the 3 standalone collectors 24/7
+#     make data-glue         # PHASE A.5 time-align raw lake -> feature store
+#     make data-label        # PHASE B  multi-symbol-safe forward-return labels
+#     make backtest-baseline # PHASE B.5 sanity-check the labeled set offline
+#     make train-all         # PHASE C/D parallel model training
+#     make model-deploy      # PHASE E  activate trained checkpoints
+#
+#  Windows note: `make` is not native. Either install it (`choco install make`)
+#  or run the underlying `python -m ...` commands shown in each recipe by hand.
+#  The concurrent `data-pipeline` recipe uses a POSIX shell (`&` + `wait`); on
+#  Windows launch each collector in its own terminal instead.
 # ============================================================================
 
-# --- knobs you can override on the command line: `make data-collect SYMBOL=ETHUSDT`
+# --- knobs (override on the CLI, e.g. `make data-glue OUT=datasets/features`)
 PYTHON      ?= python
 PIP         ?= pip
 SYMBOL      ?= BTCUSDT
+SYMBOLS     ?=
 
 DATA_ROOT   ?= ./datasets
+RAW_LAKE    ?= $(DATA_ROOT)/raw
 FEATURE_DIR ?= $(DATA_ROOT)/features
-RAW_DIR     ?= $(DATA_ROOT)/raw/binance
 PROCESSED   ?= $(DATA_ROOT)/processed
 
 MODEL_DIR   ?= ./models
 REGISTRY    ?= $(MODEL_DIR)/registry
 
-BATCH_SIZE  ?= 500
-DURATION    ?= 0
-INTERVALS   ?= 1m,5m
-START       ?= 2024-01-01
-END         ?= 2025-12-31
 HOLDOUT     ?= 0.20
 BACKEND     ?= multiprocessing
 JOBS        ?= trend,mean_reversion,scalper,hmm,world_neural
 PATIENCE    ?= 5
+BASELINE    ?= momentum
 
-.PHONY: help setup-train data-collect data-collect-backfill data-label \
-        train-all train-single model-deploy model-verify clean-features
+.PHONY: help setup-train setup-collect data-pipeline data-glue data-label \
+        backtest-baseline train-all train-single model-deploy model-verify \
+        clean-features
 
 help:
 	@echo "ECONITH factory control panel"
-	@echo "  setup-train            install training dependencies"
-	@echo "  data-collect           PHASE A  live market collection -> $(FEATURE_DIR)"
-	@echo "  data-collect-backfill  PHASE A  historical OHLCV -> $(RAW_DIR)"
-	@echo "  data-label             PHASE B  forward returns + anti-greed reward"
-	@echo "  train-all              PHASE C/D  parallel PPO/HMM/world training"
-	@echo "  train-single JOB=trend PHASE C  train one model"
-	@echo "  model-deploy           PHASE E  hot-swap checkpoints into $(MODEL_DIR)"
+	@echo "  setup-train            install training/runtime dependencies"
+	@echo "  setup-collect          install the lightweight collector dependencies"
+	@echo "  data-pipeline          PHASE A    run all 3 collectors concurrently (VPS 24/7)"
+	@echo "  data-glue              PHASE A.5  time-align raw lake -> $(FEATURE_DIR)"
+	@echo "  data-label             PHASE B    multi-symbol-safe labels -> $(PROCESSED)"
+	@echo "  backtest-baseline      PHASE B.5  offline metric verification on labels"
+	@echo "  train-all              PHASE C/D  parallel model training"
+	@echo "  train-single JOB=trend PHASE C    train one model"
+	@echo "  model-deploy           PHASE E    activate trained checkpoints"
 	@echo "  model-verify           audit SHA256 checksums in the registry"
 
-# --- PHASE A : mine the raw material ----------------------------------------
+# --- setup -------------------------------------------------------------------
 setup-train:
 	$(PIP) install -r requirements-train.txt
 
-data-collect:
-	$(PYTHON) training/collect.py \
-		--symbol $(SYMBOL) \
-		--output $(FEATURE_DIR) \
-		--batch-size $(BATCH_SIZE) \
-		--duration $(DURATION)
+setup-collect:
+	$(PIP) install -r collectors/requirements.txt
 
-data-collect-backfill:
-	$(PYTHON) training/collect.py --backfill \
-		--symbol $(SYMBOL) \
-		--start $(START) --end $(END) \
-		--intervals $(INTERVALS) \
-		--output $(RAW_DIR)
+# --- PHASE A : run the standalone collectors concurrently (raw lake) --------
+# Launches the three zero-ML daemons as background jobs and blocks on them so a
+# single Ctrl-C (or a service manager stop) tears the whole set down together.
+data-pipeline:
+	@echo "starting collectors -> $(RAW_LAKE) (Ctrl-C to stop all)"
+	$(PYTHON) -m collectors.market_coin.daemon & \
+	$(PYTHON) -m collectors.macro_global.scheduler & \
+	$(PYTHON) -m collectors.tradfi_assets.poller & \
+	wait
 
-# --- PHASE B : grade the ore (labels + reward) ------------------------------
+# --- PHASE A.5 : the multi-frequency glue (raw lake -> feature store) --------
+data-glue:
+	$(PYTHON) -m training.quant.feature_pipeline \
+		--raw-root $(RAW_LAKE) \
+		--out-dir $(FEATURE_DIR) \
+		--symbols "$(SYMBOLS)"
+
+# --- PHASE B : multi-symbol-safe labeling on the CLEAN feature store --------
 data-label:
-	$(PYTHON) training/label.py \
+	$(PYTHON) -m training.quant.label_symbol \
 		--input $(FEATURE_DIR) \
 		--output $(PROCESSED)/quant_labeled.parquet \
 		--holdout-ratio $(HOLDOUT)
 
-# --- PHASE C/D : run the smelters in parallel -------------------------------
+# --- PHASE B.5 : offline verification of the labeled outputs -----------------
+backtest-baseline:
+	$(PYTHON) -m training.evaluation.backtest \
+		--labeled $(PROCESSED)/quant_labeled.parquet \
+		--baseline $(BASELINE)
+
+# --- PHASE C/D : run the training smelters -----------------------------------
 train-all: data-label
 	$(PYTHON) training/orchestrator.py \
 		--data $(PROCESSED) \
@@ -101,7 +114,7 @@ train-single:
 		--early-stop-patience $(PATIENCE) \
 		--holdout $(PROCESSED)/quant_holdout.parquet
 
-# --- PHASE E : ship the finished goods --------------------------------------
+# --- PHASE E : ship the finished goods ---------------------------------------
 model-deploy:
 	$(PYTHON) training/deploy.py \
 		--registry $(REGISTRY)/manifest.yaml \
@@ -114,5 +127,5 @@ model-verify:
 		--verify-only
 
 clean-features:
-	@echo "removing collected feature partitions in $(FEATURE_DIR)"
-	rm -f $(FEATURE_DIR)/features_*.parquet
+	@echo "removing generated feature store in $(FEATURE_DIR)"
+	rm -f $(FEATURE_DIR)/*_features.parquet $(FEATURE_DIR)/features_*.parquet
