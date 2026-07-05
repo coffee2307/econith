@@ -27,11 +27,20 @@ import logging
 import random
 import signal
 import time
+from datetime import datetime
 
 import websockets
 
-from alerts import AlertDispatcher, get_alert_dispatcher
+from alerts import get_alert_dispatcher
 from config import CollectorConfig
+from reporting import (
+    DataReportConfig,
+    build_report_message,
+    collect_data_stats,
+    load_report_state,
+    save_report_state,
+    seconds_until_next_report,
+)
 from storage import MarketRecord, ParquetSnapshotWriter
 
 logger = logging.getLogger("econith.vps.daemon")
@@ -57,6 +66,7 @@ class CollectorDaemon:
         self._tasks: list[asyncio.Task[None]] = []
         self._alerts = get_alert_dispatcher()
         self._had_disconnect = False
+        self._report_cfg = DataReportConfig.from_env(self._cfg.data_root)
 
     @property
     def messages(self) -> int:
@@ -77,6 +87,16 @@ class CollectorDaemon:
             asyncio.create_task(self._flush_loop(), name="periodic-flush"),
             asyncio.create_task(self._heartbeat_loop(), name="heartbeat"),
         ]
+        if self._report_cfg.enabled:
+            self._tasks.append(
+                asyncio.create_task(self._daily_report_loop(), name="daily-report")
+            )
+            logger.info(
+                "daily data report enabled at %02d:%02d %s",
+                self._report_cfg.hour,
+                self._report_cfg.minute,
+                self._report_cfg.timezone,
+            )
 
         stop_event = asyncio.Event()
         loop = asyncio.get_running_loop()
@@ -220,6 +240,63 @@ class CollectorDaemon:
                 self._messages, self._writer.buffered,
                 self._writer.written, self._failures,
             )
+
+    # -- daily data-volume report (Telegram, 12:00 local by default) ----------
+    async def _daily_report_loop(self) -> None:
+        while self._running:
+            delay = seconds_until_next_report(
+                self._report_cfg.hour,
+                self._report_cfg.minute,
+                self._report_cfg.timezone,
+            )
+            logger.info("next daily data report in %.0fs", delay)
+            await asyncio.sleep(delay)
+            if not self._running:
+                break
+            await self._send_daily_report()
+
+    async def _send_daily_report(self) -> None:
+        """Collect stats off the event loop thread, then push to Telegram."""
+        await self._writer.flush()
+        stats = await asyncio.to_thread(
+            collect_data_stats,
+            self._cfg.data_root,
+            rows_written=self._writer.written,
+            messages=self._messages,
+            ws_failures=self._failures,
+        )
+        state = load_report_state()
+        previous_bytes = int(state.get("last_bytes", 0))
+
+        from zoneinfo import ZoneInfo
+
+        now = datetime.now(ZoneInfo(self._report_cfg.timezone))
+        report_date = now.strftime("%Y-%m-%d")
+        message, context = build_report_message(
+            stats,
+            cfg=self._report_cfg,
+            previous_bytes=previous_bytes,
+            report_time=now,
+        )
+
+        event_key = f"daily_data_report_{report_date}"
+        await self._alerts.send_info(event_key, message, context=context)
+        save_report_state(stats.total_bytes, report_date)
+
+        if stats.disk_used_pct >= self._report_cfg.disk_warn_pct:
+            await self._alerts.send_warning(
+                f"disk_warn_{report_date}",
+                f"VPS disk usage high: {stats.disk_used_pct:.1f}%",
+                context={
+                    "free": context["disk_free"],
+                    "data_total": context["total"],
+                },
+            )
+
+        logger.info(
+            "daily report sent: total=%s files=%d disk=%.1f%%",
+            context["total"], stats.file_count, stats.disk_used_pct,
+        )
 
 
 def main() -> None:
