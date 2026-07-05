@@ -15,3 +15,6 @@ polars==1.9.0
 
 # --- asynchronous websocket streaming (Binance combined streams) ------------
 websockets==14.1
+
+# --- Telegram operational alerts (non-blocking httpx) ---------------------
+httpx==0.28.1

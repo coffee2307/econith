@@ -55,6 +55,7 @@ from core.telemetry import MetricsHub
 from econith_quant.bridge.ai_bridge import AIBridge
 from econith_quant.bridge.exchange_bridge import ExchangeBridge
 from infrastructure.alternative.provider import AlternativeDataProvider
+from infrastructure.observability.alerts import get_alert_dispatcher, register_runtime_alerts
 from infrastructure.preprocessing.pipeline import MarketDataPipeline
 from infrastructure.storage.recorder import StateRecorder
 from infrastructure.websocket.streamer import BinanceWebSocketStreamer
@@ -75,11 +76,19 @@ async def lifespan(app: FastAPI):
 
     # Storage resiliency: probe primary DB, seamlessly fail over to local SQLite.
     await init_database()
+    alerts = get_alert_dispatcher()
     if is_fallback():
         logger.warning("persistence running on local SQLite failover matrix")
+        await alerts.send_critical(
+            "db_failover",
+            "Primary database unreachable — running on SQLite failover",
+            context={"fallback": "sqlite:///econith_fallback.db"},
+        )
 
     engine = get_engine()
     await engine.startup()  # starts EventBus + TimeEngine + TickPipeline
+
+    register_runtime_alerts(engine.bus, alerts)
 
     # =====================================================================
     #  SUBSCRIBERS FIRST (registered before producers so no frame is missed)
@@ -196,6 +205,7 @@ async def lifespan(app: FastAPI):
         world_bridge=world_bridge,
         streamer=streamer,
         alt_provider=alt_provider,
+        alerts=alerts,
     )
     app.state.components = components
     logger.info(
@@ -217,6 +227,7 @@ async def lifespan(app: FastAPI):
         await core_ai.stop()
         await predictor.stop()
         await sentinel.stop()
+        await alerts.aclose()
         await engine.shutdown()   # stops TimeEngine + EventBus last
         await dispose_database()
         components.clear()

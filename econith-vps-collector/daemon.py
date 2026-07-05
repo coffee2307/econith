@@ -30,6 +30,7 @@ import time
 
 import websockets
 
+from alerts import AlertDispatcher, get_alert_dispatcher
 from config import CollectorConfig
 from storage import MarketRecord, ParquetSnapshotWriter
 
@@ -54,6 +55,8 @@ class CollectorDaemon:
         self._messages = 0
         self._rng = random.Random()
         self._tasks: list[asyncio.Task[None]] = []
+        self._alerts = get_alert_dispatcher()
+        self._had_disconnect = False
 
     @property
     def messages(self) -> int:
@@ -94,6 +97,7 @@ class CollectorDaemon:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         drained = await self._writer.close()
+        await self._alerts.aclose()
         logger.info(
             "collector stopped (msgs=%d final_flush=%d total_written=%d)",
             self._messages, drained, self._writer.written,
@@ -116,6 +120,17 @@ class CollectorDaemon:
                     "ws fault #%d (%s); flushed %d buffered rows; reconnecting in %.1fs",
                     self._failures, exc, flushed, delay,
                 )
+                self._alerts.schedule_warning(
+                    "ws_disconnect",
+                    "Binance websocket disconnected on VPS collector",
+                    context={
+                        "failures": self._failures,
+                        "flushed_rows": flushed,
+                        "retry_in_s": round(delay, 1),
+                        "error": str(exc)[:200],
+                    },
+                )
+                self._had_disconnect = True
                 await asyncio.sleep(delay)
 
     def _backoff(self) -> float:
@@ -138,6 +153,13 @@ class CollectorDaemon:
         ) as ws:
             logger.info("websocket connected (%d topics)", self._cfg.stream_count)
             self._failures = 0  # healthy connection resets the backoff ladder
+            if self._had_disconnect:
+                self._alerts.schedule_info(
+                    "ws_reconnect",
+                    "Binance websocket reconnected on VPS collector",
+                    context={"topics": self._cfg.stream_count},
+                )
+                self._had_disconnect = False
             async for raw in ws:
                 if self._ingest(raw):
                     # Threshold tripped -- drain immediately to bound memory.

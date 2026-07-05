@@ -1,7 +1,6 @@
-"""ECONITH :: core.observability.alerts
+"""ECONITH :: infrastructure.observability
 
-Backward-compatible re-exports. Canonical implementation lives in
-``infrastructure.observability.alerts``.
+Production alerting and operational notification primitives.
 """
 from infrastructure.observability.alerts import (
     AlertDispatcher,
@@ -11,8 +10,8 @@ from infrastructure.observability.alerts import (
 )
 
 __all__ = [
-    "AlertSeverity",
     "AlertDispatcher",
+    "AlertSeverity",
     "get_alert_dispatcher",
     "register_runtime_alerts",
 ]

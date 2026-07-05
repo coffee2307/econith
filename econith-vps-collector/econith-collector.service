@@ -25,13 +25,14 @@ Type=simple
 User=econith
 Group=econith
 WorkingDirectory=/opt/econith-vps-collector
+EnvironmentFile=-/opt/econith-vps-collector/.env
 ExecStart=/opt/econith-vps-collector/.venv/bin/python /opt/econith-vps-collector/daemon.py
 
 # --- resilience: auto-restart within 5s on any crash / unhandled exception ---
 Restart=always
 RestartSec=5
 # Do not give up: allow unlimited restarts over the campaign.
-StartLimitIntervalSec=0
+StartLimitInterval=0
 
 # --- graceful shutdown: give the daemon time to flush the RAM buffer to disk -
 KillSignal=SIGTERM
