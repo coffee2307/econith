@@ -8,6 +8,11 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+# Allow running as: python scripts/send_report_now.py
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 from alerts import get_alert_dispatcher
 from config import CollectorConfig
 from reporting import (
