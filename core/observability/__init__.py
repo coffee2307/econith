@@ -5,7 +5,12 @@ webhook alert dispatcher for critical events.
 """
 from __future__ import annotations
 
-from core.observability.alerts import AlertDispatcher, AlertSeverity, get_alert_dispatcher
+from core.observability.alerts import (
+    AlertDispatcher,
+    AlertSeverity,
+    get_alert_dispatcher,
+    register_runtime_alerts,
+)
 from core.observability.logging import (
     JsonLogFormatter,
     configure_json_logging,
@@ -19,4 +24,5 @@ __all__ = [
     "AlertDispatcher",
     "AlertSeverity",
     "get_alert_dispatcher",
+    "register_runtime_alerts",
 ]
