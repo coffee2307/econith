@@ -1,0 +1,17 @@
+# ============================================================================
+#  ECONITH :: econith-vps-collector -- production dependencies
+# ----------------------------------------------------------------------------
+#  Minimal footprint for a lightweight, high-availability crypto Data Factory.
+#  ZERO machine-learning packages (no torch, no pandas, no ray) so the VPS stays
+#  lean. Polars ships its own native Parquet writer, so no pyarrow is required.
+#
+#  Deploy on the VPS:
+#     python3 -m venv .venv && . .venv/bin/activate
+#     pip install -r requirements.txt
+# ============================================================================
+
+# --- fast columnar in-memory buffering + native Parquet IO ------------------
+polars==1.9.0
+
+# --- asynchronous websocket streaming (Binance combined streams) ------------
+websockets==14.1

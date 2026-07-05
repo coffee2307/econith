@@ -1,0 +1,51 @@
+# ============================================================================
+#  ECONITH VPS Collector -- systemd service unit
+# ----------------------------------------------------------------------------
+#  Install on the VPS:
+#     sudo cp econith-collector.service /etc/systemd/system/
+#     sudo systemctl daemon-reload
+#     sudo systemctl enable --now econith-collector.service
+#
+#  Inspect:
+#     systemctl status econith-collector.service
+#     journalctl -u econith-collector.service -f
+#
+#  Assumes the project is deployed to /opt/econith-vps-collector with a venv at
+#  /opt/econith-vps-collector/.venv (see requirements.txt). Adjust User/paths
+#  to match your host.
+# ============================================================================
+[Unit]
+Description=ECONITH VPS Crypto Data Collector (24/7 Data Factory)
+Documentation=https://github.com/econith/econith-vps-collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=econith
+Group=econith
+WorkingDirectory=/opt/econith-vps-collector
+ExecStart=/opt/econith-vps-collector/.venv/bin/python /opt/econith-vps-collector/daemon.py
+
+# --- resilience: auto-restart within 5s on any crash / unhandled exception ---
+Restart=always
+RestartSec=5
+# Do not give up: allow unlimited restarts over the campaign.
+StartLimitIntervalSec=0
+
+# --- graceful shutdown: give the daemon time to flush the RAM buffer to disk -
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# --- logging: stream stdout/stderr to the systemd journal -------------------
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=econith-collector
+
+# --- lightweight hardening (safe defaults for a dedicated data box) ----------
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

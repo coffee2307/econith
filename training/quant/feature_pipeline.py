@@ -155,6 +155,15 @@ def _payload_float(paths: list[str]) -> "pl.Expr":
     return pl.coalesce(candidates)
 
 
+def _payload_float_regex(patterns: list[str]) -> "pl.Expr":
+    """Coalesce the first regex-captured float found in the JSON payload text."""
+    candidates = [
+        pl.col("payload").str.extract(pattern, group_index=1).cast(pl.Float64, strict=False)
+        for pattern in patterns
+    ]
+    return pl.coalesce(candidates)
+
+
 # ---------------------------------------------------------------------------
 # Stage 2 -- high-frequency market features
 # ---------------------------------------------------------------------------
@@ -162,14 +171,39 @@ def _build_market_features(market: "pl.DataFrame") -> "pl.DataFrame":
     """Aggregate raw market frames per (symbol, ts_ms) and derive HF indicators."""
     market = market.filter(pl.col("symbol").is_not_null() & (pl.col("symbol") != ""))
 
-    # Fair price: the collector's ``value`` (already p/c/markPrice) then payload.
-    price_expr = pl.coalesce([pl.col("value"), _payload_float(["$.p", "$.c", "$.markPrice"])])
-    base = market.with_columns(price_expr.alias("price"))
+    # Local collector test runs may carry only depth updates. In that case there
+    # is no scalar ``value`` or trade price field, so we derive the fair price
+    # from the top-of-book mid: (best_bid + best_ask) / 2.
+    best_bid_px = pl.coalesce(
+        [
+            _payload_float(["$.bid_price", "$.bidPrice", "$.b[0][0]", "$.bids[0][0]"]),
+            _payload_float_regex([r'"b":\[\["([^"]+)"', r'"bids":\[\["([^"]+)"']),
+        ]
+    )
+    best_ask_px = pl.coalesce(
+        [
+            _payload_float(["$.ask_price", "$.askPrice", "$.a[0][0]", "$.asks[0][0]"]),
+            _payload_float_regex([r'"a":\[\["([^"]+)"', r'"asks":\[\["([^"]+)"']),
+        ]
+    )
+    mid_px = ((best_bid_px + best_ask_px) / 2.0).alias("_mid_px")
+    price_expr = pl.coalesce(
+        [
+            pl.col("value"),
+            _payload_float(["$.p", "$.c", "$.markPrice"]),
+            mid_px,
+        ]
+    )
+    base = market
 
     # Microstructure extraction is best-effort: depth arrays or scalar book fields.
     try:
         base = base.with_columns(
             [
+                best_bid_px.alias("_bid_px"),
+                best_ask_px.alias("_ask_px"),
+                mid_px,
+                price_expr.alias("price"),
                 _payload_float(
                     ["$.bid_sz", "$.bidSz", "$.B", "$.b[0][1]", "$.bids[0][1]"]
                 ).alias("_bid_sz"),
@@ -179,10 +213,30 @@ def _build_market_features(market: "pl.DataFrame") -> "pl.DataFrame":
                 _payload_float(["$.q", "$.Q", "$.v", "$.qty"]).alias("_trade_qty"),
             ]
         )
-    except Exception as exc:  # noqa: BLE001 - degrade to a neutral book, never crash
-        logger.warning("microstructure extraction failed (%s); using neutral book", exc)
         base = base.with_columns(
             [
+                pl.coalesce(
+                    [
+                        pl.col("_bid_sz"),
+                        _payload_float_regex([r'"b":\[\["[^"]+","([^"]+)"', r'"bids":\[\["[^"]+","([^"]+)"']),
+                    ]
+                ).alias("_bid_sz"),
+                pl.coalesce(
+                    [
+                        pl.col("_ask_sz"),
+                        _payload_float_regex([r'"a":\[\["[^"]+","([^"]+)"', r'"asks":\[\["[^"]+","([^"]+)"']),
+                    ]
+                ).alias("_ask_sz"),
+            ]
+        )
+    except Exception as exc:  # noqa: BLE001 - degrade to a neutral book, never crash
+        logger.warning("microstructure extraction failed (%s); using neutral book", exc)
+        base = market.with_columns(
+            [
+                pl.lit(None).cast(pl.Float64).alias("_bid_px"),
+                pl.lit(None).cast(pl.Float64).alias("_ask_px"),
+                pl.lit(None).cast(pl.Float64).alias("_mid_px"),
+                price_expr.alias("price"),
                 pl.lit(None).cast(pl.Float64).alias("_bid_sz"),
                 pl.lit(None).cast(pl.Float64).alias("_ask_sz"),
                 pl.lit(None).cast(pl.Float64).alias("_trade_qty"),
