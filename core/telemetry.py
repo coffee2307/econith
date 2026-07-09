@@ -9,7 +9,7 @@ EventBus and keeps the latest consolidated snapshot of:
   * AI ensemble decision (direction / action / regime / attribution)
   * ECONITH World macro state (GDP, inflation, rate, tax, ...)
   * Sentinel governance status
-  * a rolling buffer of system log / emergency events
+  * a rolling buffer of Quant ops logs + World research headlines (separate feeds)
 
 The FastAPI ``/api/v1/stream/metrics`` WebSocket simply serialises
 ``MetricsHub.snapshot()`` on a fixed cadence -- the hub is the only place that
@@ -26,6 +26,35 @@ from core.event_bus import Event, EventBus
 from core.mode import get_mode_manager
 
 MAX_EVENTS = 60
+MAX_WORLD_EVENTS = 40
+MAX_WORLD_AGENTS = 8
+AGENT_FEED_COOLDOWN_S = 25.0
+
+# Sources routed to the World research feed (never Quant's execution log).
+_WORLD_SOURCES = frozenset({
+    "world",
+    "corporate",
+    "government",
+    "society",
+    "sovereign",
+    "journalist",
+    "scenario",
+    "regime",
+})
+
+# Sources that may emit info-level lines into the Quant ops log.
+_QUANT_INFO_SOURCES = frozenset({
+    "sentinel",
+    "ai",
+    "streamer",
+    "exchange_bridge",
+    "exchange",
+    "execution",
+    "quant",
+    "ccxt",
+    "routing",
+    "system",
+})
 
 
 class MetricsHub:
@@ -59,7 +88,11 @@ class MetricsHub:
         self._alpha: dict[str, Any] = {}
         self._world: dict[str, Any] = {}
         self._sentinel: dict[str, Any] = {}
-        self._events: deque[dict[str, Any]] = deque(maxlen=MAX_EVENTS)
+        self._quant_events: deque[dict[str, Any]] = deque(maxlen=MAX_EVENTS)
+        self._world_events: deque[dict[str, Any]] = deque(maxlen=MAX_WORLD_EVENTS)
+        self._world_agents: deque[dict[str, Any]] = deque(maxlen=MAX_WORLD_AGENTS)
+        self._agent_last_ts: dict[str, float] = {}
+        self._headline_last: str = ""
 
     # -- wiring ---------------------------------------------------------------
     def register(self) -> None:
@@ -77,6 +110,11 @@ class MetricsHub:
         self._bus.subscribe("sentinel.status", self._on_sentinel_status)
         self._bus.subscribe("sentinel.emergency", self._on_emergency)
         self._bus.subscribe("system.log", self._on_log)
+        self._bus.subscribe("journalist.news", self._on_journalist_news)
+        self._bus.subscribe("quant.fill", self._on_quant_fill)
+        self._bus.subscribe("order.update", self._on_order_update)
+        self._bus.subscribe("world.agent.narrative", self._on_world_agent)
+        self._bus.subscribe("world.headline", self._on_world_headline)
 
     # -- handlers -------------------------------------------------------------
     async def _on_ticker(self, event: Event) -> None:
@@ -154,7 +192,7 @@ class MetricsHub:
         self._sentinel = dict(event.payload)
 
     async def _on_emergency(self, event: Event) -> None:
-        self._push_event(
+        self._push_quant_event(
             level="danger",
             source="sentinel",
             message=f"EMERGENCY [{event.payload.get('action')}] {event.payload.get('reason')}",
@@ -162,15 +200,127 @@ class MetricsHub:
         )
 
     async def _on_log(self, event: Event) -> None:
-        self._push_event(
+        level = event.payload.get("level", "info")
+        source = event.payload.get("source", "system")
+        message = event.payload.get("message", "")
+
+        if source in _WORLD_SOURCES:
+            if level in ("warn", "danger"):
+                self._push_world_event(
+                    level=level, source=source, message=message, ts=event.ts
+                )
+            return
+
+        if level in ("danger", "warn"):
+            self._push_quant_event(
+                level=level, source=source, message=message, ts=event.ts
+            )
+            return
+        if source in _QUANT_INFO_SOURCES:
+            self._push_quant_event(
+                level=level, source=source, message=message, ts=event.ts
+            )
+
+    async def _on_quant_fill(self, event: Event) -> None:
+        symbol = event.payload.get("asset") or event.payload.get("symbol") or "—"
+        vol = float(event.payload.get("filledVolume") or event.payload.get("quantity") or 0)
+        price = float(event.payload.get("fillPrice") or event.payload.get("price") or 0)
+        notional = vol * price
+        level = "warn" if notional >= 250_000 else "ok"
+        self._push_quant_event(
+            level=level,
+            source="execution",
+            message=f"Fill {symbol} qty={vol:.4f} @ {price:.2f} (notional ${notional:,.0f})",
+            ts=event.ts,
+        )
+
+    async def _on_order_update(self, event: Event) -> None:
+        status = str(event.payload.get("status", "")).upper()
+        if status not in ("SUBMITTED", "FILLED", "REJECTED", "CANCELLED"):
+            return
+        symbol = event.payload.get("symbol", "—")
+        side = event.payload.get("side", "—")
+        algo = event.payload.get("algo", "")
+        level = "warn" if status == "REJECTED" else "info"
+        suffix = f" via {algo}" if algo else ""
+        self._push_quant_event(
+            level=level,
+            source="routing",
+            message=f"Order {status}: {side} {symbol}{suffix}",
+            ts=event.ts,
+        )
+
+    async def _on_world_agent(self, event: Event) -> None:
+        import asyncio
+
+        text = str(event.payload.get("text", ""))
+        actor = str(event.payload.get("actor", ""))
+        level = str(event.payload.get("level", "info"))
+        cause_key = text[:64]
+        now = asyncio.get_event_loop().time()
+        last = self._agent_last_ts.get(actor, 0.0)
+        cooldown = AGENT_FEED_COOLDOWN_S / max(1, self._time.multiplier)
+        if level != "danger" and now - last < cooldown:
+            return
+        if self._world_agents:
+            prev = self._world_agents[0]
+            if prev.get("text") == text and prev.get("actor") == actor:
+                return
+            if prev.get("text", "")[:64] == cause_key:
+                return
+        self._agent_last_ts[actor] = now
+        self._world_agents.appendleft(
+            {
+                "ts": event.ts.isoformat(),
+                "sim_day": event.payload.get("sim_day"),
+                "actor": event.payload.get("actor", ""),
+                "country": event.payload.get("country", ""),
+                "text": text,
+                "level": level,
+                "source": event.payload.get("source", ""),
+                "locale": event.payload.get("locale", "en"),
+            }
+        )
+
+    async def _on_world_headline(self, event: Event) -> None:
+        message = str(event.payload.get("message", ""))
+        if not message or message == self._headline_last:
+            return
+        self._headline_last = message
+        self._push_world_event(
             level=event.payload.get("level", "info"),
-            source=event.payload.get("source", "system"),
+            source=event.payload.get("source", "world"),
+            message=message,
+            ts=event.ts,
+        )
+
+    async def _on_journalist_news(self, event: Event) -> None:
+        level = event.payload.get("level", "info")
+        if level not in ("warn", "danger"):
+            return
+        self._push_world_event(
+            level=level,
+            source="journalist",
             message=event.payload.get("message", ""),
             ts=event.ts,
         )
 
-    def _push_event(self, level: str, source: str, message: str, ts: datetime) -> None:
-        self._events.appendleft(
+    def _push_quant_event(
+        self, level: str, source: str, message: str, ts: datetime
+    ) -> None:
+        self._quant_events.appendleft(
+            {
+                "ts": ts.isoformat(),
+                "level": level,
+                "source": source,
+                "message": message,
+            }
+        )
+
+    def _push_world_event(
+        self, level: str, source: str, message: str, ts: datetime
+    ) -> None:
+        self._world_events.appendleft(
             {
                 "ts": ts.isoformat(),
                 "level": level,
@@ -196,6 +346,8 @@ class MetricsHub:
             "alpha": dict(self._alpha),
             "world": dict(self._world),
             "sentinel": dict(self._sentinel),
-            "events": list(self._events),
+            "events": list(self._quant_events),
+            "world_events": list(self._world_events),
+            "world_agents": list(self._world_agents),
             "quant_mode": get_mode_manager().snapshot(),
         }

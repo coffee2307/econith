@@ -299,18 +299,17 @@ export function stepWorld(map: NodeMap, dt: number): Omit<SimEvent, "id" | "ts">
     if (node.tier === "proxy") node.step(dt, hubs);
   }
 
-  // Sparse spontaneous colour: only surface genuinely notable states so the
-  // log stays readable (the queue throttles display regardless).
+  // Rare spontaneous unrest spikes — routine macro drift is not logged.
   for (const node of map.values()) {
     const unrest = node.vectors.geopolitical.social_unrest_index;
-    if (unrest > 0.62 && Math.random() < 0.05) {
+    if (unrest > 0.78 && Math.random() < 0.006) {
       events.push({
         level: "danger",
         source: "society",
         country: node.code,
         messageKey: "unrest",
         messageParams: {
-          country: node.name,
+          country: node.code,
           pct: (unrest * 100).toFixed(0),
         },
       });
@@ -328,8 +327,38 @@ function fmtValue(addr: FieldAddr, value: number, fraction: boolean): string {
   return value.toFixed(2);
 }
 
+export interface EditMeta {
+  prev: number;
+  delta: number;
+  tier: NodeTier;
+  affectedProxies: { code: string; move: number }[];
+}
+
 export interface EditResult {
   events: Omit<SimEvent, "id" | "ts">[];
+  meta: EditMeta;
+}
+
+export interface TariffMeta {
+  delta: number;
+  src: string;
+  dst: string;
+  rate: number;
+}
+
+const TAX_FIELDS = new Set(["individual_tax", "vat", "corporate_tax"]);
+
+function applyTaxSocietalShockForField(node: CountryNode, field: string, delta: number): void {
+  if (Math.abs(delta) < 1e-9 || !TAX_FIELDS.has(field)) return;
+  const geo = node.vectors.geopolitical;
+  const bump = Math.min(0.1, Math.abs(delta) * 0.2);
+  if (delta > 0) {
+    geo.social_unrest_index = clampFrac(geo.social_unrest_index + bump);
+    geo.consumer_confidence = Math.max(15, geo.consumer_confidence - bump * 35);
+  } else {
+    geo.social_unrest_index = clampFrac(Math.max(0, geo.social_unrest_index - bump * 0.6));
+    geo.consumer_confidence = Math.min(95, geo.consumer_confidence + bump * 20);
+  }
 }
 
 /**
@@ -351,13 +380,17 @@ export function applyEdit(
   fraction: boolean,
 ): EditResult {
   const node = ensureNode(map, code);
-  if (!node) return { events: [] };
+  const emptyMeta: EditMeta = { prev: 0, delta: 0, tier: "proxy", affectedProxies: [] };
+  if (!node) return { events: [], meta: emptyMeta };
 
   const key = `${addr.group}.${addr.field}`;
   const prev = node.getFeature(addr);
+  const delta = value - prev;
   node.setFeature(addr, value);
+  applyTaxSocietalShockForField(node, addr.field, delta);
 
   const events: Omit<SimEvent, "id" | "ts">[] = [];
+  const affectedProxies: { code: string; move: number }[] = [];
 
   if (node.tier === "proxy") {
     // User precedence: lock the field from correlation drift.
@@ -368,29 +401,36 @@ export function applyEdit(
       country: node.code,
       messageKey: "proxyOverride",
       messageParams: {
-        country: node.name,
+        country: node.code,
         labelKey,
         value: fmtValue(addr, value, fraction),
       },
     });
-    return { events };
+    return {
+      events,
+      meta: { prev, delta, tier: node.tier, affectedProxies },
+    };
   }
 
   // ---- Hub edit: broadcast a Global Macro Shock to dependent proxies. ----
-  const delta = value - prev;
   events.push({
     level: "warn",
     source: "policy",
     country: node.code,
     messageKey: "hubAdjust",
     messageParams: {
-      country: node.name,
+      country: node.code,
       labelKey,
       value: fmtValue(addr, value, fraction),
     },
   });
 
-  if (Math.abs(delta) < 1e-9 || !isCorrelated(addr)) return { events };
+  if (Math.abs(delta) < 1e-9 || !isCorrelated(addr)) {
+    return {
+      events,
+      meta: { prev, delta, tier: node.tier, affectedProxies },
+    };
+  }
 
   // Every proxy that depends on this hub feels a fraction of the shock.
   const affected: { node: ProxyNode; move: number }[] = [];
@@ -402,28 +442,33 @@ export function applyEdit(
     const move = delta * dep.weight * 0.5; // immediate partial pass-through
     if (Math.abs(move) < 1e-9) continue;
     other.setFeature(addr, other.getFeature(addr) + move);
+    applyTaxSocietalShockForField(other, addr.field, move);
     affected.push({ node: other, move });
+    affectedProxies.push({ code: other.code, move });
   }
 
-  // Narrate the largest 3 chain reactions.
+  // Narrate the strongest chain reactions (up to 3).
   affected.sort((a, b) => Math.abs(b.move) - Math.abs(a.move));
   for (const { node: pnode, move } of affected.slice(0, 3)) {
     const dirKey = move > 0 ? "rose" : "eased";
     events.push({
-      level: "info",
+      level: "warn",
       source: "contagion",
       country: pnode.code,
       messageKey: "proxyContagion",
       messageParams: {
-        proxy: pnode.name,
+        proxy: pnode.code,
         labelKey,
         dirKey,
         value: fmtValue(addr, pnode.getFeature(addr), fraction),
-        hub: node.name,
+        hub: node.code,
       },
     });
   }
-  return { events };
+  return {
+    events,
+    meta: { prev, delta, tier: node.tier, affectedProxies },
+  };
 }
 
 function isCorrelated(addr: FieldAddr): boolean {
@@ -443,14 +488,15 @@ export function applyTariff(
   dst: string,
   rate: number,
   prevRate: number,
-): { events: Omit<SimEvent, "id" | "ts">[] } {
+): { events: Omit<SimEvent, "id" | "ts">[]; meta: TariffMeta } {
   const source = ensureNode(map, src);
   const target = ensureNode(map, dst);
   const events: Omit<SimEvent, "id" | "ts">[] = [];
-  if (!source || !target) return { events };
+  const emptyMeta: TariffMeta = { delta: 0, src, dst, rate };
+  if (!source || !target) return { events, meta: emptyMeta };
 
   const delta = rate - prevRate;
-  if (Math.abs(delta) < 1e-4) return { events };
+  if (Math.abs(delta) < 1e-4) return { events, meta: { delta: 0, src, dst, rate } };
 
   // Target: exports and growth take the hit.
   const tExport = target.vectors.fiscal.export_index;
@@ -460,6 +506,14 @@ export function applyTariff(
   source.vectors.monetary.inflation_cpi = clampFrac(
     source.vectors.monetary.inflation_cpi + 0.15 * delta,
   );
+  // Societal / business stress on the tariff target.
+  target.vectors.geopolitical.business_confidence = Math.max(
+    15,
+    target.vectors.geopolitical.business_confidence - 3 * delta,
+  );
+  target.vectors.geopolitical.social_unrest_index = clampFrac(
+    target.vectors.geopolitical.social_unrest_index + 0.04 * delta,
+  );
 
   events.push({
     level: delta > 0 ? "danger" : "ok",
@@ -467,9 +521,9 @@ export function applyTariff(
     country: source.code,
     messageKey: "tariffChange",
     messageParams: {
-      source: source.name,
+      source: source.code,
       actionKey: delta > 0 ? "raised" : "cut",
-      target: target.name,
+      target: target.code,
       rate: (rate * 100).toFixed(0),
       exportActionKey: delta > 0 ? "fall" : "recover",
       exportIdx: Math.abs(40 * delta).toFixed(1),
@@ -478,32 +532,37 @@ export function applyTariff(
     },
   });
 
-  // Supply-chain diversion: alt manufacturers (not src/dst) capture trade.
+  // Supply-chain diversion: log only the largest beneficiary.
   if (delta > 0) {
+    let best: { code: string; gain: number; bene: CountryNode } | null = null;
     for (const code of DIVERSION_BENEFICIARIES) {
       if (code === src || code === dst) continue;
       const bene = map.get(code);
       if (!bene) continue;
       const gain = 6 * delta * (bene.tier === "proxy" ? 0.6 : 1);
       if (gain < 0.4) continue;
+      if (!best || gain > best.gain) best = { code, gain, bene };
+    }
+    if (best) {
+      const { code, gain, bene } = best;
       const beforePmi = bene.vectors.industrial.manufacturing_pmi;
       bene.vectors.fiscal.export_index += gain;
       bene.vectors.industrial.manufacturing_pmi = Math.min(70, beforePmi + gain * 0.25);
       events.push({
-        level: "ok",
+        level: "warn",
         source: "contagion",
-        country: bene.code,
+        country: code,
         messageKey: "supplyDiversion",
         messageParams: {
-          country: bene.name,
+          country: code,
           pts: (gain * 0.25).toFixed(1),
-          source: source.name,
-          target: target.name,
+          source: source.code,
+          target: target.code,
         },
       });
     }
   }
-  return { events };
+  return { events, meta: { delta, src, dst, rate } };
 }
 
 /** Reset a proxy's manual overrides so it rejoins its hub correlation. */

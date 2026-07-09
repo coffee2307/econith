@@ -591,6 +591,15 @@ class SovereignWorldGraph:
         if coupling_enabled():
             for fact in self._tick_facts:
                 await self._bus.publish(
+                    "world.agent.narrative",
+                    sim_day=ctx.sim_day,
+                    actor="Sovereign",
+                    country="",
+                    text=fact,
+                    level="warn",
+                    source="sovereign",
+                )
+                await self._bus.publish(
                     "world.micro_impact", sim_day=ctx.sim_day, fact=fact
                 )
 

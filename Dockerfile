@@ -28,11 +28,23 @@ RUN useradd --create-home --uid 1000 econith
 COPY --from=builder /opt/venv /opt/venv
 
 # application source (core engine, not the dashboard)
+COPY api/ ./api/
+COPY ai/ ./ai/
+COPY bridges/ ./bridges/
+COPY econith/ ./econith/
+COPY econith_quant/bridge/ ./econith_quant/bridge/
+COPY econith_quant/execution/ ./econith_quant/execution/
+COPY econith_quant/recovery/ ./econith_quant/recovery/
+COPY quant/ ./quant/
 COPY config/ ./config/
 COPY core/ ./core/
 COPY infrastructure/ ./infrastructure/
 COPY sentinel/ ./sentinel/
+COPY archive/vendors/manifest.json ./archive/vendors/manifest.json
 COPY main.py ./
+
+RUN mkdir -p /app/logs /app/datasets \
+  && chown -R econith:econith /app/logs /app/datasets
 
 USER econith
 EXPOSE 8000

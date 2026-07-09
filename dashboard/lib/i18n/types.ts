@@ -8,7 +8,11 @@ export type SimMessageKey =
   | "hubAdjust"
   | "proxyContagion"
   | "tariffChange"
-  | "supplyDiversion";
+  | "supplyDiversion"
+  | "journalist"
+  | "geopoliticsAlert"
+  | "emergency"
+  | "macroPulse";
 
 export interface Dictionary {
   common: {
@@ -37,6 +41,15 @@ export interface Dictionary {
     quant: string;
     world: string;
     worldSubtitle: string;
+    social: string;
+    socialSubtitle: string;
+  };
+  social: {
+    subtitle: string;
+    statusReady: string;
+    statusLoading: string;
+    statusOffline: string;
+    offlineHint: string;
   };
   footer: {
     tagline: string;
@@ -55,6 +68,7 @@ export interface Dictionary {
     heroDesc: string;
     enterQuant: string;
     enterWorld: string;
+    enterSocial: string;
     platformEyebrow: string;
     platformTitle: string;
     platformDesc: string;
@@ -244,6 +258,7 @@ export interface Dictionary {
       title: string;
       online: string;
       awaitingMacro: string;
+      awaitingTape: string;
       providerHealth: string;
     };
     enums: {
@@ -285,6 +300,15 @@ export interface Dictionary {
     apply: string;
     discardDrafts: string;
     referenceOnly: string;
+    rightPanelEvents: string;
+    rightPanelAgents: string;
+    agentExchangeTitle: string;
+    agentExchangeSubtitle: string;
+    agentExchangeRefresh: string;
+    agentExchangeLoading: string;
+    agentExchangeEmpty: string;
+    agentExchangeLive: string;
+    agentExchangeWaiting: string;
   };
   macro: {
     tabs: Record<TabId, string>;

@@ -10,10 +10,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isWorld = pathname.startsWith("/world");
   const isQuant = pathname.startsWith("/quant");
+  const isSocial = pathname.startsWith("/social");
 
   useEffect(() => {
     const root = document.documentElement;
-    const rigid = isWorld || isQuant;
+    const rigid = isWorld || isQuant || isSocial;
     if (rigid) {
       root.classList.add("app-viewport");
     } else {
@@ -28,7 +29,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       root.classList.remove("app-viewport");
       root.classList.remove("world-viewport");
     };
-  }, [isWorld, isQuant]);
+  }, [isWorld, isQuant, isSocial]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -37,14 +38,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         className={
           isWorld
             ? "flex min-h-0 flex-1 flex-col overflow-hidden"
-            : isQuant
+            : isQuant || isSocial
               ? "flex min-h-0 flex-1 flex-col overflow-hidden"
               : "flex flex-1 flex-col"
         }
       >
         {children}
       </main>
-      {!isWorld && !isQuant ? <Footer /> : null}
+      {!isWorld && !isQuant && !isSocial ? <Footer /> : null}
     </div>
   );
 }

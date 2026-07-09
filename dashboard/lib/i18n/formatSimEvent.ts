@@ -2,9 +2,27 @@ import type { SimEvent } from "@/lib/worldModel";
 import type { Dictionary } from "./types";
 import { interpolate } from "./translate";
 
+/** Resolve ISO3 codes in common entity params to localized country names. */
+function localizeEntityParams(
+  params: Record<string, string | number>,
+  dict: Dictionary,
+): Record<string, string | number> {
+  const out = { ...params };
+  for (const key of ["country", "proxy", "hub", "source", "target"]) {
+    const val = out[key];
+    if (typeof val === "string" && /^[A-Z]{3}$/.test(val)) {
+      out[key] = localizedCountryName(val, dict, val);
+    }
+  }
+  return out;
+}
+
 /** Resolve a stored sim event into the active locale. */
 export function formatSimEvent(event: SimEvent, dict: Dictionary): string {
-  const params: Record<string, string | number> = { ...event.messageParams };
+  const params = localizeEntityParams(
+    { ...event.messageParams },
+    dict,
+  );
 
   if (params.labelKey) {
     const key = String(params.labelKey);

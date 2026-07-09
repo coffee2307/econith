@@ -19,6 +19,7 @@ import {
 import { makeTranslator, type TranslateFn } from "@/lib/i18n/translate";
 import type { Dictionary, Locale } from "@/lib/i18n/types";
 import type { SimEvent } from "@/lib/worldModel";
+import { syncLocale } from "@/lib/api";
 
 const STORAGE_KEY = "econith-locale";
 
@@ -67,7 +68,12 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
     setLocaleState(next);
     applyLocale(next);
     localStorage.setItem(STORAGE_KEY, next);
+    void syncLocale(next);
   }, []);
+
+  useEffect(() => {
+    void syncLocale(locale);
+  }, [locale]);
 
   const dict = DICTS[locale];
 

@@ -37,6 +37,7 @@ class Settings:
         "https://localhost",
         "https://localhost:3000",
         "http://localhost:3000",
+        "http://localhost:3001",
     )
 
     time_speed_multipliers: tuple[int, ...] = TIME_SPEED_MULTIPLIERS
@@ -67,6 +68,14 @@ class Settings:
     @property
     def audit_log_backups(self) -> int:
         return self.env.audit_log_backups
+
+    @property
+    def social_api_url(self) -> str:
+        return self.env.social_api_url.rstrip("/")
+
+    @property
+    def social_ui_url(self) -> str:
+        return self.env.social_ui_url.rstrip("/")
 
     @property
     def protected_path_prefixes(self) -> tuple[str, ...]:

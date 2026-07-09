@@ -10,6 +10,7 @@ from ai.journalist.aggregator import (
     LLMBackend,
     NewsLog,
     NumericDelta,
+    OpenAICompatibleLLMBackend,
     TemplateLLMBackend,
 )
 
@@ -18,5 +19,6 @@ __all__ = [
     "LLMBackend",
     "NewsLog",
     "NumericDelta",
+    "OpenAICompatibleLLMBackend",
     "TemplateLLMBackend",
 ]

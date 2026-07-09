@@ -5,9 +5,12 @@
 #   frontend_dashboard -> Node.js / Next.js (control dashboard, HTTPS)
 #   postgres / redis   -> backing stores for the Core Engine
 #
-# All services read secrets/config from the mounted ./.env file.
-#   cp .env.example .env   # then edit
-#   docker compose up --build
+# econith_social runs via `npm run dev` at repo root (starts Docker + social together).
+#
+# Quick start (one terminal, Windows-friendly):
+#   cp .env.example .env    # edit secrets
+#   npm run setup           # first time only
+#   npm run dev             # Docker stack + econith_social
 # =============================================================================
 
 name: econith
@@ -19,15 +22,28 @@ services:
       dockerfile: Dockerfile
     container_name: econith_backend_core
     env_file: ./.env
+    environment:
+      # Sidecar runs on the host (not in compose); reach it from inside the container.
+      SOCIAL_API_URL: http://host.docker.internal:5001
     ports:
       - "8000:8000"
     volumes:
+      - ./api:/app/api:ro
+      - ./ai:/app/ai:ro
+      - ./bridges:/app/bridges:ro
+      - ./econith:/app/econith:ro
+      - ./econith_quant/bridge:/app/econith_quant/bridge:ro
+      - ./econith_quant/execution:/app/econith_quant/execution:ro
+      - ./econith_quant/recovery:/app/econith_quant/recovery:ro
+      - ./quant:/app/quant:ro
       - ./config:/app/config:ro
       - ./core:/app/core:ro
       - ./infrastructure:/app/infrastructure:ro
       - ./sentinel:/app/sentinel:ro
+      - ./archive/vendors/manifest.json:/app/archive/vendors/manifest.json:ro
       - ./main.py:/app/main.py:ro
       - ./datasets:/app/datasets
+      - ./logs:/app/logs
     depends_on:
       postgres:
         condition: service_healthy
@@ -47,6 +63,7 @@ services:
       # the backend via localhost (NOT the docker service name).
       NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api/v1
       NEXT_PUBLIC_WS_URL: ws://localhost:8000/api/v1/stream/metrics
+      NEXT_PUBLIC_SOCIAL_UI_URL: http://localhost:3001
     # HTTP dev server: keeps the page same-scheme as the ws:// link so the
     # live metrics socket is not blocked as mixed content. For HTTPS, switch to
     # `npm run dev` + enable backend TLS (see README "Local HTTPS").

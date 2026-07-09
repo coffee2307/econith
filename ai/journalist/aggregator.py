@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from typing import Protocol
 
 from core.event_bus import Event, EventBus
+from core.llm_pool import LLMKeyPool
 
 logger = logging.getLogger("econith.ai.journalist")
 
@@ -35,6 +36,7 @@ __all__ = [
     "NewsLog",
     "LLMBackend",
     "TemplateLLMBackend",
+    "OpenAICompatibleLLMBackend",
     "JournalistLLM",
 ]
 
@@ -110,6 +112,56 @@ class TemplateLLMBackend:
             f"{tone} Chinese and regional corporate infrastructure recalibrate "
             f"supply lines while the Core reprices systemic risk. Drivers: {drivers}."
         )
+
+
+class OpenAICompatibleLLMBackend:
+    """OpenAI-compatible backend (Groq, OpenAI, etc.) with multi-key failover."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str = "",
+        base_url: str = "",
+        model: str = "",
+        timeout_s: float = 20.0,
+        key_pool: LLMKeyPool | None = None,
+    ) -> None:
+        self._model = model
+        self._base_url = base_url
+        self._timeout_s = timeout_s
+        if key_pool is not None:
+            self._pool = key_pool
+        else:
+            from core.llm_pool import parse_llm_api_keys
+
+            self._pool = LLMKeyPool(parse_llm_api_keys(api_key))
+
+    async def complete(self, prompt: str, facts: list[NumericDelta]) -> str:
+        def _call() -> str:
+            response = self._pool.create_chat_completion(
+                base_url=self._base_url,
+                model=self._model,
+                timeout=self._timeout_s,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are ECONITH's world-event news writer. "
+                            "Write one concise, factual paragraph, no hype."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.2,
+                max_tokens=220,
+            )
+            content = response.choices[0].message.content or ""
+            return content.strip()
+
+        text = await asyncio.to_thread(_call)
+        if not text:
+            return await TemplateLLMBackend().complete(prompt, facts)
+        return text
 
 
 # ---------------------------------------------------------------------------
@@ -291,12 +343,14 @@ class JournalistLLM:
             return
         self._last_digest = digest
 
-        prompt = self._build_prompt(facts)
+        from core.locale_prefs import dashboard_locale
+
+        prompt = self._build_prompt(facts, locale=dashboard_locale())
         try:
             message = await self._backend.complete(prompt, facts)
-        except Exception:  # noqa: BLE001 - a model fault must not kill the feed
-            logger.exception("journalist backend failed")
-            return
+        except Exception:  # noqa: BLE001 - model faults must not kill the feed
+            logger.exception("journalist backend failed; using template fallback")
+            message = await TemplateLLMBackend().complete(prompt, facts)
 
         if message == self._last_message:
             return
@@ -318,14 +372,15 @@ class JournalistLLM:
             logger.debug(log.format())
 
     @staticmethod
-    def _build_prompt(facts: list[NumericDelta]) -> str:
+    def _build_prompt(facts: list[NumericDelta], *, locale: str = "en") -> str:
         """Structural prompt: factual numeric deltas -> natural news request."""
+        lang = "Vietnamese" if locale.startswith("vi") else "English"
         lines = "\n".join(f"- {f.render()}" for f in facts)
         return (
-            "You are ECONITH's objective global financial news terminal. "
-            "Translate the following raw numeric multi-agent state deltas into a "
-            "single cohesive, contextualized breaking-news paragraph. Be factual, "
-            "avoid hype, and explain the causal chain.\n"
+            f"You are ECONITH's objective global financial news terminal. "
+            f"Write in {lang}. Translate the following raw numeric multi-agent "
+            f"state deltas into a single cohesive, contextualized breaking-news "
+            f"paragraph. Be factual, avoid hype, and explain the causal chain.\n"
             f"State deltas:\n{lines}"
         )
 

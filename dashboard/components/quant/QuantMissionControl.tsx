@@ -63,12 +63,12 @@ export function QuantMissionControl() {
   const market = snapshot?.market;
   const sentinel = snapshot?.sentinel;
   const ai = snapshot?.ai;
-  const events = snapshot?.events ?? [];
+  const alt = snapshot?.alt;
+  const quantEvents = snapshot?.events ?? [];
   const quantMode = snapshot?.quant_mode?.mode ?? "REALITY";
   const routing = snapshot?.routing;
   const debate = snapshot?.debate;
   const alpha = snapshot?.alpha;
-  const worldGlobal = snapshot?.world?.global;
 
   const breaker = sentinel?.state ?? "—";
   const mode = sentinel?.mode ?? "—";
@@ -179,17 +179,23 @@ export function QuantMissionControl() {
             </div>
           </div>
 
-          {/* RIGHT — risk rail */}
+          {/* RIGHT — risk rail (stacked panels, scroll inside column) */}
           <aside className="flex min-h-0 flex-col gap-2.5 overflow-y-auto overflow-x-hidden overscroll-contain pr-0.5">
-            <SentinelRiskPanel sentinel={sentinel} breaker={breaker} tLabel={t} />
-            <DataInflowMonitor macro={worldGlobal} />
-            <QuantControls />
+            <div className="shrink-0">
+              <SentinelRiskPanel sentinel={sentinel} breaker={breaker} tLabel={t} />
+            </div>
+            <div className="shrink-0">
+              <DataInflowMonitor market={market} alt={alt} quantOnly />
+            </div>
+            <div className="shrink-0 pb-1">
+              <QuantControls />
+            </div>
           </aside>
         </div>
 
         <QuantResizeHandle onResize={adjustLogHeight} label={t("quant.resizeLog")} />
         <div className="flex-none overflow-hidden" style={{ height: logHeight }}>
-          <EventLogTerminal events={events} dock fill />
+          <EventLogTerminal events={quantEvents} dock fill />
         </div>
       </div>
     </div>

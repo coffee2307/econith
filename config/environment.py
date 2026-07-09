@@ -87,6 +87,39 @@ class Environment(BaseSettings):
     audit_log_max_bytes: int = Field(default=5_000_000, alias="AUDIT_LOG_MAX_BYTES")
     audit_log_backups: int = Field(default=5, alias="AUDIT_LOG_BACKUPS")
 
+    # --- econith_social (first-party social simulation sidecar) ---------------
+    social_api_url: str = Field(
+        default="http://localhost:5001", alias="SOCIAL_API_URL"
+    )
+    social_ui_url: str = Field(
+        default="http://localhost:3001", alias="SOCIAL_UI_URL"
+    )
+    llm_api_key: str = Field(default="", alias="LLM_API_KEY")
+    llm_base_url: str = Field(
+        default="https://api.groq.com/openai/v1", alias="LLM_BASE_URL"
+    )
+    llm_model_name: str = Field(
+        default="llama-3.3-70b-versatile", alias="LLM_MODEL_NAME"
+    )
+    zep_api_key: str = Field(default="", alias="ZEP_API_KEY")
+
+    @property
+    def llm_api_key_list(self) -> list[str]:
+        """Parsed Groq/OpenAI keys from comma-separated ``LLM_API_KEY``."""
+        from core.llm_pool import parse_llm_api_keys
+
+        return parse_llm_api_keys(self.llm_api_key)
+
+    @property
+    def has_llm_credentials(self) -> bool:
+        return bool(self.llm_api_key_list)
+
+    @property
+    def effective_llm_api_key(self) -> str:
+        """First configured key (backward compatibility)."""
+        keys = self.llm_api_key_list
+        return keys[0] if keys else ""
+
     @property
     def api_key_set(self) -> frozenset[str]:
         """Parsed, de-duplicated set of accepted API keys / bearer tokens."""

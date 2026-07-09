@@ -13,6 +13,7 @@ ECONITH runtime. Eight upstream projects are wrapped in ``econith_*`` shims:
     QUANT    Zipline-Reloaded  EconithZiplineShim          (offline, none)
     WORLD    Mesa              EconithMesaShim             (offline, none)
     WORLD    ABIDES            EconithAbidesShim           quant.fill (SIM only)
+    SOCIAL   econith_social    EconithSocialShim           social.opinion.snapshot (SIM only)
 
 Design contract (Zero-Breakage)
 -------------------------------
@@ -61,6 +62,7 @@ __all__ = [
     "EconithZiplineShim",
     "EconithMesaShim",
     "EconithAbidesShim",
+    "EconithSocialShim",
     "RoutedIntent",
     "ConsensusVerdict",
     "VendorConsensus",
@@ -688,6 +690,47 @@ class EconithAbidesShim(VendorShim):
 
 
 # ===========================================================================
+#  SOCIAL :: econith_social  (first-party OASIS opinion simulator)
+# ===========================================================================
+class EconithSocialShim(VendorShim):
+    """SOCIAL :: econith_social → multi-agent social opinion simulation (SIM only).
+
+    First-party integration: availability is determined by the in-tree source
+    tree, not an OSS sparse-checkout. The Flask sidecar runs out-of-process;
+    this shim exposes advisory EventBus topics only.
+    """
+
+    contract = VendorContract(
+        name="econith_social",
+        pillar="social",
+        probe_module="econith_social.backend",
+        consumes=("journalist.news",),
+        emits=("social.opinion.snapshot", "social.simulation.verdict"),
+        simulation_only=True,
+    )
+
+    @property
+    def available(self) -> bool:
+        root = Path(__file__).resolve().parents[1]
+        return (root / "econith_social" / "backend" / "run.py").is_file()
+
+    def _wire(self) -> None:
+        if self._bus is not None:
+            self._bus.subscribe("journalist.news", self._on_journalist_news)
+
+    async def _on_journalist_news(self, event: Event) -> None:
+        """Fan world narrative headlines into an advisory social context snapshot."""
+        headline = event.payload.get("headline") or event.payload.get("title")
+        if not headline:
+            return
+        await self.emit(
+            "social.opinion.snapshot",
+            headline=str(headline),
+            source="journalist.news",
+        )
+
+
+# ===========================================================================
 #  Consensus fuser (used by ai/meta/core_ai.py)
 # ===========================================================================
 @dataclass(slots=True)
@@ -843,6 +886,33 @@ class VendorShimRegistry:
             else:
                 logger.warning("vendor %s %s (%s)", name, status, error)
 
+        for spec in data.get("integrations", []):
+            name = str(spec.get("name", ""))
+            if not name:
+                continue
+            root_rel = str(spec.get("root", name))
+            integration_root = Path(__file__).resolve().parents[1] / root_rel
+            entrypoint = integration_root / "backend" / "run.py"
+            status = "READY" if entrypoint.is_file() else "MISSING"
+            error = None if status == "READY" else "entrypoint_missing"
+            shim = self.shims.get(name)
+            monitor[name] = {
+                "status": status,
+                "error": error,
+                "pillar": spec.get("pillar", "social"),
+                "consumes": list(spec.get("consumes", ()) or (shim.contract.consumes if shim else ())),
+                "emits": list(spec.get("emits_topics", ()) or (shim.contract.emits if shim else ())),
+                "simulation_only": bool(
+                    spec.get("simulation_only", False)
+                    or (shim.contract.simulation_only if shim else False)
+                ),
+                "first_party": True,
+            }
+            if status == "READY":
+                logger.info("integration %s READY", name)
+            else:
+                logger.warning("integration %s %s (%s)", name, status, error)
+
         self._monitor = monitor
         return monitor
 
@@ -881,4 +951,5 @@ def build_default_registry(bus: EventBus) -> VendorShimRegistry:
         .add(EconithZiplineShim(bus))
         .add(EconithMesaShim(bus))
         .add(EconithAbidesShim(bus))
+        .add(EconithSocialShim(bus))
     )

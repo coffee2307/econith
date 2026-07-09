@@ -77,17 +77,26 @@ class CentralBankModel(ReactionModel):
         target = self._neutral + 1.5 * infl_gap + 0.5 * growth_gap
         rate_delta = _clamp(target - m.interest_rate, -self._step, self._step)
         if abs(rate_delta) > 1e-5:
-            adj.append(Adjustment(code, "monetary", "interest_rate", rate_delta,
-                                  reason="taylor_rule"))
+            policy_event: str | None = None
+            policy_level = "info"
             if abs(infl_gap) > 0.02 and abs(rate_delta) >= self._step - 1e-6:
                 direction = "hikes" if rate_delta > 0 else "cuts"
-                adj.append(Adjustment(
-                    code, "monetary", "interest_rate", 0.0,
-                    reason="policy_signal",
-                    event=(f"{c.name} central bank {direction} rates "
-                           f"to fight {m.inflation_cpi*100:.1f}% inflation"),
-                    event_level="warn" if rate_delta > 0 else "ok",
-                ))
+                policy_event = (
+                    f"{c.name} central bank {direction} rates "
+                    f"to fight {m.inflation_cpi*100:.1f}% inflation"
+                )
+                policy_level = "warn" if rate_delta > 0 else "ok"
+            adj.append(
+                Adjustment(
+                    code,
+                    "monetary",
+                    "interest_rate",
+                    rate_delta,
+                    reason="taylor_rule",
+                    event=policy_event,
+                    event_level=policy_level,
+                )
+            )
 
         # Inflation responds to the real rate (cooling) with persistence.
         real_rate = m.interest_rate - m.inflation_cpi

@@ -1,0 +1,16 @@
+{
+  "name": "econith",
+  "private": true,
+  "description": "ECONITH platform — one-command dev startup",
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "dev": "node scripts/dev.mjs",
+    "stop": "docker compose down"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

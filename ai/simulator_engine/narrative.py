@@ -61,8 +61,10 @@ class NarrativeEngine:
     def __init__(self, seed: int | None = None) -> None:
         self._rng = random.Random(seed)
 
-    def compose(self, fact: CausalFact) -> str:
+    def compose(self, fact: CausalFact, *, locale: str = "en") -> str:
         """Render a single causal fact into a detailed news line."""
+        if locale.lower().startswith("vi"):
+            return self._compose_vi(fact)
         templates = self._CONNECTORS.get(fact.level, self._CONNECTORS["info"])
         template = self._rng.choice(templates)
         line = template.format(
@@ -74,6 +76,65 @@ class NarrativeEngine:
         )
         metric_suffix = self._format_metrics(fact.metrics)
         return f"{line}{metric_suffix}"
+
+    _ACTOR_VI = {
+        "Corporate AI": "AI doanh nghiệp",
+        "Government AI": "AI chính phủ",
+        "Societal AI": "AI xã hội",
+        "Market": "Thị trường",
+        "Sovereign": "Đại diện chủ quyền",
+    }
+
+    _PHRASE_VI = (
+        ("systemic market-crisis print", "khủng hoảng thị trường"),
+        ("sell-pressure", "áp lực bán"),
+        ("repatriated", "hồi hương"),
+        ("dumped sovereign paper", "bán trái phiếu"),
+        ("relocated supply chains", "dời chuỗi cung ứng"),
+        ("supply-chain friction rising", "ma sát chuỗi cung ứng tăng"),
+        ("capital controls", "kiểm soát vốn"),
+        ("imposed capital controls", "áp kiểm soát vốn"),
+        ("yields", "lợi suất"),
+        ("currency", "tỷ giá"),
+    )
+
+    def _compose_vi(self, fact: CausalFact) -> str:
+        actor = self._ACTOR_VI.get(fact.actor, fact.actor)
+        action = self._vi_phrase(fact.action)
+        cause = self._vi_phrase(fact.cause)
+        effect = self._vi_phrase(fact.effect)
+        templates = {
+            "danger": (
+                "Vì {cause}, {actor} tại {country} hành động quyết liệt: {action}. {effect}.",
+                "{cause} buộc {actor} tại {country} phải {action} — {effect}.",
+            ),
+            "warn": (
+                "Trước {cause}, {actor} tại {country} chọn {action} — {effect}.",
+                "{actor} tại {country} phản ứng với {cause} bằng {action}; {effect}.",
+            ),
+            "ok": (
+                "Khi {cause} dịu đi, {actor} tại {country} {action}; {effect}.",
+            ),
+            "info": (
+                "{actor} tại {country} {action} giữa bối cảnh {cause}; {effect}.",
+            ),
+        }
+        pool = templates.get(fact.level, templates["info"])
+        line = self._rng.choice(pool).format(
+            actor=actor,
+            country=fact.country,
+            action=action,
+            cause=cause,
+            effect=effect,
+        )
+        metric_suffix = self._format_metrics(fact.metrics)
+        return f"{line}{metric_suffix}"
+
+    def _vi_phrase(self, text: str) -> str:
+        out = text
+        for en, vi in self._PHRASE_VI:
+            out = out.replace(en, vi)
+        return out
 
     def regime_transition(
         self, country_or_market: str, old: str, new: str, driver: str,

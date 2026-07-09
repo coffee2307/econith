@@ -121,6 +121,8 @@ _AMBIENT = (
     "{company} signs strategic supply deal in {country}.",
 )
 
+_AGENT_ACTORS = frozenset({"Corporate AI", "Government AI", "Societal AI", "Sovereign"})
+
 # Which log source each narrative actor maps to (for the dashboard event feed).
 _ACTOR_SOURCE = {
     "Corporate AI": "corporate",
@@ -910,6 +912,7 @@ class WorldKernel:
                     "text": p.event,
                     "level": p.event_level,
                     "source": "world",
+                    "actor": "",
                 })
         return events
 
@@ -944,22 +947,72 @@ class WorldKernel:
 
     # -- event emission -------------------------------------------------------
     async def _emit_all(self, facts: list[CausalFact], legacy_events: list[dict]) -> None:
-        events: list[dict] = []
-        # Narrative facts first (they carry the causal "why").
-        for fact in facts:
-            events.append({
+        from core.locale_prefs import dashboard_locale
+
+        locale = dashboard_locale()
+        severity = {"danger": 4, "warn": 3, "ok": 2, "info": 1}
+        ranked = sorted(facts, key=lambda f: severity.get(f.level, 0), reverse=True)
+
+        # Agent feed: one narrative per tick (highest-severity, non-duplicate cause).
+        seen_cause: set[str] = set()
+        for fact in ranked:
+            cause_key = fact.cause[:48]
+            if cause_key in seen_cause:
+                continue
+            seen_cause.add(cause_key)
+            await self._emit_agent_narrative(fact, locale=locale)
+            break
+
+        # World "Sự kiện" headline: policy warn/legacy OR top macro fact.
+        headline: dict | None = None
+        for leg in legacy_events:
+            if leg.get("level") in ("warn", "danger") and leg.get("text"):
+                headline = leg
+                break
+        if headline is None and ranked:
+            fact = ranked[0]
+            headline = {
                 "country": fact.country,
-                "text": self._narrator.compose(fact),
+                "text": self._narrator.compose(fact, locale=locale),
                 "level": fact.level,
                 "source": _ACTOR_SOURCE.get(fact.actor, "world"),
-            })
-        events.extend(legacy_events)
-        # Ambient colour when there's spare room in the feed.
-        if random.random() < self._event_p and len(events) < self._max_events:
-            events.append(self._ambient_event())
+            }
+        if headline:
+            await self._bus.publish(
+                "world.headline",
+                sim_day=self._sim_day,
+                country=headline["country"],
+                message=headline["text"],
+                level=headline.get("level", "info"),
+                source=headline.get("source", "world"),
+                locale=locale,
+            )
 
-        for ev in events[: self._max_events]:
-            await self._emit_event(ev)
+    async def _emit_agent_narrative(self, fact: CausalFact, *, locale: str) -> None:
+        text = self._narrator.compose(fact, locale=locale)
+        source = _ACTOR_SOURCE.get(fact.actor, "world")
+        await self._bus.publish(
+            "world.agent.narrative",
+            sim_day=self._sim_day,
+            actor=fact.actor,
+            country=fact.country,
+            text=text,
+            level=fact.level,
+            source=source,
+            locale=locale,
+        )
+        if fact.level == "danger":
+            message = f"[{self._sim_date()}] {fact.country}: {text}"
+            await self._bus.publish(
+                "system.log", level=fact.level, source=source, message=message
+            )
+        await self._bus.publish(
+            "world.event",
+            sim_day=self._sim_day,
+            country=fact.country,
+            message=text,
+            level=fact.level,
+        )
 
     def _ambient_event(self) -> dict:
         c = random.choice(list(self._world.countries.values()))
@@ -973,12 +1026,29 @@ class WorldKernel:
 
     async def _emit_event(self, ev: dict) -> None:
         message = f"[{self._sim_date()}] {ev['country']}: {ev['text']}"
-        await self._bus.publish(
-            "system.log", level=ev["level"], source=ev["source"], message=message
-        )
+        source = ev.get("source", "world")
+        actor = ev.get("actor", "")
+        level = ev.get("level", "info")
+
+        if actor in _AGENT_ACTORS or source in ("corporate", "government", "society"):
+            await self._bus.publish(
+                "world.agent.narrative",
+                sim_day=self._sim_day,
+                actor=actor or source,
+                country=ev["country"],
+                text=ev["text"],
+                level=level,
+                source=source,
+            )
+
+        # Routine central-bank / ambient lines stay out of the dashboard feed.
+        if level == "danger" or source in ("corporate", "government", "society", "regime"):
+            await self._bus.publish(
+                "system.log", level=level, source=source, message=message
+            )
         await self._bus.publish(
             "world.event", sim_day=self._sim_day, country=ev["country"],
-            message=ev["text"], level=ev["level"],
+            message=ev["text"], level=level,
         )
 
     # -- publication ----------------------------------------------------------

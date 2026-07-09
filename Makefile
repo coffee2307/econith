@@ -42,10 +42,12 @@ BASELINE    ?= momentum
 
 .PHONY: help setup-train setup-collect data-pipeline data-glue data-label \
         backtest-baseline train-all train-single model-deploy model-verify \
-        clean-features
+        clean-features social-setup social-dev dev setup
 
 help:
 	@echo "ECONITH factory control panel"
+	@echo "  dev                    one terminal: Docker stack + econith_social (npm run dev)"
+	@echo "  setup                  first-time setup (npm run setup)"
 	@echo "  setup-train            install training/runtime dependencies"
 	@echo "  setup-collect          install the lightweight collector dependencies"
 	@echo "  data-pipeline          PHASE A    run all 3 collectors concurrently (VPS 24/7)"
@@ -56,6 +58,21 @@ help:
 	@echo "  train-single JOB=trend PHASE C    train one model"
 	@echo "  model-deploy           PHASE E    activate trained checkpoints"
 	@echo "  model-verify           audit SHA256 checksums in the registry"
+	@echo "  social-setup           install econith_social Node + Python deps"
+	@echo "  social-dev             run econith_social Flask (:5001) + Vue (:3001)"
+
+dev:
+	npm run dev
+
+setup:
+	npm run setup
+
+# --- econith_social (first-party sidecar) ------------------------------------
+social-setup:
+	cd econith_social && npm run setup:all
+
+social-dev:
+	cd econith_social && npm run dev
 
 # --- setup -------------------------------------------------------------------
 setup-train:

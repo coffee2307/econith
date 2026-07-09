@@ -182,5 +182,24 @@
       "invariant_note": "SIMULATION-only synthetic LOB. Never binds live sockets; refuses to run in REALITY."
     }
   ],
+  "integrations": [
+    {
+      "name": "econith_social",
+      "pillar": "social",
+      "first_party": true,
+      "root": "econith_social",
+      "shim": "EconithSocialShim",
+      "consumed_by": [
+        "dashboard/app/social",
+        "api/endpoints/social.py"
+      ],
+      "emits_topics": [
+        "social.opinion.snapshot",
+        "social.simulation.verdict"
+      ],
+      "simulation_only": true,
+      "invariant_note": "First-party OASIS sidecar. Advisory topics only; never publishes order.intent."
+    }
+  ],
   "deferred": []
 }

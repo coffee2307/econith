@@ -171,7 +171,7 @@ export function LandingPage() {
           </p>
         </ScrollReveal>
 
-        <ScrollReveal delay={240} className="mt-10 flex w-full flex-col items-center justify-center gap-4 sm:flex-row">
+        <ScrollReveal delay={240} className="mt-10 flex w-full flex-col items-center justify-center gap-4 sm:flex-row sm:flex-wrap">
           <Link href="/quant" className="landing-btn-primary w-full sm:w-auto">
             <FontAwesomeIcon icon={faChartLine} className="h-4 w-4" />
             {t("landing.enterQuant")}

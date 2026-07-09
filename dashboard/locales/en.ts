@@ -42,10 +42,20 @@ export const en: Dictionary = {
     overview: "Overview",
     quant: "ECONITH Quant",
     world: "ECONITH World",
-    worldSubtitle: "Macro-Geopolitical Simulation Engine",
+    worldSubtitle: "Macro-geopolitical simulation with multi-agent exchange",
+    social: "ECONITH Social",
+    socialSubtitle: "Multi-agent social opinion simulation (OASIS + GraphRAG)",
+  },
+  social: {
+    subtitle: "Upload documents, build knowledge graphs, and run parallel social simulations",
+    statusReady: "Sidecar online",
+    statusLoading: "Checking sidecar…",
+    statusOffline: "Sidecar offline",
+    offlineHint:
+      "Start the econith_social stack (Flask :5001 + Vue :3001), e.g. make social-dev",
   },
   footer: {
-    tagline: "ECONITH :: Phase 1 — Quant + World",
+    tagline: "ECONITH :: Phase 1 — Quant + World + Social",
     sentinel: "Sentinel-guarded",
     internal: "internal build",
   },
@@ -62,6 +72,7 @@ export const en: Dictionary = {
       "ECONITH fuses an AI Quant Research Platform with a Financial World Simulator on one decoupled core engine — stream markets, train multi-agent strategies, and steer an AI-driven simulated planet in real time.",
     enterQuant: "Enter ECONITH Quant",
     enterWorld: "Enter ECONITH World",
+    enterSocial: "Enter ECONITH Social",
     platformEyebrow: "Platform Overview",
     platformTitle: "Two products, one core engine.",
     platformDesc:
@@ -157,7 +168,7 @@ export const en: Dictionary = {
     flashCrash: "Flash crash",
     latencySpike: "Latency +",
     rearmSentinel: "Re-arm",
-    eventLogTitle: "System Event Logs",
+    eventLogTitle: "Quant execution log",
     levels: {
       all: "all",
       info: "info",
@@ -294,6 +305,7 @@ export const en: Dictionary = {
       title: "Data inflow",
       online: "{ready}/{total} online",
       awaitingMacro: "Awaiting macro inflow…",
+      awaitingTape: "Awaiting market tape…",
       providerHealth: "Provider health",
     },
     enums: {
@@ -345,6 +357,17 @@ export const en: Dictionary = {
     draftTitle: "Pending change — not applied yet",
     apply: "Apply",
     discardDrafts: "Discard changes",
+    rightPanelEvents: "Events",
+    rightPanelAgents: "Agents",
+    agentExchangeTitle: "Agent exchange",
+    agentExchangeSubtitle:
+      "Corporate / Government / Societal AI — at most one statement / 25s from world kernel",
+    agentExchangeRefresh: "Refresh debate",
+    agentExchangeLoading: "Synthesizing agent positions…",
+    agentExchangeEmpty:
+      "Waiting for Corporate / Government / Societal AI moves from the live world kernel…",
+    agentExchangeLive: "Live sim",
+    agentExchangeWaiting: "Waiting",
   },
   macro: {
     tabs: tabLabels as Dictionary["macro"]["tabs"],
@@ -362,6 +385,11 @@ export const en: Dictionary = {
       "{source} {action} tariffs on {target} to {rate}% — {target} exports {exportAction} {exportIdx} idx, {source} CPI {cpiSign}{cpiDelta}%.",
     supplyDiversion:
       "{country}'s manufacturing index rose {pts} pts as supply chains divert following the {source}-{target} tariff escalation.",
+    journalist: "{text}",
+    geopoliticsAlert: "{text}",
+    emergency: "EMERGENCY: {text}",
+    macroPulse:
+      "{country}: GDP growth {growth}%, inflation {inflation}% — macro matrix update.",
   },
   simSources: {
     policy: "policy",
@@ -369,6 +397,9 @@ export const en: Dictionary = {
     contagion: "contagion",
     corporate: "corporate",
     society: "society",
+    journalist: "world wire",
+    world: "world",
+    sentinel: "sentinel",
   },
   simDirs: { rose: "rose", eased: "eased" },
   simTariff: {

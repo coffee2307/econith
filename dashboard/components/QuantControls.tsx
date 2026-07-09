@@ -2,12 +2,6 @@
 
 /**
  * ECONITH Quant :: Operator console with dual-mode gating.
- *
- * Renders the sovereign operating-mode switch (REALITY / SIMULATION) and the
- * Sentinel stress controls. Anomaly-injection triggers (Flash Crash, Latency
- * Shock, Volatility Spike) are HARD-GATED: they are hidden/disabled whenever the
- * platform is in REALITY mode, so the live trading brain can never be perturbed
- * by synthetic shocks. The backend enforces the same rule; this is the UI layer.
  */
 import { useEffect, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
@@ -22,6 +16,7 @@ import {
 } from "@fortawesome/free-solid-svg-icons";
 import { useMetrics } from "@/components/MetricsProvider";
 import { useLocale } from "@/contexts/LocaleContext";
+import { Panel } from "@/components/quant/ui/Panel";
 import {
   sentinelInject,
   sentinelReset,
@@ -83,7 +78,6 @@ export function QuantControls() {
   const [switching, setSwitching] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
-  // Reconcile with authoritative backend state once the switch settles.
   useEffect(() => {
     if (serverMode && !switching) setMode(serverMode);
   }, [serverMode, switching]);
@@ -94,7 +88,7 @@ export function QuantControls() {
   const toggleMode = async () => {
     const next: QuantModeName = isReality ? "SIMULATION" : "REALITY";
     setSwitching(true);
-    setMode(next); // optimistic
+    setMode(next);
     const res = await setQuantMode(next);
     if (res?.mode) setMode(res.mode);
     setSwitching(false);
@@ -109,13 +103,12 @@ export function QuantControls() {
     trigger(() => sentinelInject(kind), kind);
 
   return (
-    <section className="panel flex h-full min-h-0 flex-col p-3 sm:p-4">
-      <header className="mb-2 flex shrink-0 items-center gap-2">
-        <FontAwesomeIcon icon={faShieldHalved} className="h-4 w-4 text-accent" />
-        <h2 className="text-sm font-semibold">{c.title}</h2>
-      </header>
-
-      {/* Mode switch */}
+    <Panel
+      title={c.title}
+      icon={faShieldHalved}
+      zone="risk"
+      bodyClassName="flex flex-col gap-3"
+    >
       <div className="rounded-lg border border-line bg-elevated p-3">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
@@ -153,8 +146,7 @@ export function QuantControls() {
         </p>
       </div>
 
-      {/* Anomaly injection — gated by mode */}
-      <div className="mt-3 min-h-0 flex-1">
+      <div>
         <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">
           {c.injectTitle}
         </p>
@@ -200,18 +192,17 @@ export function QuantControls() {
         )}
       </div>
 
-      {/* Re-arm is always available (governance reset, not an anomaly) */}
-      <div className="mt-3 shrink-0 border-t border-line pt-3">
+      <div className="border-t border-line pt-3">
         <button
           type="button"
           onClick={() => trigger(sentinelReset, "reset")}
           disabled={busy === "reset"}
-          className="quant-ctrl-btn border-line bg-elevated text-ink hover:bg-base"
+          className="quant-ctrl-btn w-full border-line bg-elevated text-ink hover:bg-base"
         >
           <FontAwesomeIcon icon={faRotateRight} className="h-3 w-3" />
           {c.rearm}
         </button>
       </div>
-    </section>
+    </Panel>
   );
 }

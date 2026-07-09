@@ -93,10 +93,20 @@ export const vi: Dictionary = {
     overview: "Tổng quan",
     quant: "ECONITH Quant",
     world: "ECONITH World",
-    worldSubtitle: "Công cụ mô phỏng kinh tế — địa chính trị vĩ mô",
+    worldSubtitle: "Mô phỏng vĩ mô — địa chính trị với trao đổi đa tác tử",
+    social: "ECONITH Social",
+    socialSubtitle: "Mô phỏng dư luận xã hội đa tác tử (OASIS + GraphRAG)",
+  },
+  social: {
+    subtitle: "Tải tài liệu, dựng đồ thị tri thức và chạy mô phỏng song song",
+    statusReady: "Sidecar sẵn sàng",
+    statusLoading: "Đang kiểm tra sidecar…",
+    statusOffline: "Sidecar ngoại tuyến",
+    offlineHint:
+      "Khởi động econith_social (Flask :5001 + Vue :3001), ví dụ: make social-dev",
   },
   footer: {
-    tagline: "ECONITH :: Giai đoạn 1 — Quant + World",
+    tagline: "ECONITH :: Giai đoạn 1 — Quant + World + Social",
     sentinel: "Bảo vệ bởi Sentinel",
     internal: "bản nội bộ",
   },
@@ -114,6 +124,7 @@ export const vi: Dictionary = {
       "ECONITH kết hợp Nền tảng Nghiên cứu Định lượng AI với Mô phỏng Thế giới Tài chính trên một lõi tách biệt — truyền thị trường, huấn luyện chiến lược đa tác tử và điều khiển hành tinh mô phỏng do AI dẫn dắt theo thời gian thực.",
     enterQuant: "Vào ECONITH Quant",
     enterWorld: "Vào ECONITH World",
+    enterSocial: "Vào ECONITH Social",
     platformEyebrow: "Tổng quan nền tảng",
     platformTitle: "Hai sản phẩm, một lõi chung.",
     platformDesc:
@@ -209,7 +220,7 @@ export const vi: Dictionary = {
     flashCrash: "Sập flash",
     latencySpike: "Độ trễ +",
     rearmSentinel: "Reset",
-    eventLogTitle: "Nhật ký sự kiện hệ thống",
+    eventLogTitle: "Nhật ký thực thi Quant",
     levels: {
       all: "tất cả",
       info: "thông tin",
@@ -346,6 +357,7 @@ export const vi: Dictionary = {
       title: "Luồng dữ liệu",
       online: "{ready}/{total} hoạt động",
       awaitingMacro: "Đang chờ luồng vĩ mô…",
+      awaitingTape: "Đang chờ dữ liệu thị trường…",
       providerHealth: "Sức khỏe provider",
     },
     enums: {
@@ -389,7 +401,7 @@ export const vi: Dictionary = {
       "kéo để xoay · di chuột để highlight · nhấp quốc gia để xem",
     inspectFeatures: "Xem 111 chỉ số",
     imposeTariffOn: "Áp thuế nhập khẩu lên",
-    referenceOnly: "Reference data",
+    referenceOnly: "Dữ liệu tham chiếu",
     tariffRate: "Mức thuế",
     imposeTariff: "Áp thuế",
     fullMacroVector: "Vector vĩ mô đầy đủ",
@@ -399,6 +411,17 @@ export const vi: Dictionary = {
     draftTitle: "Thay đổi chờ áp dụng",
     apply: "Áp dụng",
     discardDrafts: "Hủy thay đổi",
+    rightPanelEvents: "Sự kiện",
+    rightPanelAgents: "Tác tử",
+    agentExchangeTitle: "Trao đổi tác tử",
+    agentExchangeSubtitle:
+      "Corporate / Government / Societal AI — tối đa 1 phát biểu / 25s từ world kernel",
+    agentExchangeRefresh: "Làm mới tranh luận",
+    agentExchangeLoading: "Đang tổng hợp quan điểm tác tử…",
+    agentExchangeEmpty:
+      "Đang chờ Corporate / Government / Societal AI phản ứng từ world kernel…",
+    agentExchangeLive: "Sim trực tiếp",
+    agentExchangeWaiting: "Đang chờ",
   },
   macro: {
     tabs: tabLabels as Dictionary["macro"]["tabs"],
@@ -416,6 +439,11 @@ export const vi: Dictionary = {
       "{source} {action} thuế lên {target} lên {rate}% — xuất khẩu {target} {exportAction} {exportIdx} điểm, CPI {source} {cpiSign}{cpiDelta}%.",
     supplyDiversion:
       "Chỉ số sản xuất của {country} tăng {pts} điểm khi chuỗi cung ứng chuyển hướng sau leo thang thuế {source}-{target}.",
+    journalist: "{text}",
+    geopoliticsAlert: "{text}",
+    emergency: "KHẨN CẤP: {text}",
+    macroPulse:
+      "{country}: tăng trưởng GDP {growth}%, lạm phát {inflation}% — cập nhật ma trận vĩ mô.",
   },
   simSources: {
     policy: "chính sách",
@@ -423,6 +451,9 @@ export const vi: Dictionary = {
     contagion: "lan truyền",
     corporate: "doanh nghiệp",
     society: "xã hội",
+    journalist: "tin thế giới",
+    world: "thế giới",
+    sentinel: "cảnh báo",
   },
   simDirs: { rose: "tăng", eased: "giảm" },
   simTariff: {

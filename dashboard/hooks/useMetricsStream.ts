@@ -168,6 +168,16 @@ export interface LogEvent {
   message: string;
 }
 
+export interface WorldAgentEvent {
+  ts: string;
+  sim_day?: number;
+  actor: string;
+  country: string;
+  text: string;
+  level: string;
+  source: string;
+}
+
 export type QuantModeName = "REALITY" | "SIMULATION";
 
 export interface QuantModeState {
@@ -188,6 +198,8 @@ export interface MetricsSnapshot {
   world: WorldState;
   sentinel: SentinelState;
   events: LogEvent[];
+  world_events?: LogEvent[];
+  world_agents?: WorldAgentEvent[];
   quant_mode?: QuantModeState;
 }
 

@@ -23,6 +23,7 @@ const config: Config = {
         faint: "var(--color-faint)",
         accent: "#3b82f6",
         world: "#10b981",
+        social: "#a855f7",
         warn: "#f59e0b",
         danger: "#ef4444",
         ok: "#22c55e",

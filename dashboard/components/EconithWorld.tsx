@@ -23,7 +23,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { useLocale } from "@/contexts/LocaleContext";
 import { useMetrics } from "@/components/MetricsProvider";
 import { useWorldSim } from "@/contexts/WorldSimContext";
-import { EventLogQueue } from "@/components/EventLogQueue";
+import { WorldRightPanel } from "@/components/world/WorldRightPanel";
 import { pauseTime, resumeTime, setTimeSpeed } from "@/lib/api";
 import type { CountryMacro } from "@/hooks/useMetricsStream";
 import {
@@ -668,8 +668,8 @@ export default function EconithWorld() {
           }
         />
 
-        {/* RIGHT EVENT LOG (throttled LogQueue) */}
-        <EventLogQueue events={sim.events} pendingCount={sim.pendingCount} />
+        {/* RIGHT PANEL — events + agent exchange */}
+        <WorldRightPanel events={sim.events} pendingCount={sim.pendingCount} />
       </div>
 
       {/* ================= DOWNBAR ================= */}

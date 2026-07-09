@@ -86,3 +86,26 @@ async function get<T = unknown>(path: string): Promise<T | null> {
 
 export const getWorldState = () => get("/world/state");
 export const getCountry = (code: string) => get(`/world/country/${code}`);
+export const getJournalistNews = (limit = 20) =>
+  get<{ news: Array<{ ts: string; category: string; level: string; message: string }> }>(
+    `/journalist/news?limit=${limit}`,
+  );
+
+export interface AgentExchangeLine {
+  agent_id: string;
+  country: string;
+  role: string;
+  text: string;
+}
+
+export const postAgentExchange = (body: {
+  locale: string;
+  topic?: string;
+  countries: Record<string, unknown>;
+}) => post<{ lines: AgentExchangeLine[]; source: string; locale: string }>(
+  "/world/agent-exchange",
+  body,
+);
+
+export const syncLocale = (locale: string) =>
+  post<{ locale: string }>("/locale", { locale });

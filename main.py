@@ -35,13 +35,16 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from api.endpoints.social import build_social_router
 from api.endpoints.vendors import build_vendors_router
 from ai.inference.predictor import Predictor
-from ai.journalist import JournalistLLM
+from ai.journalist import JournalistLLM, OpenAICompatibleLLMBackend
+from ai.world_agents import synthesize_agent_exchange
 from ai.meta import CoreAIOrchestrator
 from ai.simulator_engine.llm_scenario import LLMScenarioEngine
 from ai.simulator_engine.sovereign_graph import SovereignWorldGraph, default_world
 from ai.simulator_engine.world_kernel import WorldKernel
+from bridges.social_bridge import SocialServiceBridge
 from bridges.quant_bridge import QuantExecutionBridge
 from bridges.vendor_shims import build_default_registry
 from bridges.world_bridge import WorldBridge
@@ -51,6 +54,7 @@ from config.settings import TIME_SPEED_MULTIPLIERS, get_settings
 from core.api import install_api_security
 from core.cockpit import CockpitTelemetryHub, build_cockpit_router
 from core.engine import get_engine
+from core.locale_prefs import dashboard_locale, set_dashboard_locale
 from core.ingestion import MacroIngestionHub, MacroIngestionSettings
 from core.mode import QuantMode, get_mode_manager
 from core.telemetry import MetricsHub
@@ -95,6 +99,8 @@ async def lifespan(app: FastAPI):
     # logs READY/MISSING/ERROR without activating vendor business logic.
     vendor_registry = build_default_registry(engine.bus)
     vendor_status = await vendor_registry.initialize()
+    vendor_registry.register_all()
+    social_bridge = SocialServiceBridge(settings.social_api_url)
 
     # =====================================================================
     #  SUBSCRIBERS FIRST (registered before producers so no frame is missed)
@@ -127,7 +133,26 @@ async def lifespan(app: FastAPI):
     )
     cockpit_hub.register()
 
-    journalist = JournalistLLM(engine.bus)
+    journalist_backend = None
+    if env.has_llm_credentials:
+        try:
+            from core.llm_pool import LLMKeyPool
+
+            llm_pool = LLMKeyPool.from_raw(env.llm_api_key)
+            journalist_backend = OpenAICompatibleLLMBackend(
+                key_pool=llm_pool,
+                base_url=env.llm_base_url,
+                model=env.llm_model_name,
+            )
+            logger.info(
+                "journalist backend: external LLM enabled (%d key(s), %s @ %s)",
+                len(llm_pool.keys),
+                env.llm_model_name,
+                env.llm_base_url,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("failed to initialize journalist external LLM backend")
+    journalist = JournalistLLM(engine.bus, backend=journalist_backend)
     journalist.register()
 
     # Core AI orchestrator: fuses HF micro + LF macro context and broadcasts
@@ -189,6 +214,7 @@ async def lifespan(app: FastAPI):
     # Mount the cockpit router (GET /cockpit/snapshot + WS /stream/cockpit).
     app.include_router(build_cockpit_router(cockpit_hub, settings.api_prefix))
     app.include_router(build_vendors_router(api_prefix=settings.api_prefix, settings=settings))
+    app.include_router(build_social_router(api_prefix=settings.api_prefix, settings=settings))
 
     components.update(
         env=env,
@@ -215,6 +241,7 @@ async def lifespan(app: FastAPI):
         alerts=alerts,
         vendor_registry=vendor_registry,
         vendor_status=vendor_status,
+        social_bridge=social_bridge,
     )
     app.state.components = components
     logger.info(
@@ -284,6 +311,16 @@ class TariffRequest(BaseModel):
     source: str
     target: str
     value: float
+
+
+class AgentExchangeRequest(BaseModel):
+    locale: str = "en"
+    topic: str | None = None
+    countries: dict[str, dict] = {}
+
+
+class LocaleRequest(BaseModel):
+    locale: str = "en"
 
 
 class ModeRequest(BaseModel):
@@ -452,6 +489,12 @@ async def get_state() -> dict:
     return {"state": _engine().state.snapshot()}
 
 
+@app.post(f"{settings.api_prefix}/locale")
+async def set_locale(req: LocaleRequest) -> dict:
+    set_dashboard_locale(req.locale)
+    return {"locale": dashboard_locale()}
+
+
 # --- ECONITH World simulator (legacy kernel + sovereign graph bridge) --------
 @app.post(f"{settings.api_prefix}/world/scenario")
 async def world_scenario(req: ScenarioRequest) -> dict:
@@ -493,6 +536,23 @@ async def world_sovereign() -> dict:
 @app.get(f"{settings.api_prefix}/world/chronology")
 async def world_chronology() -> dict:
     return _world_bridge().chronology()
+
+
+@app.post(f"{settings.api_prefix}/world/agent-exchange")
+async def world_agent_exchange(req: AgentExchangeRequest) -> dict:
+    """Multi-agent macro debate for the World pillar (localized en/vi)."""
+    env = get_environment()
+    countries = req.countries
+    if not countries:
+        countries = _world_kernel().state_dict().get("countries", {}) or {}
+    return await synthesize_agent_exchange(
+        countries,
+        locale=req.locale,
+        topic=req.topic,
+        api_key=env.llm_api_key,
+        base_url=env.llm_base_url,
+        model=env.llm_model_name,
+    )
 
 
 # --- CORE macro ingestion ----------------------------------------------------
