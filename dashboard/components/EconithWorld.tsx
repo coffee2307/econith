@@ -50,8 +50,26 @@ import { HUB_CODES, dependenciesFor } from "@/constants/worldGraph";
 import { isSimNation } from "@/constants/simNations";
 
 const GLOBE_THEME = {
-  dark: { bg: "#0a0a0b", material: "#1e3a5f", stroke: "#64748b", labelFg: "#ededef", labelBg: "#16161a", labelBorder: "#26262b" },
-  light: { bg: "#f8fafc", material: "#bae6fd", stroke: "#334155", labelFg: "#0f172a", labelBg: "#ffffff", labelBorder: "#e2e8f0" },
+  dark: {
+    bg: "#0a0a0b",
+    material: "#1e3a5f",
+    stroke: "#64748b",
+    labelFg: "#ededef",
+    labelBg: "#16161a",
+    labelBorder: "#26262b",
+    selectCap: "#d1d5db",
+    hoverCap: "#ffffff",
+  },
+  light: {
+    bg: "#f8fafc",
+    material: "#bae6fd",
+    stroke: "#334155",
+    labelFg: "#0f172a",
+    labelBg: "#ffffff",
+    labelBorder: "#e2e8f0",
+    selectCap: "#e2e8f0",
+    hoverCap: "#ffffff",
+  },
 } as const;
 
 const GEOJSON_URL =
@@ -329,8 +347,8 @@ export default function EconithWorld() {
   const capColor = (d: object): string => {
     const f = d as GeoFeature;
     const code = featCode(f);
-    if (code && code === hovered) return "#ffffff";
-    if (code && code === activeCode) return "#10b981";
+    if (code && code === hovered) return globePalette.hoverCap;
+    if (code && code === activeCode) return globePalette.selectCap;
     return continentCap(featContinent(f));
   };
   const sideColor = (d: object): string => continentSide(featContinent(d as GeoFeature));
