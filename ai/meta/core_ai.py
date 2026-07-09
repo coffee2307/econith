@@ -182,6 +182,19 @@ class CoreAIOrchestrator:
         self._running = False
         self._task: Optional[asyncio.Task[None]] = None
 
+        # Native consensus + alpha kernels (TradingAgents / ai-hedge-fund
+        # internalized under econith.quant.*). Advisory only: they nudge the
+        # directive and publish telemetry; the Sentinel gate stays sovereign.
+        self._consensus = None
+        self._alpha = None
+        try:
+            from econith.quant.alpha import EconithAlphaKernel
+            from econith.quant.consensus import EconithConsensusKernel
+            self._consensus = EconithConsensusKernel(bus)
+            self._alpha = EconithAlphaKernel(bus)
+        except Exception:  # noqa: BLE001 - consensus is strictly optional
+            logger.debug("native consensus/alpha unavailable; native derivation only")
+
     # -- wiring ---------------------------------------------------------------
     def register(self) -> None:
         # HIGH-FREQUENCY micro plane.
@@ -193,6 +206,8 @@ class CoreAIOrchestrator:
         self._bus.subscribe("core.macro.context", self._on_macro)
         # WORLD coupling (only consumed while in SIMULATION).
         self._bus.subscribe("world.micro_impact", self._on_world_impact)
+        if self._consensus is not None:
+            self._consensus.register()
         logger.info("core AI orchestrator registered (HF micro + LF macro planes)")
 
     async def start(self) -> None:
@@ -272,6 +287,7 @@ class CoreAIOrchestrator:
 
     async def _emit_directives(self) -> None:
         quant = self._derive_quant()
+        quant = await self._apply_consensus(quant)
         risk = self._derive_risk()
         await self._bus.publish("meta.quant.directive", **quant.payload())
         await self._bus.publish("meta.risk.directive", **risk.payload())
@@ -307,6 +323,38 @@ class CoreAIOrchestrator:
             regime_hint=self._ctx.macro_regime,
             rationale=rationale,
         )
+
+    async def _apply_consensus(self, quant: QuantDirective) -> QuantDirective:
+        """Blend the native consensus + alpha into the quant directive.
+
+        Advisory only: it nudges the directional bias toward the multi-agent
+        verdict (weighted by confidence) and publishes an alpha candidate for
+        telemetry. It never overrides the Sentinel gate downstream.
+        """
+        snap = self._ctx.snapshot()
+        # Native alpha candidate (advisory telemetry).
+        if self._alpha is not None:
+            try:
+                candidate = self._alpha.predict(snap, self._ctx.macro_regime)
+                if candidate is not None:
+                    await self._alpha.publish(candidate)
+            except Exception:  # noqa: BLE001
+                logger.debug("native alpha candidate failed")
+
+        if self._consensus is None:
+            return quant
+        try:
+            verdict = await self._consensus.resolve(snap)
+        except Exception:  # noqa: BLE001 - a consensus fault must not kill the loop
+            logger.debug("native consensus resolution failed")
+            return quant
+        if not verdict.has_signal:
+            return quant
+        weight = 0.4 * max(0.0, min(1.0, verdict.confidence))
+        blended = (1.0 - weight) * quant.directional_bias + weight * verdict.bias
+        quant.directional_bias = max(-1.0, min(1.0, blended))
+        quant.rationale = f"{quant.rationale} | consensus({','.join(verdict.sources)})"
+        return quant
 
     def _derive_risk(self) -> RiskDirective:
         """Tighten Sentinel thresholds as turbulence + world shock rise."""

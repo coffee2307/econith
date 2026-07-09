@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ECONITH vendor manifest",
+  "type": "object",
+  "required": ["policy", "vendors"],
+  "properties": {
+    "policy": { "type": "object" },
+    "vendors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "pillar", "repo", "commit", "sparse_paths", "shim"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+          "pillar": { "type": "string", "enum": ["core", "quant", "world"] },
+          "repo": { "type": "string", "format": "uri" },
+          "commit": { "type": "string" },
+          "license": { "type": "string" },
+          "sparse_paths": { "type": "array", "items": { "type": "string" } },
+          "shim": { "type": "string" },
+          "emits_topics": { "type": "array", "items": { "type": "string" } },
+          "domain": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "deferred": { "type": "array", "items": { "type": "string" } }
+  }
+}

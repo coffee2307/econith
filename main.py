@@ -35,6 +35,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from api.endpoints.vendors import build_vendors_router
 from ai.inference.predictor import Predictor
 from ai.journalist import JournalistLLM
 from ai.meta import CoreAIOrchestrator
@@ -42,6 +43,7 @@ from ai.simulator_engine.llm_scenario import LLMScenarioEngine
 from ai.simulator_engine.sovereign_graph import SovereignWorldGraph, default_world
 from ai.simulator_engine.world_kernel import WorldKernel
 from bridges.quant_bridge import QuantExecutionBridge
+from bridges.vendor_shims import build_default_registry
 from bridges.world_bridge import WorldBridge
 from config.database import dispose_database, init_database, is_fallback
 from config.environment import get_environment
@@ -89,6 +91,10 @@ async def lifespan(app: FastAPI):
     await engine.startup()  # starts EventBus + TimeEngine + TickPipeline
 
     register_runtime_alerts(engine.bus, alerts)
+    # Monitoring-only vendor registry: checks on-disk manifest/SHA markers and
+    # logs READY/MISSING/ERROR without activating vendor business logic.
+    vendor_registry = build_default_registry(engine.bus)
+    vendor_status = await vendor_registry.initialize()
 
     # =====================================================================
     #  SUBSCRIBERS FIRST (registered before producers so no frame is missed)
@@ -182,6 +188,7 @@ async def lifespan(app: FastAPI):
 
     # Mount the cockpit router (GET /cockpit/snapshot + WS /stream/cockpit).
     app.include_router(build_cockpit_router(cockpit_hub, settings.api_prefix))
+    app.include_router(build_vendors_router(api_prefix=settings.api_prefix, settings=settings))
 
     components.update(
         env=env,
@@ -206,6 +213,8 @@ async def lifespan(app: FastAPI):
         streamer=streamer,
         alt_provider=alt_provider,
         alerts=alerts,
+        vendor_registry=vendor_registry,
+        vendor_status=vendor_status,
     )
     app.state.components = components
     logger.info(
@@ -281,6 +290,10 @@ class ModeRequest(BaseModel):
     mode: Literal["REALITY", "SIMULATION"]
 
 
+class RoutingProfileRequest(BaseModel):
+    profile: str
+
+
 # --- component accessors -----------------------------------------------------
 def _engine():
     return components.get("engine") or get_engine()
@@ -322,8 +335,23 @@ def _journalist() -> JournalistLLM:
     return components["journalist"]  # type: ignore[return-value]
 
 
+def _ai_bridge() -> AIBridge:
+    return components["ai_bridge"]  # type: ignore[return-value]
+
+
 def _macro_hub() -> MacroIngestionHub:
     return components["macro_hub"]  # type: ignore[return-value]
+
+
+# --- Quant native routing (NoFx kernelized) ----------------------------------
+@app.get(f"{settings.api_prefix}/quant/routing/status")
+async def quant_routing_status() -> dict:
+    return _ai_bridge().router_status()
+
+
+@app.post(f"{settings.api_prefix}/quant/routing/profile")
+async def quant_routing_profile(req: RoutingProfileRequest) -> dict:
+    return _ai_bridge().set_router_profile(req.profile)
 
 
 # --- health / introspection --------------------------------------------------

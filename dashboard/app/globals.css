@@ -8,29 +8,47 @@
 :root {
   --font-sans: "Inter", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Sovereign Trading OS — directional + zone accents (theme-agnostic base) */
+  --wr-long: #2dd4a7;
+  --wr-short: #f6465d;
+  --wr-flat: #8b8b96;
+  --wr-zone-alpha: #7c93ff;
+  --wr-zone-exec: #34d399;
+  --wr-zone-risk: #f5a623;
 }
 
-/* Dark theme (default) */
+/* Dark theme (default) — War Room: midnight / charcoal */
 .dark {
-  --color-base: #0a0a0b;
-  --color-surface: #101012;
-  --color-elevated: #16161a;
-  --color-line: #26262b;
-  --color-ink: #ededef;
-  --color-muted: #9a9aa3;
-  --color-faint: #5c5c66;
+  --color-base: #07070a;
+  --color-surface: #0d0e12;
+  --color-elevated: #14151b;
+  --color-line: #23252e;
+  --color-ink: #f2f3f7;
+  --color-muted: #949aa9;
+  --color-faint: #565c6b;
+  --wr-long: #2dd4a7;
+  --wr-short: #f6465d;
+  --wr-flat: #7a8091;
+  --wr-grid-line: rgba(124, 147, 255, 0.045);
+  --wr-glow: rgba(124, 147, 255, 0.10);
   color-scheme: dark;
 }
 
 /* Light theme */
 .light {
-  --color-base: #f8fafc;
+  --color-base: #f6f8fb;
   --color-surface: #ffffff;
-  --color-elevated: #f1f5f9;
-  --color-line: #e2e8f0;
-  --color-ink: #0f172a;
-  --color-muted: #64748b;
-  --color-faint: #94a3b8;
+  --color-elevated: #eef2f7;
+  --color-line: #dde3ec;
+  --color-ink: #0d1424;
+  --color-muted: #5a6474;
+  --color-faint: #97a1b2;
+  --wr-long: #0f9d75;
+  --wr-short: #d5253c;
+  --wr-flat: #7a8091;
+  --wr-grid-line: rgba(59, 90, 200, 0.05);
+  --wr-glow: rgba(59, 90, 200, 0.08);
   color-scheme: light;
 }
 
@@ -196,6 +214,106 @@
   .quant-terminal-scroll {
     min-height: 0;
     flex: 1 1 auto;
+  }
+
+  /* ══ SOVEREIGN TRADING OS — War Room design system ═════════════════════ */
+
+  /* Root surface with faint tactical grid + top glow */
+  .wr-room {
+    @apply relative min-h-0;
+    background-color: var(--color-base);
+    background-image:
+      radial-gradient(120% 80% at 50% -10%, var(--wr-glow), transparent 55%),
+      linear-gradient(var(--wr-grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--wr-grid-line) 1px, transparent 1px);
+    background-size: 100% 100%, 30px 30px, 30px 30px;
+  }
+
+  /* Panel — crisp, flat, institutional. Optional zone accent rail on top. */
+  .wr-panel {
+    @apply relative flex min-h-0 flex-col rounded-lg border border-line;
+    background-color: color-mix(in srgb, var(--color-surface) 88%, transparent);
+    box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.02);
+  }
+  .wr-panel-rail::before {
+    content: "";
+    @apply pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-lg;
+    background: linear-gradient(90deg, transparent, var(--wr-rail, transparent), transparent);
+    opacity: 0.9;
+  }
+  .wr-rail-alpha { --wr-rail: var(--wr-zone-alpha); }
+  .wr-rail-exec { --wr-rail: var(--wr-zone-exec); }
+  .wr-rail-risk { --wr-rail: var(--wr-zone-risk); }
+
+  .wr-panel-head {
+    @apply flex flex-none items-center justify-between gap-2 border-b border-line px-3 py-2;
+  }
+  .wr-panel-title {
+    @apply flex items-center gap-2 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-ink;
+  }
+  .wr-panel-eyebrow {
+    @apply font-mono text-[9px] font-semibold uppercase tracking-[0.18em] text-faint;
+  }
+  .wr-panel-body {
+    @apply min-h-0 p-3;
+  }
+  .wr-panel-body-fill {
+    @apply min-h-0 flex-1;
+  }
+
+  /* Micro label + tabular readout */
+  .wr-label {
+    @apply text-[9px] font-semibold uppercase tracking-[0.16em] text-faint;
+  }
+  .wr-value {
+    @apply font-mono font-semibold tabular-nums tracking-tight text-ink;
+  }
+
+  /* Status chip */
+  .wr-chip {
+    @apply inline-flex items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-wide;
+    border-color: color-mix(in srgb, var(--wr-chip-color, var(--color-faint)) 40%, transparent);
+    background-color: color-mix(in srgb, var(--wr-chip-color, var(--color-faint)) 12%, transparent);
+    color: var(--wr-chip-color, var(--color-muted));
+  }
+  .wr-chip-dot {
+    @apply h-1.5 w-1.5 rounded-full;
+    background-color: currentColor;
+    box-shadow: 0 0 6px 1px currentColor;
+  }
+
+  /* Live status dot pulse */
+  .wr-pulse { animation: wr-pulse 1.8s ease-in-out infinite; }
+
+  /* Bipolar sentiment / bias bar (centered at 0) */
+  .wr-bias-track {
+    @apply relative h-1.5 w-full overflow-hidden rounded-full;
+    background-color: color-mix(in srgb, var(--color-faint) 22%, transparent);
+  }
+  .wr-bias-mid {
+    @apply absolute top-0 h-full w-px;
+    left: 50%;
+    background-color: color-mix(in srgb, var(--color-ink) 35%, transparent);
+  }
+  .wr-bias-fill {
+    @apply absolute top-0 h-full rounded-full;
+  }
+
+  /* Value flash on update */
+  .wr-flash-on { animation: wr-flash 700ms ease-out; }
+
+  /* Scanline sweep highlight for "streaming" panels */
+  .wr-stream::after {
+    content: "";
+    @apply pointer-events-none absolute inset-y-0 left-0 w-1/4;
+    background: linear-gradient(90deg, transparent, rgba(124, 147, 255, 0.06), transparent);
+    animation: wr-sweep 2.4s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .wr-pulse,
+    .wr-flash-on,
+    .wr-stream::after { animation: none !important; }
   }
 
   /* ── Landing page ─────────────────────────────────────────────────────── */
@@ -447,6 +565,11 @@
       @apply translate-x-0 translate-y-0 opacity-100;
     }
   }
+}
+
+@keyframes wr-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.82); }
 }
 
 @keyframes landing-float {

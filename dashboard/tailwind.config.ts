@@ -26,6 +26,14 @@ const config: Config = {
         warn: "#f59e0b",
         danger: "#ef4444",
         ok: "#22c55e",
+        // Sovereign Trading OS — directional signal semantics
+        long: "var(--wr-long)",
+        short: "var(--wr-short)",
+        flat: "var(--wr-flat)",
+        // War-room accent rails per hierarchy zone
+        "zone-alpha": "var(--wr-zone-alpha)",
+        "zone-exec": "var(--wr-zone-exec)",
+        "zone-risk": "var(--wr-zone-risk)",
       },
       fontFamily: {
         sans: ["var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
@@ -33,6 +41,24 @@ const config: Config = {
       },
       borderRadius: {
         xl: "0.625rem",
+      },
+      keyframes: {
+        "wr-flash": {
+          "0%": { backgroundColor: "rgba(59,130,246,0.16)" },
+          "100%": { backgroundColor: "transparent" },
+        },
+        "wr-sweep": {
+          "0%": { transform: "translateX(-120%)" },
+          "100%": { transform: "translateX(320%)" },
+        },
+        "wr-dash": {
+          to: { strokeDashoffset: "-16" },
+        },
+      },
+      animation: {
+        "wr-flash": "wr-flash 700ms ease-out",
+        "wr-sweep": "wr-sweep 2.4s ease-in-out infinite",
+        "wr-dash": "wr-dash 0.9s linear infinite",
       },
     },
   },

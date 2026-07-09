@@ -48,7 +48,12 @@ export function EventLogTerminal({
 
   if (dock) {
     return (
-      <section className="quant-terminal-dock flex min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-surface">
+      <section
+        className={[
+          "quant-terminal-dock flex min-h-0 flex-col overflow-hidden rounded-lg border border-line bg-surface",
+          fill ? "h-full" : "",
+        ].join(" ")}
+      >
         <div className="flex flex-none flex-wrap items-center gap-2 border-b border-line px-3 py-2 sm:gap-3 sm:px-4">
           <div className="flex items-center gap-2">
             <FontAwesomeIcon icon={faTerminal} className="h-3.5 w-3.5 text-accent" />

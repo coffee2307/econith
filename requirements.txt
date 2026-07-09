@@ -20,6 +20,9 @@ redis==5.2.1
 pandas==2.2.3
 pyarrow==18.1.0
 
+# TITAN world scale — contiguous hub/proxy tensor runtime
+numpy==1.26.4
+
 # --- optional ML extras (auto-detected; heuristic fallback if absent) --------
 # scikit-learn==1.5.2     # GMM regime classifier (ai/regime/gmm.py)
 # hmmlearn==0.3.2         # HMM regime classifier (ai/regime/hmm.py)

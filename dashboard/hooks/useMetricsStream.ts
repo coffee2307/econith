@@ -62,6 +62,46 @@ export interface AiState {
   explain?: AiExplain;
 }
 
+export interface RoutingLeg {
+  symbol: string;
+  side: string;
+  quantity: number;
+  desk: string;
+  weight: number;
+  reason: string;
+}
+
+export interface RoutingState {
+  profile?: string;
+  confidence?: number;
+  direction?: number;
+  reduce_only?: boolean;
+  created_at?: string;
+  legs?: RoutingLeg[];
+}
+
+export interface DebateVote {
+  agent: string;
+  bias: number;
+  confidence: number;
+  rationale?: string;
+}
+
+export interface DebateState {
+  consensus_bias?: number;
+  consensus_confidence?: number;
+  sources?: string[];
+  votes?: DebateVote[];
+  dissent?: Record<string, number>;
+}
+
+export interface AlphaState {
+  symbol?: string;
+  direction?: number;
+  confidence?: number;
+  agent?: string;
+}
+
 // Each vector is a flat map of feature -> value (100+ features total).
 export type MacroVector = Record<string, number>;
 
@@ -142,6 +182,9 @@ export interface MetricsSnapshot {
   market: MarketState;
   alt: AltState;
   ai: AiState;
+  routing?: RoutingState;
+  debate?: DebateState;
+  alpha?: AlphaState;
   world: WorldState;
   sentinel: SentinelState;
   events: LogEvent[];

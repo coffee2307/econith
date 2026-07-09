@@ -62,6 +62,7 @@ from ai.simulator_engine.reaction_models import (
 )
 from core.event_bus import Event, EventBus
 from core.mode import get_mode_manager
+from econith.world import MesaSovereignKernel
 
 logger = logging.getLogger("econith.world.kernel")
 
@@ -506,6 +507,18 @@ class WorldKernel:
         self._graph = GeopoliticalCausalGraph(self._world)
         # PHASE-2 injection queue: anomalies / REST mutations / LLM scenarios.
         self._pending: list[dict] = []
+        # Native ECONITH Mesa-style sovereign step kernel (no external scheduler).
+        self._mesa_kernel = MesaSovereignKernel()
+        # TITAN scale-out tensor engine (50 hubs + 100 proxies). Co-steps with the
+        # classic entity loop; Sentinel still consumes the EventBus snapshot from
+        # the original path. REALITY mode-gates are unchanged.
+        try:
+            from econith.world.sovereign import SovereignEngine
+
+            self._titan = SovereignEngine()
+            self._mesa_kernel.attach_titan(self._titan)
+        except Exception:  # noqa: BLE001
+            self._titan = None
 
     # -- introspection --------------------------------------------------------
     @property
@@ -725,11 +738,9 @@ class WorldKernel:
 
         # 3) ENTITY BEHAVIOUR MATRIX: each autonomous CountryEntity best-responds
         #    to the propagated external shock (aging + war -> consumption collapse
-        #    + capital flight, etc.).
-        for code, ent in self._entities.items():
-            proposals.extend(
-                ent.calculate_behavior(snap.stress, external.get(code, 0.0), scale)
-            )
+        #    + capital flight, etc.). Routed through the Mesa scheduler when
+        #    available, else the native loop — identical physics either way.
+        proposals.extend(self._entity_behavior(external, snap.stress, scale))
 
         # 4) Quant -> World macro feedback (capital flight, FX, yields, unrest).
         feedback = quant_to_macro(self._world, snap)
@@ -745,6 +756,30 @@ class WorldKernel:
         transition = self._regime_transition_fact(snap, ctx["coupling"])
         if transition is not None:
             facts.insert(0, transition)
+
+    def _entity_behavior(
+        self, external: dict[str, float], stress: float, scale: float
+    ) -> list[Adjustment]:
+        """Collect per-entity behavioural Adjustments for this tick.
+
+        Uses the native ECONITH Mesa-style sovereign step kernel. If anything
+        fails, falls back to the direct deterministic loop.
+        """
+        try:
+            props = self._mesa_kernel.step(
+                entities=self._entities,
+                external=external,
+                market_stress=stress,
+                scale=scale,
+            )
+            if props:
+                return props
+        except Exception:  # noqa: BLE001
+            logger.debug("native mesa kernel step failed; direct fallback")
+        out: list[Adjustment] = []
+        for code, ent in self._entities.items():
+            out.extend(ent.calculate_behavior(stress, external.get(code, 0.0), scale))
+        return out
 
     # -- PHASE 5 :: EMIT SIGNALS ---------------------------------------------
     async def _phase5_emit_signals(self, ctx: dict) -> None:

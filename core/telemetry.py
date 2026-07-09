@@ -54,6 +54,9 @@ class MetricsHub:
             "liquidation_notional": None,
         }
         self._ai: dict[str, Any] = {}
+        self._routing: dict[str, Any] = {}
+        self._debate: dict[str, Any] = {}
+        self._alpha: dict[str, Any] = {}
         self._world: dict[str, Any] = {}
         self._sentinel: dict[str, Any] = {}
         self._events: deque[dict[str, Any]] = deque(maxlen=MAX_EVENTS)
@@ -67,6 +70,9 @@ class MetricsHub:
         self._bus.subscribe("alt.open_interest", self._on_open_interest)
         self._bus.subscribe("alt.liquidation", self._on_liquidation)
         self._bus.subscribe("ai.signal", self._on_ai_signal)
+        self._bus.subscribe("quant.route.plan", self._on_route_plan)
+        self._bus.subscribe("meta.debate.verdict", self._on_debate)
+        self._bus.subscribe("ai.alpha.candidate", self._on_alpha)
         self._bus.subscribe("world.macro", self._on_world_macro)
         self._bus.subscribe("sentinel.status", self._on_sentinel_status)
         self._bus.subscribe("sentinel.emergency", self._on_emergency)
@@ -123,6 +129,15 @@ class MetricsHub:
             "explain": p.get("explain"),
         }
 
+    async def _on_route_plan(self, event: Event) -> None:
+        self._routing = dict(event.payload)
+
+    async def _on_debate(self, event: Event) -> None:
+        self._debate = dict(event.payload)
+
+    async def _on_alpha(self, event: Event) -> None:
+        self._alpha = dict(event.payload)
+
     async def _on_world_macro(self, event: Event) -> None:
         self._world = {
             "sim_day": event.payload.get("sim_day"),
@@ -176,6 +191,9 @@ class MetricsHub:
             "market": dict(self._market),
             "alt": dict(self._alt),
             "ai": dict(self._ai),
+            "routing": dict(self._routing),
+            "debate": dict(self._debate),
+            "alpha": dict(self._alpha),
             "world": dict(self._world),
             "sentinel": dict(self._sentinel),
             "events": list(self._events),

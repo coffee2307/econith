@@ -7,6 +7,16 @@ const nextConfig = {
   // NOTE: Next 16 removed the granular `devIndicators.buildActivity` flag; the
   // modern equivalent that fully hides the indicator is `devIndicators: false`.
   devIndicators: false,
+  async rewrites() {
+    // Dev proxy: route dashboard REST calls to ECONITH backend so UI can use
+    // same-origin paths (/api/v1/*) without CORS/host drift issues.
+    return [
+      {
+        source: "/api/v1/:path*",
+        destination: "http://localhost:8000/api/v1/:path*",
+      },
+    ];
+  },
 };
 
 export default nextConfig;

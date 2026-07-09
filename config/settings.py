@@ -89,6 +89,7 @@ class Settings:
             f"{p}/time/pause",
             f"{p}/time/resume",
             f"{p}/order",               # execution-intent injection paths
+            f"{p}/quant/routing/profile",
         )
 
 

@@ -1,0 +1,9 @@
+# Show vendor folders in Source Control while still avoiding full vendored code.
+# Track only manifest/policy + per-vendor SHA marker files.
+*
+!*/
+!.gitignore
+!manifest.json
+!manifest.schema.json
+!README.md
+!*/VENDOR_SHA.txt

@@ -206,6 +206,56 @@ export interface Dictionary {
     };
     peakEquity: string;
     lastPrice: string;
+    badges: {
+      quant: string;
+      exec: string;
+      testnet: string;
+    };
+    resizeLog: string;
+    routing: {
+      title: string;
+      maxLeg: string;
+      biasMult: string;
+      conf: string;
+      legs: string;
+      reduceOnly: string;
+      awaitingPlan: string;
+      errorPrefix: string;
+      profiles: Record<string, string>;
+      cols: {
+        symbol: string;
+        side: string;
+        qty: string;
+        wt: string;
+        desk: string;
+      };
+    };
+    debate: {
+      title: string;
+      analystCount: string;
+      conviction: string;
+      fusedVerdict: string;
+      bias: string;
+      noVerdict: string;
+      alphaCandidate: string;
+      noAlpha: string;
+    };
+    dataInflow: {
+      title: string;
+      online: string;
+      awaitingMacro: string;
+      providerHealth: string;
+    };
+    enums: {
+      action: Record<string, string>;
+      verdict: Record<string, string>;
+      side: Record<string, string>;
+      quantMode: Record<string, string>;
+      execRouting: Record<string, string>;
+      breaker: Record<string, string>;
+      sentinelMode: Record<string, string>;
+      vendorStatus: Record<string, string>;
+    };
   };
   world: {
     searchPlaceholder: string;

@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from core.event_bus import DOMAIN_QUANT, Event, EventBus
 from core.ingestion.context_state import AssetUniverse
 from core.mode import QuantMode, current_mode
+from econith.world import AbidesStepKernel
 from quant.ccxt_bridge import CCXTBinanceBridge
 from quant.payloads import ExecutionPayload, OrderSide, OrderType
 
@@ -46,11 +47,17 @@ class QuantExecutionBridge:
         ccxt: CCXTBinanceBridge,
         *,
         base_notional: float = 1_000.0,
+        abides: AbidesStepKernel | None = None,
     ) -> None:
         self._bus = bus
         self._ccxt = ccxt
         self._base_notional = base_notional
         self._marks: dict[str, float] = {}
+        # Optional ABIDES synthetic LOB. When present AND in SIMULATION, order
+        # intents fill against the discrete order book instead of the CCXT
+        # synthetic path. In REALITY it is never consulted (defense-in-depth on
+        # top of the shim's own SIMULATION-only guard).
+        self._abides = abides if abides is not None else AbidesStepKernel()
 
     # -- wiring ---------------------------------------------------------------
     def register(self) -> None:
@@ -59,6 +66,13 @@ class QuantExecutionBridge:
         # ever reaching live execution while running in REALITY.
         self._bus.subscribe("order.intent", self._on_intent, domain=DOMAIN_QUANT)
         self._bus.subscribe("md.ticker", self._on_ticker, domain=DOMAIN_QUANT)
+        # The ABIDES tape consumers (md.depth/md.aggTrade) are ungoverned — they
+        # only shape the synthetic book, never touch live routing.
+        if self._abides is not None:
+            try:
+                self._abides.bind(self._bus)
+            except Exception:  # noqa: BLE001
+                logger.debug("abides kernel bind skipped")
         logger.info("quant execution bridge registered (mode-gated CCXT routing)")
 
     async def _on_ticker(self, event: Event) -> None:
@@ -76,6 +90,21 @@ class QuantExecutionBridge:
         if payload is None:
             return
         mode = current_mode()
+        # SIMULATION + ABIDES available -> fill against the discrete LOB simulator
+        # for realistic microstructure. Any failure degrades to the CCXT synthetic
+        # path so a fill is never dropped.
+        if mode is QuantMode.SIMULATION and self._abides is not None:
+            try:
+                await self._abides.submit(
+                    symbol=payload.symbol,
+                    side=payload.side.value if hasattr(payload.side, "value") else str(payload.side),
+                    quantity=payload.quantity,
+                    client_order_id=payload.client_order_id,
+                )
+                logger.debug("routed SIMULATION %s via native ABIDES kernel", payload.symbol)
+                return
+            except Exception:  # noqa: BLE001 - fall through to CCXT synthetic
+                logger.debug("abides submit failed; CCXT synthetic fallback")
         # The CCXTBinanceBridge internally honours the same gate: it executes
         # against the live session only in REALITY (and when connected), else it
         # produces a deterministic synthetic fill. Both paths publish quant.fill.

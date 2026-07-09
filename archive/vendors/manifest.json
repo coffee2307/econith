@@ -1,0 +1,186 @@
+{
+  "$schema": "./manifest.schema.json",
+  "policy": {
+    "strategy": "sparse-checkout",
+    "rationale": "Pull ONLY the core-logic subtrees of each upstream repo (no docs, tests, web assets, node_modules) so the ECONITH tree stays lean. Every vendor is pinned to an immutable commit and never imported directly into main.py — access is mediated exclusively through bridges/vendor_shims.py.",
+    "import_rule": "NEVER import a vendor package outside an econith_* shim. Runtime code depends on the shim contract, not the vendor.",
+    "execution_authority_rule": "No shim may publish 'order.intent' and no shim may subscribe with domain=QUANT. Alpha/routing/consensus shims emit only advisory topics; the Sentinel-gated AIBridge is the sole producer of order.intent, keeping Sentinel's veto absolute.",
+    "mode_rule": "Shims marked simulation_only refuse to emit while the process is in REALITY (defense-in-depth on top of the EventBus mode gate).",
+    "lightweight_units": [
+      "collectors/ MUST NOT gain a hard dependency on any vendor SDK; it may only call an econith_* shim that degrades gracefully when the vendor is absent."
+    ]
+  },
+  "vendors": [
+    {
+      "name": "openbb",
+      "pillar": "core",
+      "repo": "https://github.com/OpenBB-finance/OpenBB.git",
+      "commit": "1f1ebdd53555a833bb39fd303333572e6aa82eb8",
+      "license": "AGPL-3.0",
+      "license_note": "AGPL — review distribution terms before shipping binaries. Shim keeps the surface REST/SDK-optional.",
+      "sparse_paths": [
+        "openbb_platform/core/openbb_core/provider",
+        "openbb_platform/providers/fred",
+        "openbb_platform/providers/yfinance"
+      ],
+      "shim": "EconithOpenBBShim",
+      "probe_module": "openbb",
+      "consumed_by": [
+        "collectors/macro_global",
+        "collectors/tradfi_assets"
+      ],
+      "emits_topics": [
+        "core.macro.context"
+      ],
+      "domain": null
+    },
+    {
+      "name": "qlib",
+      "pillar": "core",
+      "repo": "https://github.com/microsoft/qlib.git",
+      "commit": "d5379c520f66a39953bad76234a7019a72796fd0",
+      "license": "MIT",
+      "sparse_paths": [
+        "qlib/data",
+        "qlib/contrib/data",
+        "qlib/utils"
+      ],
+      "shim": "EconithQlibShim",
+      "probe_module": "qlib",
+      "consumed_by": [
+        "training/h200/orchestrator.py"
+      ],
+      "emits_topics": [
+        "training.feature.ready"
+      ],
+      "domain": null
+    },
+    {
+      "name": "nofx",
+      "pillar": "quant",
+      "repo": "https://github.com/NoFxAiOS/nofx.git",
+      "commit": "d84e22ab82643fd50f0ad4706697fcb07fae52c4",
+      "license": "REVIEW_UPSTREAM",
+      "sparse_paths": [
+        "src",
+        "core"
+      ],
+      "sparse_note": "Adjust to upstream layout after first pull; keep only the routing/policy core.",
+      "shim": "EconithNoFxShim",
+      "probe_module": "nofx",
+      "consumed_by": [
+        "econith_quant/bridge/ai_bridge.py"
+      ],
+      "emits_topics": [
+        "quant.route.plan"
+      ],
+      "domain": null,
+      "invariant_note": "Emits an ADVISORY routing plan only. The Sentinel-gated AIBridge remains the sole producer of order.intent."
+    },
+    {
+      "name": "trading_agents",
+      "pillar": "quant",
+      "repo": "https://github.com/TauricResearch/TradingAgents.git",
+      "commit": "01477f9afb7a47b849ed4c9259d3a9a4738d9fda",
+      "license": "REVIEW_UPSTREAM",
+      "sparse_paths": [
+        "tradingagents/agents",
+        "tradingagents/graph"
+      ],
+      "shim": "EconithTradingAgentsShim",
+      "probe_module": "tradingagents",
+      "consumed_by": [
+        "ai/meta/core_ai.py"
+      ],
+      "emits_topics": [
+        "meta.debate.verdict"
+      ],
+      "domain": null,
+      "invariant_note": "Advisory consensus only; never publishes order.intent, never claims DOMAIN_QUANT."
+    },
+    {
+      "name": "ai_hedge_fund",
+      "pillar": "quant",
+      "repo": "https://github.com/virattt/ai-hedge-fund.git",
+      "commit": "3a18702cb25777fb4bdb4b2527a0c868bc8297f4",
+      "license": "REVIEW_UPSTREAM",
+      "sparse_paths": [
+        "src/agents",
+        "src/graph",
+        "src/llm"
+      ],
+      "shim": "EconithHedgeFundShim",
+      "probe_module": "ai_hedge_fund",
+      "consumed_by": [
+        "ai/inference/predictor.py",
+        "ai/meta/core_ai.py"
+      ],
+      "emits_topics": [
+        "ai.alpha.candidate"
+      ],
+      "domain": null,
+      "invariant_note": "Emits an ADVISORY alpha candidate folded by the Predictor; the single ai.signal producer is unchanged."
+    },
+    {
+      "name": "zipline_reloaded",
+      "pillar": "quant",
+      "repo": "https://github.com/stefan-jansen/zipline-reloaded.git",
+      "commit": "943010b9da848e317fc520de87edade2b884d329",
+      "license": "Apache-2.0",
+      "sparse_paths": [
+        "src/zipline/finance",
+        "src/zipline/data"
+      ],
+      "shim": "EconithZiplineShim",
+      "probe_module": "zipline",
+      "consumed_by": [
+        "training/evaluation/backtest.py"
+      ],
+      "emits_topics": [],
+      "domain": null,
+      "invariant_note": "Offline friction provider — no bus emission; used inside the backtest engine."
+    },
+    {
+      "name": "mesa",
+      "pillar": "world",
+      "repo": "https://github.com/projectmesa/mesa.git",
+      "commit": "76027dc88871516c04d1cf9c7475d4324f722f4a",
+      "license": "Apache-2.0",
+      "sparse_paths": [
+        "mesa"
+      ],
+      "shim": "EconithMesaShim",
+      "probe_module": "mesa",
+      "consumed_by": [
+        "ai/simulator_engine/world_kernel.py"
+      ],
+      "emits_topics": [],
+      "domain": null,
+      "invariant_note": "Deterministic single step per TickPipeline PHASE 4 — no independent scheduler thread on the EventBus."
+    },
+    {
+      "name": "abides",
+      "pillar": "world",
+      "repo": "https://github.com/jpmorganchase/abides-jpmc-public.git",
+      "commit": "f9cbe51342b7dedd9587e4e069040d68a5c6477f",
+      "license": "BSD-3-Clause",
+      "sparse_paths": [
+        "abides_core",
+        "abides_markets"
+      ],
+      "sparse_note": "Older repo layouts may expose 'abides'/'util' — re-point after first pull.",
+      "shim": "EconithAbidesShim",
+      "probe_module": "abides_core",
+      "consumed_by": [
+        "bridges/quant_bridge.py"
+      ],
+      "emits_topics": [
+        "quant.fill"
+      ],
+      "domain": null,
+      "simulation_only": true,
+      "invariant_note": "SIMULATION-only synthetic LOB. Never binds live sockets; refuses to run in REALITY."
+    }
+  ],
+  "deferred": []
+}

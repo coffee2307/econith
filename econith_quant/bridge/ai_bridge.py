@@ -18,17 +18,24 @@ import logging
 from typing import Any
 
 from core.event_bus import Event, EventBus
+from econith.quant.routing import EconithRouteKernel
 from econith_quant.execution.smart_order import OrderIntent, OrderSide
 
 logger = logging.getLogger("econith.quant.bridge.ai")
 
 
 class AIBridge:
-    def __init__(self, bus: EventBus, base_quantity: float = 1.0) -> None:
+    def __init__(
+        self,
+        bus: EventBus,
+        base_quantity: float = 1.0,
+        router: EconithRouteKernel | None = None,
+    ) -> None:
         self._bus = bus
         self._base_qty = base_quantity
         self._mode = "NORMAL"
         self._target_exposure = 0.0   # current desired exposure in [-1, 1]
+        self._router = router or EconithRouteKernel()
 
     def register(self) -> None:
         self._bus.subscribe("sentinel.status", self._on_sentinel)
@@ -61,21 +68,38 @@ class AIBridge:
             return
 
         self._target_exposure = target
-        intent = OrderIntent(
-            symbol=p.get("symbol", "BTCUSDT"),
-            side=side,
-            quantity=round(abs(delta) * self._base_qty, 8),
-            reason=f"ai {action} dir={direction:.2f} conf={confidence:.2f} regime={p.get('regime')}",
+        base_qty = round(abs(delta) * self._base_qty, 8)
+        plan = self._router.build_plan(
+            direction=direction,
+            confidence=confidence,
+            base_quantity=base_qty,
             reduce_only=reduce_only,
+            symbol=str(p.get("symbol", "")).upper() or None,
         )
-        await self._bus.publish(
-            "order.intent",
-            symbol=intent.symbol,
-            side=intent.side.value,
-            quantity=intent.quantity,
-            reduce_only=intent.reduce_only,
-            reason=intent.reason,
-        )
+        await self._bus.publish("quant.route.plan", **plan.payload())
+        for leg in plan.legs:
+            intent = OrderIntent(
+                symbol=leg.symbol,
+                side=OrderSide.BUY if leg.side == "BUY" else OrderSide.SELL,
+                quantity=round(leg.quantity, 8),
+                reason=f"ai {action} dir={direction:.2f} conf={confidence:.2f} regime={p.get('regime')} | {leg.reason}",
+                reduce_only=reduce_only,
+            )
+            await self._bus.publish(
+                "order.intent",
+                symbol=intent.symbol,
+                side=intent.side.value,
+                quantity=intent.quantity,
+                reduce_only=intent.reduce_only,
+                reason=intent.reason,
+            )
+
+    def router_status(self) -> dict[str, Any]:
+        return self._router.status()
+
+    def set_router_profile(self, profile: str) -> dict[str, Any]:
+        active = self._router.set_profile(profile)
+        return active.payload()
 
     async def _veto(self, mode: str, action: str) -> None:
         await self._bus.publish(

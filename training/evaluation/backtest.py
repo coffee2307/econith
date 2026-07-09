@@ -46,6 +46,11 @@ class BacktestConfig:
     return_column: str = "forward_return_1m"
     regime_column: str = "regime"
     symbol_column: str = "symbol"
+    # When True, the engine sources round-trip friction from the Zipline-Reloaded
+    # institutional slippage/commission models (via EconithZiplineShim) instead of
+    # the static bps blend above. Falls back to the static blend when Zipline is
+    # not pulled, so results stay reproducible on any box.
+    use_zipline_friction: bool = False
 
 
 @dataclass(slots=True)
@@ -195,9 +200,31 @@ class BacktestEngine:
 
     def __init__(self, config: Optional[BacktestConfig] = None) -> None:
         self._cfg = config or BacktestConfig()
+        # Optional Zipline-Reloaded friction provider. Constructed only when
+        # requested; degrades to the static bps blend when the vendor is absent.
+        self._friction = None
+        if self._cfg.use_zipline_friction:
+            try:
+                from econith.quant.backtest.friction import EconithFrictionModel
+                self._friction = EconithFrictionModel(
+                    fee_bps=self._cfg.fee_bps,
+                    slippage_bps=self._cfg.slippage_bps,
+                    spread_bps=self._cfg.spread_bps,
+                )
+            except Exception:  # noqa: BLE001 - friction upgrade is strictly optional
+                logger.debug("native friction model unavailable; using static bps")
 
     def _friction_per_turn(self) -> float:
-        """Total round-trip-normalised friction as a fraction (per unit turnover)."""
+        """Total round-trip-normalised friction as a fraction (per unit turnover).
+
+        Uses the native EconithFrictionModel when wired, else the static
+        fee+slippage+spread bps blend.
+        """
+        if self._friction is not None:
+            try:
+                return self._friction.aggregate_friction_bps() / 10_000.0
+            except Exception:  # noqa: BLE001
+                logger.debug("native friction query failed; static fallback")
         return (self._cfg.fee_bps + self._cfg.slippage_bps + self._cfg.spread_bps) / 10_000.0
 
     def run_frame(self, frame: Any, signal_fn: SignalFn) -> BacktestResult:
