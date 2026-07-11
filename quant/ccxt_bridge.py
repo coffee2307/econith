@@ -49,6 +49,16 @@ _CCXT_SYMBOL: dict[str, str] = {
 }
 
 
+def _to_ccxt_symbol(internal: str, market_type: str) -> str:
+    """Map desk symbol to CCXT unified form (linear perps need ``BASE/QUOTE:QUOTE``)."""
+    base = _CCXT_SYMBOL.get(internal.upper(), internal)
+    if CCXTOrderPayload._is_derivatives_market(market_type):
+        if ":" not in base and "/" in base:
+            quote = base.split("/", 1)[1]
+            return f"{base}:{quote}"
+    return base
+
+
 @dataclass(slots=True)
 class FillReport:
     """The realised outcome of an execution, streamed to the cockpit ledger."""
@@ -91,7 +101,7 @@ class CCXTBinanceBridge:
         *,
         api_key: str = "",
         api_secret: str = "",
-        testnet: bool = True,
+        execution_env: str = "demo",
         default_type: str = "future",
         taker_fee_bps: float = 4.0,
         credentialed: bool = True,
@@ -99,7 +109,8 @@ class CCXTBinanceBridge:
         self._bus = bus
         self._api_key = api_key
         self._api_secret = api_secret
-        self._testnet = testnet
+        self._execution_env = execution_env if execution_env in ("demo", "live") else "demo"
+        self._testnet = self._execution_env == "demo"
         self._default_type = default_type
         self._taker_fee_bps = taker_fee_bps
         # Only authenticate a live session when REAL trade credentials exist.
@@ -208,7 +219,34 @@ class CCXTBinanceBridge:
 
         self._exchange = exchange
         self._live = True
-        logger.info("CCXT Binance session authenticated (testnet=%s)", self._testnet)
+        logger.info(
+            "CCXT Binance session authenticated (execution_env=%s, defaultType=%s)",
+            self._execution_env,
+            self._default_type,
+        )
+        await self._sync_demo_capital()
+
+    async def _sync_demo_capital(self) -> None:
+        """Align cockpit/Sentinel equity base with the Binance demo wallet."""
+        if self._execution_env != "demo" or self._exchange is None:
+            return
+        try:
+            balance = await self._exchange.fetch_balance()  # type: ignore[attr-defined]
+            usdt = balance.get("USDT") or {}
+            total = float(usdt.get("total") or usdt.get("free") or 0)
+            if total > 0:
+                await self._bus.publish(
+                    "quant.capital.sync",
+                    equity_base=round(total, 2),
+                    source="binance_demo",
+                )
+                logger.info(
+                    "demo equity base synced from Binance futures wallet: %.2f USDT",
+                    total,
+                )
+        except Exception:  # noqa: BLE001 - sync is best-effort at boot
+            logger.debug("demo capital sync skipped", exc_info=True)
+        await self._publish_wallet_truth()
 
     @staticmethod
     async def _safe_dispose(exchange: object | None) -> None:
@@ -249,6 +287,7 @@ class CCXTBinanceBridge:
         return {
             "quant_mode": mode,
             "execution_routing": routing,
+            "execution_env": self._execution_env,
             "exchange_live": self.is_live,
             "credentialed": self._credentialed,
             "testnet": self._testnet,
@@ -283,17 +322,88 @@ class CCXTBinanceBridge:
         else:
             report = self._execute_simulation(payload)
         await self._bus.publish("quant.fill", **report.to_ledger_entry())
+        if self.is_live and current_mode() is QuantMode.REALITY:
+            await self._publish_wallet_truth()
         return report
 
+    @staticmethod
+    def _desk_symbol(ccxt_symbol: str) -> str:
+        """``BTC/USDT:USDT`` -> ``BTCUSDT`` for the cockpit ledger."""
+        return ccxt_symbol.split(":")[0].replace("/", "")
+
+    async def _publish_wallet_truth(self) -> None:
+        """Reconcile cockpit/Sentinel PnL with the live exchange wallet."""
+        if self._exchange is None:
+            return
+        try:
+            balance = await self._exchange.fetch_balance()  # type: ignore[attr-defined]
+            usdt = balance.get("USDT") or {}
+            equity = float(usdt.get("total") or usdt.get("free") or 0)
+            positions_raw = await self._exchange.fetch_positions()  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001
+            logger.debug("wallet truth sync failed", exc_info=True)
+            return
+        if equity <= 0:
+            return
+        positions: dict[str, dict[str, float]] = {}
+        unrealized = 0.0
+        for pos in positions_raw:
+            contracts = float(pos.get("contracts") or 0)
+            if contracts == 0:
+                continue
+            sym = self._desk_symbol(str(pos.get("symbol", "")))
+            side = str(pos.get("side", "long")).lower()
+            signed = contracts if side == "long" else -contracts
+            upnl = float(pos.get("unrealizedPnl") or 0)
+            positions[sym] = {
+                "qty": signed,
+                "avg": float(pos.get("entryPrice") or 0),
+            }
+            unrealized += upnl
+        await self._bus.publish(
+            "quant.wallet.sync",
+            equity=round(equity, 2),
+            unrealized_pnl=round(unrealized, 2),
+            positions=positions,
+            source="binance",
+        )
+
     async def _execute_reality(self, payload: ExecutionPayload) -> FillReport:
-        ccxt_symbol = _CCXT_SYMBOL.get(payload.symbol, payload.symbol)
-        order_kwargs = CCXTOrderPayload.from_execution(payload, ccxt_symbol)
+        ccxt_symbol = _to_ccxt_symbol(payload.symbol, self._default_type)
+        order_kwargs = CCXTOrderPayload.from_execution(
+            payload, ccxt_symbol, market_type=self._default_type
+        )
+        amount = order_kwargs.amount
+        try:
+            amount = float(
+                self._exchange.amount_to_precision(ccxt_symbol, amount)  # type: ignore[attr-defined]
+            )
+            limits = getattr(self._exchange, "markets", {}).get(ccxt_symbol, {}).get("limits", {})
+            min_amt = float((limits.get("amount") or {}).get("min") or 0)
+            if min_amt and amount < min_amt:
+                amount = float(
+                    self._exchange.amount_to_precision(ccxt_symbol, min_amt)  # type: ignore[attr-defined]
+                )
+            ticker = await self._exchange.fetch_ticker(ccxt_symbol)  # type: ignore[attr-defined]
+            last = float(ticker.get("last") or ticker.get("bid") or 0)
+            min_cost = float((limits.get("cost") or {}).get("min") or 20.0)
+            if last > 0 and amount * last < min_cost:
+                bumped = (min_cost / last) * 1.15
+                amount = float(
+                    self._exchange.amount_to_precision(ccxt_symbol, bumped)  # type: ignore[attr-defined]
+                )
+                if amount * last < min_cost:
+                    amount = float(
+                        self._exchange.amount_to_precision(ccxt_symbol, bumped * 1.1)  # type: ignore[attr-defined]
+                    )
+        except Exception:  # noqa: BLE001 - precision helper is best-effort
+            amount = order_kwargs.amount
         try:
             result = await self._exchange.create_order(  # type: ignore[attr-defined]
                 symbol=order_kwargs.symbol,
                 type=order_kwargs.type,
                 side=order_kwargs.side,
-                amount=order_kwargs.amount,
+                amount=amount,
                 price=order_kwargs.price,
                 params=order_kwargs.params,
             )
@@ -302,6 +412,12 @@ class CCXTBinanceBridge:
             raise
         avg = float(result.get("average") or result.get("price") or 0.0)
         filled = float(result.get("filled") or payload.quantity)
+        if avg <= 0.0:
+            try:
+                ticker = await self._exchange.fetch_ticker(ccxt_symbol)  # type: ignore[attr-defined]
+                avg = float(ticker.get("last") or ticker.get("bid") or 0.0)
+            except Exception:  # noqa: BLE001
+                avg = float(self._sim_marks.get(payload.symbol, 0.0) or 0.0)
         fee = self._extract_fee(result, filled, avg)
         ref = payload.limit_price or avg
         slippage = (avg - ref) if ref else 0.0

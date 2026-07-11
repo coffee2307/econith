@@ -224,6 +224,7 @@ export interface Dictionary {
       quant: string;
       exec: string;
       testnet: string;
+      live: string;
     };
     resizeLog: string;
     routing: {

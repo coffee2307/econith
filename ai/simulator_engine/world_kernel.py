@@ -862,7 +862,7 @@ class WorldKernel:
             c = self._world.countries[worst.code]
             facts.append(CausalFact(
                 actor="Market",
-                country=c.name,
+                country=worst.code,
                 action="transmitted the market rout into the real economy",
                 cause=(f"a systemic risk-off episode (intensity {worst.intensity:.2f}) "
                        f"cascading through fragile balance sheets"),

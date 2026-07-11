@@ -8,6 +8,7 @@ export type ExecutionRouting = "LIVE" | "SYNTHETIC" | "DEGRADED" | "OFFLINE";
 export interface ExecutionStatus {
   quant_mode: string;
   execution_routing: ExecutionRouting;
+  execution_env: "demo" | "live";
   exchange_live: boolean;
   credentialed: boolean;
   testnet: boolean;
@@ -24,6 +25,7 @@ const POLL_INTERVAL_MS = 8_000;
 const OFFLINE_STATUS: ExecutionStatus = {
   quant_mode: "UNKNOWN",
   execution_routing: "OFFLINE",
+  execution_env: "demo",
   exchange_live: false,
   credentialed: false,
   testnet: false,

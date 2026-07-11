@@ -319,6 +319,7 @@ export const vi: Dictionary = {
       quant: "QUANT",
       exec: "THỰC THI",
       testnet: "TESTNET",
+      live: "LIVE",
     },
     resizeLog: "Kéo giãn nhật ký sự kiện",
     routing: {
@@ -415,7 +416,7 @@ export const vi: Dictionary = {
     rightPanelAgents: "Tác tử",
     agentExchangeTitle: "Trao đổi tác tử",
     agentExchangeSubtitle:
-      "Corporate / Government / Societal AI — tối đa 1 phát biểu / 25s từ world kernel",
+      "AI doanh nghiệp / chính phủ / xã hội — tối đa 1 phát biểu / 50s, cuộn xem lại được",
     agentExchangeRefresh: "Làm mới tranh luận",
     agentExchangeLoading: "Đang tổng hợp quan điểm tác tử…",
     agentExchangeEmpty:

@@ -130,9 +130,11 @@ export function QuantMissionControl() {
             <StatusBadge
               label={t("quant.badges.exec")}
               value={
-                execution.testnet && execution.execution_routing === "LIVE"
+                execution.execution_env === "demo" && execution.execution_routing === "LIVE"
                   ? t("quant.badges.testnet")
-                  : tQuantEnum(t, "execRouting", execution.execution_routing)
+                  : execution.execution_env === "live" && execution.execution_routing === "LIVE"
+                    ? t("quant.badges.live")
+                    : tQuantEnum(t, "execRouting", execution.execution_routing)
               }
               tone={EXEC_TONE[execution.execution_routing] ?? "danger"}
               icon={faSatelliteDish}

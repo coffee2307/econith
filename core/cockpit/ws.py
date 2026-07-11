@@ -71,6 +71,8 @@ class CockpitTelemetryHub:
     # -- wiring ---------------------------------------------------------------
     def register(self) -> None:
         self._bus.subscribe("quant.fill", self._on_fill)
+        self._bus.subscribe("quant.capital.sync", self._on_capital_sync)
+        self._bus.subscribe("quant.wallet.sync", self._on_wallet_sync)
         self._bus.subscribe("md.ticker", self._on_ticker)
         self._bus.subscribe("core.macro.context", self._on_macro)
         self._bus.subscribe("world.macro", self._on_world)
@@ -87,6 +89,40 @@ class CockpitTelemetryHub:
             return
         self._ledger.appendleft(entry)
         self._apply_pnl(entry)
+
+    async def _on_capital_sync(self, event: Event) -> None:
+        """Re-base equity from the live Binance demo wallet (boot-time only)."""
+        if self._positions or self._ledger:
+            return
+        base = float(event.payload.get("equity_base", 0))
+        if base <= 0:
+            return
+        self._starting_capital = base
+        self._equity.clear()
+        self._equity.append(base)
+        self._peak_equity = base
+        self._realized_total = 0.0
+        self._unrealized = 0.0
+        logger.info("cockpit equity base synced to %.2f USDT", base)
+
+    async def _on_wallet_sync(self, event: Event) -> None:
+        """Exchange wallet is the PnL source of truth after live fills."""
+        p = event.payload
+        equity = float(p.get("equity", 0))
+        if equity <= 0:
+            return
+        upnl = float(p.get("unrealized_pnl", 0))
+        raw_positions = p.get("positions") or {}
+        self._positions = {
+            str(sym).upper(): {
+                "qty": float(pos.get("qty", 0)),
+                "avg": float(pos.get("avg", 0)),
+            }
+            for sym, pos in raw_positions.items()
+        }
+        self._unrealized = upnl
+        self._realized_total = equity - self._starting_capital - upnl
+        self._update_equity()
 
     async def _on_ticker(self, event: Event) -> None:
         sym = event.payload.get("symbol")

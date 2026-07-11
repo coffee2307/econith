@@ -127,22 +127,45 @@ class CCXTOrderPayload(BaseModel):
     price: float | None = None
     params: dict[str, object] = Field(default_factory=dict)
 
+    @staticmethod
+    def _is_derivatives_market(market_type: str) -> bool:
+        """True for Binance futures/swap endpoints (not spot)."""
+        return market_type.lower() in (
+            "future",
+            "futures",
+            "swap",
+            "linear",
+            "delivery",
+            "inverse",
+        )
+
     @classmethod
     def from_execution(
-        cls, payload: ExecutionPayload, ccxt_symbol: str
+        cls,
+        payload: ExecutionPayload,
+        ccxt_symbol: str,
+        *,
+        market_type: str = "spot",
     ) -> "CCXTOrderPayload":
-        """Lower a high-level :class:`ExecutionPayload` into CCXT kwargs."""
-        params: dict[str, object] = {
-            "reduceOnly": payload.side.reduce_only,
-            "newClientOrderId": payload.client_order_id or None,
-        }
-        if payload.leverage > 1.0:
-            params["leverage"] = payload.leverage
+        """Lower a high-level :class:`ExecutionPayload` into CCXT kwargs.
+
+        Spot Binance rejects futures-only params such as ``reduceOnly`` even
+        when set to ``False`` (error -1104). Derivatives params are gated on
+        ``market_type``.
+        """
+        params: dict[str, object] = {}
+        if payload.client_order_id:
+            params["newClientOrderId"] = payload.client_order_id
+        if cls._is_derivatives_market(market_type):
+            if payload.side.reduce_only:
+                params["reduceOnly"] = True
+            if payload.leverage > 1.0:
+                params["leverage"] = int(payload.leverage)
         return cls(
             symbol=ccxt_symbol,
             type=payload.order_type.value.lower(),
             side=payload.side.ccxt_side,
             amount=payload.quantity,
             price=payload.limit_price,
-            params={k: v for k, v in params.items() if v is not None},
+            params=params,
         )

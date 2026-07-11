@@ -174,10 +174,11 @@ async def lifespan(app: FastAPI):
     # Advanced execution: state-isolation gate over CCXT (REALITY/SIMULATION).
     ccxt_bridge = CCXTBinanceBridge(
         engine.bus,
-        api_key=env.effective_binance_trade_api_key,
-        api_secret=env.effective_binance_trade_api_secret,
-        testnet=env.binance_testnet,
-        credentialed=env.has_binance_trade_credentials,
+        api_key=env.effective_binance_execution_api_key,
+        api_secret=env.effective_binance_execution_api_secret,
+        execution_env=env.binance_execution_env_resolved,
+        default_type=env.effective_binance_ccxt_default_type,
+        credentialed=env.has_binance_execution_credentials,
     )
     quant_exec = QuantExecutionBridge(engine.bus, ccxt_bridge)
     quant_exec.register()

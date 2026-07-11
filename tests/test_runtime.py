@@ -162,6 +162,7 @@ def _make_bridge(*, live: bool, credentialed: bool, mode: str):
     bridge._live = live
     bridge._exchange = object() if live else None
     bridge._credentialed = credentialed
+    bridge._execution_env = "demo"
     bridge._testnet = True
     return bridge
 
@@ -204,3 +205,74 @@ def test_execution_status_synthetic_in_simulation(monkeypatch) -> None:
     bridge = _make_bridge(live=False, credentialed=True, mode="SIMULATION")
     status = bridge.execution_status()
     assert status["execution_routing"] == "SYNTHETIC", status
+
+
+def test_binance_execution_env_resolves_demo_and_live(monkeypatch) -> None:
+    from config.environment import Environment
+
+    demo = Environment(
+        BINANCE_EXECUTION_ENV="demo",
+        BINANCE_TESTNET=False,
+        BINANCE_DEMO_API_KEY="k_demo",
+        BINANCE_DEMO_API_SECRET="s_demo",
+        BINANCE_TRADE_API_KEY="k_live",
+        BINANCE_TRADE_API_SECRET="s_live",
+    )
+    assert demo.binance_execution_env_resolved == "demo"
+    assert demo.is_demo_execution is True
+    assert demo.effective_binance_execution_api_key == "k_demo"
+    assert demo.has_binance_execution_credentials is True
+
+    live = Environment(
+        BINANCE_EXECUTION_ENV="live",
+        BINANCE_TESTNET=True,
+        BINANCE_DEMO_API_KEY="k_demo",
+        BINANCE_DEMO_API_SECRET="s_demo",
+        BINANCE_TRADE_API_KEY="k_live",
+        BINANCE_TRADE_API_SECRET="s_live",
+    )
+    assert live.binance_execution_env_resolved == "live"
+    assert live.is_demo_execution is False
+    assert live.effective_binance_execution_api_key == "k_live"
+
+
+def test_ccxt_spot_order_omits_futures_params() -> None:
+    from quant.payloads import CCXTOrderPayload, ExecutionPayload, OrderSide, OrderType
+
+    payload = ExecutionPayload(
+        symbol="BTCUSDT",
+        desk="crypto",
+        mode="REALITY",
+        side=OrderSide.LONG_CLOSE,
+        order_type=OrderType.MARKET,
+        quantity=0.001,
+        leverage=3.0,
+        client_order_id="econith-test-1",
+    )
+    order = CCXTOrderPayload.from_execution(payload, "BTC/USDT", market_type="spot")
+    assert "reduceOnly" not in order.params
+    assert "leverage" not in order.params
+    assert order.params.get("newClientOrderId") == "econith-test-1"
+
+
+def test_ccxt_futures_symbol_maps_to_linear_perp() -> None:
+    from quant.ccxt_bridge import _to_ccxt_symbol
+
+    assert _to_ccxt_symbol("BTCUSDT", "future") == "BTC/USDT:USDT"
+    assert _to_ccxt_symbol("BTCUSDT", "spot") == "BTC/USDT"
+
+
+def test_ccxt_futures_order_includes_reduce_only_when_closing() -> None:
+    from quant.payloads import CCXTOrderPayload, ExecutionPayload, OrderSide
+
+    payload = ExecutionPayload(
+        symbol="BTCUSDT",
+        desk="crypto",
+        mode="REALITY",
+        side=OrderSide.LONG_CLOSE,
+        quantity=0.001,
+        leverage=3.0,
+    )
+    order = CCXTOrderPayload.from_execution(payload, "BTC/USDT", market_type="future")
+    assert order.params.get("reduceOnly") is True
+    assert order.params.get("leverage") == 3

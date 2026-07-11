@@ -267,6 +267,7 @@ export const en: Dictionary = {
       quant: "QUANT",
       exec: "EXEC",
       testnet: "TESTNET",
+      live: "LIVE",
     },
     resizeLog: "Resize event log",
     routing: {
@@ -361,7 +362,7 @@ export const en: Dictionary = {
     rightPanelAgents: "Agents",
     agentExchangeTitle: "Agent exchange",
     agentExchangeSubtitle:
-      "Corporate / Government / Societal AI — at most one statement / 25s from world kernel",
+      "Corporate / Government / Societal AI — at most one line / 50s, scroll to review history",
     agentExchangeRefresh: "Refresh debate",
     agentExchangeLoading: "Synthesizing agent positions…",
     agentExchangeEmpty:

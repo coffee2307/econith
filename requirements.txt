@@ -9,6 +9,7 @@ pydantic-settings==2.7.1
 # data connections
 httpx==0.28.1
 websockets==14.1          # required for LIVE Binance mode
+ccxt==4.4.69              # Binance execution bridge (REALITY / testnet)
 openai==1.99.9
 
 # storage

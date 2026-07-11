@@ -27,8 +27,8 @@ from core.mode import get_mode_manager
 
 MAX_EVENTS = 60
 MAX_WORLD_EVENTS = 40
-MAX_WORLD_AGENTS = 8
-AGENT_FEED_COOLDOWN_S = 25.0
+MAX_WORLD_AGENTS = 50
+AGENT_FEED_COOLDOWN_S = 50.0
 
 # Sources routed to the World research feed (never Quant's execution log).
 _WORLD_SOURCES = frozenset({
@@ -256,17 +256,20 @@ class MetricsHub:
         text = str(event.payload.get("text", ""))
         actor = str(event.payload.get("actor", ""))
         level = str(event.payload.get("level", "info"))
-        cause_key = text[:64]
         now = asyncio.get_event_loop().time()
         last = self._agent_last_ts.get(actor, 0.0)
-        cooldown = AGENT_FEED_COOLDOWN_S / max(1, self._time.multiplier)
+        cooldown = AGENT_FEED_COOLDOWN_S  # wall-clock: readable even at 20x sim speed
         if level != "danger" and now - last < cooldown:
             return
         if self._world_agents:
             prev = self._world_agents[0]
             if prev.get("text") == text and prev.get("actor") == actor:
                 return
-            if prev.get("text", "")[:64] == cause_key:
+            if (
+                prev.get("actor") == actor
+                and prev.get("country") == event.payload.get("country")
+                and text[:40] == str(prev.get("text", ""))[:40]
+            ):
                 return
         self._agent_last_ts[actor] = now
         self._world_agents.appendleft(

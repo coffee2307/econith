@@ -24,7 +24,7 @@ const ACTOR_VI: Record<string, string> = {
   Market: "Thị trường",
 };
 
-const MAX_LINES = 6;
+const MAX_LINES = 50;
 
 export function useWorldAgentDebate() {
   const { snapshot } = useMetrics();
@@ -48,6 +48,10 @@ export function useWorldAgentDebate() {
     const out: WorldAgentLine[] = [...policy];
     for (let i = 0; i < raw.length && out.length < MAX_LINES; i++) {
       const row = raw[i];
+      const rowLocale = (row as { locale?: string }).locale;
+      if (rowLocale && rowLocale !== locale && rowLocale.slice(0, 2) !== locale) {
+        continue;
+      }
       const text = row.text ?? "";
       const sig = `${row.actor}|${text.slice(0, 80)}`;
       if (seen.has(sig)) continue;
@@ -64,7 +68,7 @@ export function useWorldAgentDebate() {
       });
     }
     return out.slice(0, MAX_LINES);
-  }, [snapshot?.world_agents, policyAgentLines]);
+  }, [snapshot?.world_agents, policyAgentLines, locale]);
 
   const localizedLines = useMemo(
     () =>

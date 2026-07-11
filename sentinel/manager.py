@@ -39,7 +39,7 @@ from typing import Optional
 
 from core.event_bus import Event, EventBus
 from sentinel.circuit_breaker import BreakerState, CircuitBreaker
-from sentinel.var import HistoricalSimulationVaR
+from sentinel.var import MIN_SAMPLES, HistoricalSimulationVaR
 
 logger = logging.getLogger("econith.sentinel.manager")
 
@@ -128,6 +128,8 @@ class Sentinel:
     def register(self) -> None:
         # Execution truth: the principal equity base is driven by real fills.
         self._bus.subscribe("quant.fill", self._on_fill)
+        self._bus.subscribe("quant.capital.sync", self._on_capital_sync)
+        self._bus.subscribe("quant.wallet.sync", self._on_wallet_sync)
         # Mark-to-market + latency heartbeat only (never fabricates equity).
         self._bus.subscribe("md.ticker", self._on_ticker)
         # Core AI dynamic threshold recalibration (advisory, bounded).
@@ -229,6 +231,42 @@ class Sentinel:
         self._marks[asset] = price
         await self._revalue_and_govern()
 
+    async def _on_capital_sync(self, event: Event) -> None:
+        """Re-base equity from the live Binance demo wallet (boot-time only)."""
+        if self._positions:
+            return
+        base = float(event.payload.get("equity_base", 0))
+        if base <= 0:
+            return
+        self._starting_capital = base
+        self._equity = base
+        self._prev_equity = base
+        self._peak_equity = base
+        self._realized_total = 0.0
+        self._unrealized = 0.0
+        logger.info("sentinel equity base synced to %.2f USDT", base)
+
+    async def _on_wallet_sync(self, event: Event) -> None:
+        """Exchange wallet is the PnL source of truth after live fills."""
+        p = event.payload
+        equity = float(p.get("equity", 0))
+        if equity <= 0:
+            return
+        upnl = float(p.get("unrealized_pnl", 0))
+        raw_positions = p.get("positions") or {}
+        self._positions = {
+            str(sym).upper(): {
+                "qty": float(pos.get("qty", 0)),
+                "avg": float(pos.get("avg", 0)),
+            }
+            for sym, pos in raw_positions.items()
+        }
+        self._unrealized = upnl
+        self._realized_total = equity - self._starting_capital - upnl
+        self._equity = equity
+        self._prev_equity = equity
+        self._peak_equity = max(self._peak_equity, equity)
+
     async def _on_ticker(self, event: Event) -> None:
         """Mark-to-market open positions + latency heartbeat (no equity fabrication)."""
         price = float(event.payload["price"])
@@ -291,12 +329,19 @@ class Sentinel:
             # recompute VaR / C-VaR each cycle
             est = self._risk.estimate()
             prev_soft = self._var_soft_breach
-            self._var_soft_breach = est.var > self._var_limit
+            # Monte-Carlo VaR with only a handful of equity ticks is noise;
+            # wait for enough realised returns before soft-freezing.
+            if est.sample_size >= MIN_SAMPLES:
+                self._var_soft_breach = est.var > self._var_limit
+            else:
+                self._var_soft_breach = False
             if self._var_soft_breach and not prev_soft:
                 await self._emergency(
                     action="REDUCE_ONLY",
                     reason=f"24h VaR {est.var*100:.2f}% > {self._var_limit*100:.0f}% limit",
                 )
+            elif not self._var_soft_breach and prev_soft:
+                await self._log("VaR back within limit -- REDUCE_ONLY lifted", "ok")
 
             # auto re-arm after the hard-freeze cooldown
             if self._risk_frozen and time.monotonic() >= self._risk_unfreeze_at:

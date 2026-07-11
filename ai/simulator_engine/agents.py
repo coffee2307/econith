@@ -198,7 +198,7 @@ class CorporateAI(MarketAwareAgent):
             trigger = f"a systemic market-crisis print (stress {m.stress:.2f})"
         fact = CausalFact(
             actor="Corporate AI",
-            country=c.name,
+            country=code,
             action=(f"repatriated ${flight_usd / 1e9:.1f}B, dumped sovereign paper and "
                     f"relocated supply chains"),
             cause=f"{trigger} with sell-pressure {m.sell_pressure:.2f}",
@@ -260,7 +260,7 @@ class GovernmentAI(MarketAwareAgent):
 
         fact = CausalFact(
             actor="Government AI",
-            country=c.name,
+            country=code,
             action=(f"imposed capital controls, hiked policy rates "
                     f"+{0.0045*defend*1e4:.0f}bps{events_extra}"),
             cause=(f"${drain/1e9:.1f}B in capital flight and a "
@@ -332,7 +332,7 @@ class SocietalSentimentAI(MarketAwareAgent):
         if projected > self._threshold and delta > 0.0:
             facts.append(CausalFact(
                 actor="Societal AI",
-                country=c.name,
+                country=code,
                 action="mass mobilisation and strikes erupted",
                 cause=(f"civil-unrest index breached {self._threshold:.2f} under market "
                        f"stress {m.stress:.2f} and {c.monetary.inflation_cpi*100:.1f}% inflation"),
