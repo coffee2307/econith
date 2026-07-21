@@ -25,6 +25,22 @@ services:
     environment:
       # Sidecar runs on the host (not in compose); reach it from inside the container.
       SOCIAL_API_URL: http://host.docker.internal:5001
+      # Local-first LLM route. Ollama runs on the Windows host; Groq credentials
+      # from .env remain an automatic fallback if the local runner is unavailable.
+      LOCAL_LLM_ENABLED: "true"
+      LOCAL_LLM_BASE_URL: http://host.docker.internal:11434/v1
+      LOCAL_LLM_MODEL_NAME: llama3:8b
+      LOCAL_LLM_FIRST: "true"
+      LOCAL_LLM_TIMEOUT_S: "240"
+      LOCAL_LLM_MAX_TOKENS: "384"
+      LOCAL_LLM_QUEUE_TIMEOUT_S: "3"
+      LOCAL_LLM_CONTEXT_TOKENS: "2048"
+      LOCAL_LLM_GOVERNOR_CADENCE_TICKS: "120"
+      MODEL_DIR: /app/models
+      MODEL_REGISTRY: /app/models/registry
+      # Weak-machine friendly: World off until Main Control enables it.
+      WORLD_SIMULATION_DEFAULT: "false"
+      ECONITH_MOCK_TWAP: "false"
     ports:
       - "8000:8000"
     volumes:
@@ -42,6 +58,7 @@ services:
       - ./sentinel:/app/sentinel:ro
       - ./archive/vendors/manifest.json:/app/archive/vendors/manifest.json:ro
       - ./main.py:/app/main.py:ro
+      - ./models:/app/models:ro
       - ./datasets:/app/datasets
       - ./logs:/app/logs
     depends_on:

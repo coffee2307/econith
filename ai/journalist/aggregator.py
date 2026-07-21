@@ -1,21 +1,14 @@
 """ECONITH :: ai.journalist.aggregator
 
-The Journalist LLM -- semantic narrative synthesis engine.
+World-term news wire — NOT a CPI tick paraphraser.
 
-An objective global financial news terminal. It subscribes to the internal
-EventBus macro/micro channels (``world.macro``, ``world.micro_impact``,
-``core.macro.context``, ``quant.fill``), buffers the raw numeric multi-agent
-state deltas, and translates them into cohesive, contextualized breaking-news
-logs.
+Real “thinking” in ECONITH lives in Tier-1 governors + material dialogue turns
+(``world.dialogue.turn`` with ``source=llm``). The journalist’s job is to put
+those grounded agent utterances on the wire.
 
-Rather than hardcoded rules, it builds a structured prompt from the factual
-numeric deltas and hands it to a pluggable :class:`LLMBackend`. A deterministic
-template backend ships by default so the terminal is fully operable without any
-external model; swapping in a real LLM means implementing one ``complete``
-method.
-
-Required log format:
-    [WORLD TERM - TIMESTAMP] [CATEGORY]: <cohesive narrative synthesis>.
+It deliberately does **not** synthesize stories from oscillating ``world.macro``
+CPI noise — that path produced fluent but empty LLM waffle that felt hardcoded.
+Large execution fills may still get a short numeric line; silence beats filler.
 """
 from __future__ import annotations
 
@@ -76,13 +69,16 @@ class NewsLog:
         stamp = self.ts.strftime("%Y-%m-%d %H:%M:%S")
         return f"[WORLD TERM - {stamp}] [{self.category.upper()}]: {self.message}"
 
-    def to_cockpit(self) -> dict[str, str]:
-        return {
+    def to_cockpit(self, *, locale: str = "") -> dict[str, str]:
+        out = {
             "ts": self.ts.isoformat(),
             "category": self.category,
             "level": self.level,
             "message": self.message,
         }
+        if locale:
+            out["locale"] = locale
+        return out
 
 
 # ---------------------------------------------------------------------------
@@ -101,17 +97,10 @@ class TemplateLLMBackend:
 
     async def complete(self, prompt: str, facts: list[NumericDelta]) -> str:
         if not facts:
-            return "Markets steady; no material structural re-pricing this interval."
-        drivers = ", ".join(f.render() for f in facts[:4])
-        lead = facts[0]
-        if abs(lead.value) > (5.0 if lead.unit == "%" else 1.0):
-            tone = "Geopolitical friction triggers localized structural re-routing."
-        else:
-            tone = "Incremental macro drift observed across the global matrix."
-        return (
-            f"{tone} Chinese and regional corporate infrastructure recalibrate "
-            f"supply lines while the Core reprices systemic risk. Drivers: {drivers}."
-        )
+            return ""
+        # Deterministic one-liner from netted facts only — no invented China/Core waffle.
+        drivers = "; ".join(f.render() for f in facts[:5])
+        return f"Material moves: {drivers}."
 
 
 class OpenAICompatibleLLMBackend:
@@ -147,20 +136,22 @@ class OpenAICompatibleLLMBackend:
                         "role": "system",
                         "content": (
                             "You are ECONITH's world-event news writer. "
-                            "Write one concise, factual paragraph, no hype."
+                            "Write one short factual sentence or two. "
+                            "Never invent volatility stories from canceling +/- moves. "
+                            "If facts are empty or noise, reply with exactly: SKIP"
                         ),
                     },
                     {"role": "user", "content": prompt},
                 ],
-                temperature=0.2,
-                max_tokens=220,
+                temperature=0.15,
+                max_tokens=120,
             )
             content = response.choices[0].message.content or ""
             return content.strip()
 
         text = await asyncio.to_thread(_call)
-        if not text:
-            return await TemplateLLMBackend().complete(prompt, facts)
+        if not text or text.strip().upper() == "SKIP":
+            return ""
         return text
 
 
@@ -177,7 +168,7 @@ class JournalistLLM:
         *,
         flush_interval_s: float = 30.0,
         history: int = 100,
-        min_delta: float = 0.05,
+        min_delta: float = 0.5,
     ) -> None:
         self._bus = bus
         self._backend = backend or TemplateLLMBackend()
@@ -194,13 +185,15 @@ class JournalistLLM:
         self._fact_cooldown_s: float = 120.0
         self._task: asyncio.Task[None] | None = None
         self._running = False
+        # CPI must move by this many percentage points (net) to make news.
+        self._cpi_material_pp = 1.5
 
     # -- wiring ---------------------------------------------------------------
     def register(self) -> None:
-        self._bus.subscribe("world.macro", self._on_world_macro)
-        self._bus.subscribe("world.sovereign", self._on_world_macro)
+        # No world.macro CPI subscription — tick noise → LLM waffle.
         self._bus.subscribe("world.micro_impact", self._on_micro_impact)
-        self._bus.subscribe("core.macro.context", self._on_core_macro)
+        self._bus.subscribe("world.dialogue.turn", self._on_dialogue_turn)
+        self._bus.subscribe("world.agent.narrative", self._on_agent_narrative)
         self._bus.subscribe("quant.fill", self._on_fill)
 
     async def start(self) -> None:
@@ -242,72 +235,122 @@ class JournalistLLM:
             NumericDelta(field=field, value=delta_val, unit=unit, entity=entity)
         )
 
-    async def _on_world_macro(self, event: Event) -> None:
-        self._category = "MACRO"
-        countries = event.payload.get("countries", {}) or {}
-        for code, snap in list(countries.items())[:6]:
-            inflation = snap.get("inflation")
-            if inflation is not None:
-                self._enqueue_if_changed(
-                    f"{code}:cpi",
-                    float(inflation) * 100.0,
-                    field="CPI",
-                    unit="%",
-                    entity=code,
-                    threshold=0.1,
-                )
-            export = snap.get("export_index")
-            if export is not None:
-                self._enqueue_if_changed(
-                    f"{code}:export",
-                    float(export) - 100.0,
-                    field="Export Index",
-                    unit="%",
-                    entity=code,
-                    threshold=1.0,
-                )
+    async def _on_dialogue_turn(self, event: Event) -> None:
+        """Wire agent dialogue — LLM turns and honest status fallbacks."""
+        source = str(event.payload.get("source") or "")
+        if source not in ("llm", "status"):
+            return
+        utterances = event.payload.get("utterances") or []
+        if not utterances:
+            return
+        lines: list[str] = []
+        for u in utterances[:3]:
+            if not isinstance(u, dict):
+                continue
+            text = str(u.get("text") or "").strip()
+            if not text or len(text) < 16:
+                continue
+            low = text.lower()
+            if "selecting action" in low or "chọn hành động" in low:
+                continue
+            if self._looks_like_cpi_waffle(text):
+                continue
+            role = str(u.get("role") or "").strip()
+            country = str(u.get("country") or "").strip()
+            prefix = f"{role} ({country}): " if role and country else ""
+            lines.append(f"{prefix}{text}" if prefix else text)
+        if not lines:
+            return
+        reason = str(event.payload.get("material_reason") or "").strip()
+        message = " | ".join(lines)
+        if reason:
+            message = f"[{reason}] {message}"
+        if source == "status":
+            message = f"[status] {message}"
+        await self._publish_wire(
+            message,
+            category="MACRO",
+            level="info" if source == "status" else str(event.payload.get("level") or "warn"),
+            dedupe_key=f"dlg:{source}:{message[:96]}",
+        )
+
+    async def _on_agent_narrative(self, event: Event) -> None:
+        """Promote grounded agent narratives that came from dialogue, not templates."""
+        if str(event.payload.get("provenance") or event.payload.get("source") or "") not in (
+            "llm",
+            "dialogue",
+        ):
+            return
+        if str(event.payload.get("provenance") or "") == "control_law":
+            return
+        text = str(event.payload.get("text") or "").strip()
+        if not text or len(text) < 20 or self._looks_like_cpi_waffle(text):
+            return
+        # Dialogue path already published the turn; skip duplicate agent echoes.
+        if str(event.payload.get("source") or "") == "dialogue":
+            return
+        await self._publish_wire(
+            text,
+            category="MACRO",
+            level=str(event.payload.get("level") or "info"),
+            dedupe_key=f"nar:{text[:96]}",
+        )
 
     async def _on_micro_impact(self, event: Event) -> None:
-        self._category = "GEOPOLITICS"
-        self._level = "warn"
-        fact = event.payload.get("fact")
-        if not fact:
-            return
-        fact_str = str(fact)
+        # Coupling vector only — never republish canned ``fact`` strings.
+        return
+
+    async def _publish_wire(
+        self,
+        message: str,
+        *,
+        category: str,
+        level: str,
+        dedupe_key: str,
+    ) -> None:
         now = asyncio.get_event_loop().time()
-        last_seen = self._fact_seen.get(fact_str, 0.0)
-        if now - last_seen < self._fact_cooldown_s:
+        if now - self._fact_seen.get(dedupe_key, 0.0) < self._fact_cooldown_s:
             return
-        self._fact_seen[fact_str] = now
-        # Prune stale entries to prevent unbounded memory growth.
+        self._fact_seen[dedupe_key] = now
         if len(self._fact_seen) > 500:
             cutoff = now - self._fact_cooldown_s * 2
-            self._fact_seen = {
-                k: v for k, v in self._fact_seen.items() if v > cutoff
-            }
+            self._fact_seen = {k: v for k, v in self._fact_seen.items() if v > cutoff}
+        from core.locale_prefs import dashboard_locale
+
+        locale = dashboard_locale()
         log = NewsLog(
             ts=datetime.now(timezone.utc),
-            category=self._category,
-            level=self._level,
-            message=fact_str,
+            category=category,
+            level=level,
+            message=message,
         )
         self._logs.appendleft(log)
-        await self._bus.publish("journalist.news", **log.to_cockpit())
+        await self._bus.publish("journalist.news", **log.to_cockpit(locale=locale))
         logger.info(log.format())
-        self._level = "info"
 
-    async def _on_core_macro(self, event: Event) -> None:
-        macro = event.payload.get("macro", {}) or {}
-        btc_prem = macro.get("btc_risk_premium")
-        if btc_prem is not None:
-            self._enqueue_if_changed(
-                "core:btc_prem",
-                float(btc_prem) * 100.0,
-                field="BTC systemic risk premium",
-                unit="%",
-                entity="Core",
-                threshold=0.5,
-            )
+    @staticmethod
+    def _looks_like_cpi_waffle(text: str) -> bool:
+        """Reject fluent-but-empty CPI oscillation paragraphs."""
+        t = text.lower()
+        markers = (
+            "dao động",
+            "tăng giảm",
+            "giảm phát",
+            "oscillat",
+            "đã giảm",
+            "rồi giảm",
+            "then fell",
+            "up and down",
+            "biến động nhỏ",
+            "ổn định tương đối",
+        )
+        if "cpi" in t or "chỉ số giá" in t or "consumer price" in t:
+            if any(m in t for m in markers):
+                return True
+            # Same-magnitude up/down storytelling.
+            if ("tăng" in t and "giảm" in t) or ("rose" in t and "fell" in t):
+                return True
+        return False
 
     async def _on_fill(self, event: Event) -> None:
         vol = float(event.payload.get("filledVolume", 0.0))
@@ -315,61 +358,65 @@ class JournalistLLM:
         notional = vol * price
         if notional <= 250_000.0:
             return
-        self._category = "EXECUTION"
-        self._level = "warn"
-        self._pending.append(
-            NumericDelta(
-                field="block execution",
-                value=notional,
-                unit="",
-                entity=str(event.payload.get("asset", "")),
-            )
+        asset = str(event.payload.get("asset", "") or "asset")
+        await self._publish_wire(
+            f"Block execution: {asset} ~${notional:,.0f}",
+            category="EXECUTION",
+            level="warn",
+            dedupe_key=f"fill:{asset}:{int(notional)}",
         )
 
-    # -- synthesis loop -------------------------------------------------------
+    # -- synthesis loop (legacy numeric path — fills only; CPI disabled) ------
     async def _flush_loop(self) -> None:
         while self._running:
             await asyncio.sleep(self._flush_interval)
             await self._synthesize()
 
     async def _synthesize(self) -> None:
+        """Numeric flush is intentionally quiet after CPI wire was removed."""
         if not self._pending:
             return
-        facts = list(self._pending)
+        raw = list(self._pending)
         self._pending.clear()
-
-        digest = "|".join(f"{f.entity}:{f.field}:{f.value:.4g}" for f in facts)
-        if digest == self._last_digest:
+        facts = self._net_material_facts(raw)
+        if not facts:
             return
-        self._last_digest = digest
-
-        from core.locale_prefs import dashboard_locale
-
-        prompt = self._build_prompt(facts, locale=dashboard_locale())
-        try:
-            message = await self._backend.complete(prompt, facts)
-        except Exception:  # noqa: BLE001 - model faults must not kill the feed
-            logger.exception("journalist backend failed; using template fallback")
-            message = await TemplateLLMBackend().complete(prompt, facts)
-
-        if message == self._last_message:
+        # Never LLM-paraphrase remaining numeric crumbs into macro essays.
+        drivers = "; ".join(f.render() for f in facts[:4])
+        if self._looks_like_cpi_waffle(drivers):
             return
-        self._last_message = message
-
-        log = NewsLog(
-            ts=datetime.now(timezone.utc),
+        await self._publish_wire(
+            f"Material moves: {drivers}",
             category=self._category,
             level=self._level,
-            message=message,
-            facts=facts,
+            dedupe_key=f"num:{drivers[:96]}",
         )
-        self._logs.appendleft(log)
-        self._level = "info"
-        await self._bus.publish("journalist.news", **log.to_cockpit())
-        if log.level in ("warn", "danger"):
-            logger.info(log.format())
-        else:
-            logger.debug(log.format())
+
+    def _net_material_facts(self, facts: list[NumericDelta]) -> list[NumericDelta]:
+        """Collapse same entity+field (cancel +x then -x) and drop noise."""
+        nets: dict[tuple[str, str, str], float] = {}
+        gross: dict[tuple[str, str, str], float] = {}
+        for f in facts:
+            key = (f.entity, f.field, f.unit)
+            nets[key] = nets.get(key, 0.0) + float(f.value)
+            gross[key] = gross.get(key, 0.0) + abs(float(f.value))
+        out: list[NumericDelta] = []
+        for (entity, field_name, unit), net in nets.items():
+            g = gross[(entity, field_name, unit)]
+            # Oscillation spam: large back-and-forth, tiny net direction.
+            if g > 1e-9 and abs(net) < 0.40 * g:
+                continue
+            if field_name == "CPI":
+                if abs(net) < self._cpi_material_pp:
+                    continue
+            elif unit == "%":
+                if abs(net) < max(self._min_delta, 1.0):
+                    continue
+            elif abs(net) < self._min_delta:
+                continue
+            out.append(NumericDelta(field=field_name, value=net, unit=unit, entity=entity))
+        out.sort(key=lambda d: abs(d.value), reverse=True)
+        return out
 
     @staticmethod
     def _build_prompt(facts: list[NumericDelta], *, locale: str = "en") -> str:
@@ -378,10 +425,11 @@ class JournalistLLM:
         lines = "\n".join(f"- {f.render()}" for f in facts)
         return (
             f"You are ECONITH's objective global financial news terminal. "
-            f"Write in {lang}. Translate the following raw numeric multi-agent "
-            f"state deltas into a single cohesive, contextualized breaking-news "
-            f"paragraph. Be factual, avoid hype, and explain the causal chain.\n"
-            f"State deltas:\n{lines}"
+            f"Write in {lang}. Translate ONLY these netted material deltas into "
+            f"one or two short sentences. Do not mention countries that are not "
+            f"listed. Do not invent oscillating volatility (+x then -x). "
+            f"If nothing is material, reply SKIP.\n"
+            f"Netted state deltas:\n{lines}"
         )
 
     # -- reads ----------------------------------------------------------------

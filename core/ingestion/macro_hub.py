@@ -121,6 +121,7 @@ class MacroIngestionHub:
         self._state = ExhaustiveContextState()
         self._tasks: list[asyncio.Task[None]] = []
         self._running = False
+        self._source_provenance: dict[str, dict[str, str]] = {}
         # Historical training sink: every pull is broadcast live AND appended.
         self._snapshots: MacroSnapshotWriter | None = (
             MacroSnapshotWriter(snapshot_root) if persist_history else None
@@ -169,12 +170,20 @@ class MacroIngestionHub:
         self._fold_into_state(features)
         source = adapter.config.kind.value
         frequency = adapter.config.frequency.value
+        provenance = getattr(adapter, "last_provenance", "unknown")
+        reason = getattr(adapter, "last_provenance_reason", "")
+        self._source_provenance[source] = {
+            "provenance": provenance,
+            "reason": reason,
+        }
         # (1) LIVE runtime broadcast onto the event bus.
         await self._bus.publish(
             adapter.topic,
             source=source,
             frequency=frequency,
             features=features,
+            provenance=provenance,
+            provenance_reason=reason,
             ts=datetime.now(timezone.utc).isoformat(),
         )
         # Emit the consolidated macro snapshot on the canonical world.macro-adjacent
@@ -183,11 +192,17 @@ class MacroIngestionHub:
             "core.macro.context",
             macro=self._state.macro.model_dump(exclude_none=True),
             regime_label=self._state.regime_label,
+            provenance=dict(self._source_provenance),
         )
         # (2) HISTORICAL append-only persistence for retrospective training.
         if self._snapshots is not None:
             await self._snapshots.append(source, frequency, features)
-        logger.debug("ingested %d features from %s", len(features), source)
+        logger.debug(
+            "ingested %d features from %s (provenance=%s)",
+            len(features),
+            source,
+            provenance,
+        )
 
     # -- consolidation --------------------------------------------------------
     def _fold_into_state(self, features: dict[str, float]) -> None:
@@ -220,6 +235,7 @@ class MacroIngestionHub:
         return {
             "generated_at": self._state.generated_at.isoformat(),
             "sources": list(self._adapters.keys()),
+            "source_provenance": dict(self._source_provenance),
             "macro": self._state.macro.model_dump(exclude_none=True),
             "regime": {
                 "label": self._state.regime_label,

@@ -145,6 +145,25 @@ class Environment(BaseSettings):
     llm_model_name: str = Field(
         default="llama-3.3-70b-versatile", alias="LLM_MODEL_NAME"
     )
+    local_llm_enabled: bool = Field(default=True, alias="LOCAL_LLM_ENABLED")
+    local_llm_base_url: str = Field(
+        default="http://localhost:11434/v1", alias="LOCAL_LLM_BASE_URL"
+    )
+    local_llm_model_name: str = Field(
+        default="llama3:8b", alias="LOCAL_LLM_MODEL_NAME"
+    )
+    local_llm_first: bool = Field(default=True, alias="LOCAL_LLM_FIRST")
+    local_llm_timeout_s: float = Field(default=240.0, alias="LOCAL_LLM_TIMEOUT_S")
+    local_llm_max_tokens: int = Field(default=384, alias="LOCAL_LLM_MAX_TOKENS")
+    local_llm_queue_timeout_s: float = Field(
+        default=3.0, alias="LOCAL_LLM_QUEUE_TIMEOUT_S"
+    )
+    local_llm_context_tokens: int = Field(
+        default=2048, alias="LOCAL_LLM_CONTEXT_TOKENS"
+    )
+    local_llm_governor_cadence_ticks: int = Field(
+        default=120, alias="LOCAL_LLM_GOVERNOR_CADENCE_TICKS"
+    )
     zep_api_key: str = Field(default="", alias="ZEP_API_KEY")
 
     @property
@@ -157,6 +176,18 @@ class Environment(BaseSettings):
     @property
     def has_llm_credentials(self) -> bool:
         return bool(self.llm_api_key_list)
+
+    @property
+    def has_any_llm(self) -> bool:
+        """True when local Ollama or a remote credential route is configured."""
+        return bool(
+            (
+                self.local_llm_enabled
+                and self.local_llm_base_url
+                and self.local_llm_model_name
+            )
+            or self.has_llm_credentials
+        )
 
     @property
     def effective_llm_api_key(self) -> str:

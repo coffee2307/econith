@@ -34,6 +34,7 @@ from typing import Any
 from core.engine import TickContext, TickPhase, TickPipeline
 from core.event_bus import EventBus
 from core.mode import coupling_enabled
+from core.system_controller import get_system_controller
 
 logger = logging.getLogger("econith.world.sovereign_graph")
 
@@ -268,9 +269,6 @@ class CentralBankAgent(SovereignAgent):
             proposals.append(PolicyProposal(
                 role=self.role, code=state.code, field="policy_rate",
                 delta=rate_delta, reason="taylor_rule",
-                narrative=(f"{state.name} central bank "
-                           f"{'hikes' if rate_delta > 0 else 'cuts'} "
-                           f"rates by {abs(rate_delta)*1e4:.0f}bps"),
             ))
         # Defend an FX peg / competitiveness: devalue to sustain exports if
         # export index has cratered under a tariff shock.
@@ -278,7 +276,6 @@ class CentralBankAgent(SovereignAgent):
             proposals.append(PolicyProposal(
                 role=self.role, code=state.code, field="fx_rate",
                 delta=state.fx_rate * 0.01, reason="competitive_devaluation",
-                narrative=f"{state.name} lets its currency slide to defend exports",
             ))
         return proposals
 
@@ -332,9 +329,6 @@ class PublicAgent(SovereignAgent):
             proposals.append(PolicyProposal(
                 role=self.role, code=state.code, field="social_unrest",
                 delta=delta, reason="social_dynamics",
-                narrative=(f"{state.name} public stress "
-                           f"{'rises' if delta > 0 else 'eases'} on "
-                           f"{state.inflation*100:.1f}% inflation"),
             ))
             proposals.append(PolicyProposal(
                 role=self.role, code=state.code, field="consumer_confidence",
@@ -548,12 +542,18 @@ class SovereignWorldGraph:
         self._pending_mutations = []
 
     async def _phase_resolve(self, ctx: TickContext) -> None:
+        # COMPUTE GUARDRAIL: skip the (heavy) multi-agent deliberation when the
+        # operator has suspended the World simulation.
+        if not get_system_controller().world_pipeline_active():
+            return
         # Each nation's agents deliberate; the trade matrix is mutated in-place
         # by EnterpriseAgents (supply-chain reroute) during deliberation.
         for node in self.nodes.values():
             self._tick_proposals.extend(node.deliberate(self, ctx))
 
     async def _phase_update(self, ctx: TickContext) -> None:
+        if not get_system_controller().world_pipeline_active():
+            return
         for prop in self._tick_proposals:
             target = self.nodes.get(prop.code)
             if target is None:
@@ -572,6 +572,8 @@ class SovereignWorldGraph:
             s.gdp_growth = _clamp(s.gdp_growth, -0.15, 0.15)
 
     async def _phase_emit(self, ctx: TickContext) -> None:
+        if not get_system_controller().world_pipeline_active():
+            return
         ctx.signals["world_nations"] = len(self.nodes)
         # Published on a DISTINCT topic (``world.sovereign``) so the advanced
         # multi-agent graph never collides with the legacy WorldKernel's
@@ -588,7 +590,9 @@ class SovereignWorldGraph:
         # coupling is enabled (SIMULATION). In REALITY the feed is shut down at the
         # source so the sovereign brain is never perturbed by simulated shocks --
         # complementing the EventBus mode-gate (defence in depth).
-        if coupling_enabled():
+        # World->Quant coupling requires BOTH the sovereign gate (SIMULATION) AND
+        # the operator's bridge toggle + compute switch to be open.
+        if coupling_enabled() and get_system_controller().bridge_and_compute_open():
             for fact in self._tick_facts:
                 await self._bus.publish(
                     "world.agent.narrative",

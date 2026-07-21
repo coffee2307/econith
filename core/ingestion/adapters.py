@@ -73,6 +73,8 @@ class IngestionAdapter(ABC):
         self.config = config
         self._fetch = fetch or _default_fetch
         self._rng = random.Random(hash(config.kind.value) & 0xFFFF)
+        self.last_provenance: str = "unknown"  # live | mock
+        self.last_provenance_reason: str = ""
 
     @property
     def topic(self) -> str:
@@ -83,17 +85,23 @@ class IngestionAdapter(ABC):
 
         Wraps :meth:`_collect_once` in the retry envelope; on total failure it
         returns the deterministic :meth:`_mock` payload so the CORE never stalls.
+        Provenance is recorded on ``last_provenance`` / ``last_provenance_reason``.
         """
         attempt = 0
         while True:
             try:
-                return await self._collect_once()
+                features = await self._collect_once()
+                self.last_provenance = "live"
+                self.last_provenance_reason = ""
+                return features
             except Exception as exc:  # noqa: BLE001 - resilience is the contract
                 attempt += 1
                 if attempt > self.config.max_retries:
                     logger.warning(
                         "%s exhausted retries (%s); serving mock", self.config.kind.value, exc
                     )
+                    self.last_provenance = "mock"
+                    self.last_provenance_reason = f"{type(exc).__name__}: {exc}"
                     return self._mock()
                 delay = self.config.backoff_base_s * (2 ** (attempt - 1))
                 jitter = self._rng.uniform(0.0, delay * 0.25)

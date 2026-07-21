@@ -286,8 +286,10 @@ def quant_to_macro(
         + 0.2 * market.liquidation,
         0.0, 1.0,
     )
-    # A calm, risk-on tape produces no feedback.
-    if systemic < 0.12:
+    # A calm or merely-choppy tape produces no feedback. This function runs
+    # EVERY tick, so an ordinary volatile crypto session must not qualify as
+    # a systemic macro event — only genuine stress episodes pass the gate.
+    if systemic < 0.25:
         return {}
 
     feedback: dict[str, MacroFeedback] = {}
@@ -296,21 +298,25 @@ def quant_to_macro(
         # Capital flees fragile nations hardest; safe havens can even attract.
         directed = systemic * (0.35 + 1.15 * frag)
         intensity = _clamp(directed, 0.0, 1.0)
-        if intensity < 0.04:
+        if intensity < 0.08:
             continue
 
         # Capital flight scales with the country's mobile external capital base.
         mobile_base = c.fiscal.fdi_inflow + 0.25 * c.fiscal.foreign_reserves
-        capital_flight = mobile_base * 0.18 * intensity
+        capital_flight = mobile_base * 0.03 * intensity
 
+        # PER-TICK rates. The old values were sized for a whole multi-day
+        # episode but were re-applied every tick while the tape stayed hot,
+        # compounding a 6%/tick currency slide + 0.05/tick unrest push that
+        # locked the world into a permanent crisis state within minutes.
         fb = MacroFeedback(
             code=code,
             capital_flight_usd=capital_flight,
-            fx_depreciation=0.06 * intensity,                 # up to ~6% per episode
-            yield_shock_bps=120.0 * intensity * frag,         # sovereign dump
-            investment_drain=-0.02 * intensity,               # public_investment_pct
-            imported_inflation=0.010 * intensity,             # FX pass-through
-            unrest_pressure=0.05 * intensity,                 # social_unrest_index
+            fx_depreciation=0.004 * intensity,                # per-tick slide
+            yield_shock_bps=25.0 * intensity * frag,          # sovereign pressure
+            investment_drain=-0.004 * intensity,              # public_investment_pct
+            imported_inflation=0.002 * intensity,             # FX pass-through
+            unrest_pressure=0.008 * intensity,                # social_unrest_index
             intensity=round(intensity, 4),
         )
         feedback[code] = fb

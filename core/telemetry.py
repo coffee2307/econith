@@ -26,9 +26,11 @@ from core.event_bus import Event, EventBus
 from core.mode import get_mode_manager
 
 MAX_EVENTS = 60
-MAX_WORLD_EVENTS = 40
-MAX_WORLD_AGENTS = 50
-AGENT_FEED_COOLDOWN_S = 50.0
+MAX_WORLD_EVENTS = 60
+MAX_WORLD_AGENTS = 60
+# Wall-clock throttle per actor:country. Story-level repetition is suppressed
+# at the source (WorldKernel narrative gate), so this only smooths bursts.
+AGENT_FEED_COOLDOWN_S = 20.0
 
 # Sources routed to the World research feed (never Quant's execution log).
 _WORLD_SOURCES = frozenset({
@@ -39,9 +41,12 @@ _WORLD_SOURCES = frozenset({
     "sovereign",
     "journalist",
     "scenario",
+    "hypothesis",
     "regime",
 })
 
+# Always surface these sources on the World event feed (even at info level).
+_WORLD_INFO_SOURCES = frozenset({"hypothesis", "scenario", "status"})
 # Sources that may emit info-level lines into the Quant ops log.
 _QUANT_INFO_SOURCES = frozenset({
     "sentinel",
@@ -92,7 +97,12 @@ class MetricsHub:
         self._world_events: deque[dict[str, Any]] = deque(maxlen=MAX_WORLD_EVENTS)
         self._world_agents: deque[dict[str, Any]] = deque(maxlen=MAX_WORLD_AGENTS)
         self._agent_last_ts: dict[str, float] = {}
+        self._headline_last_ts: dict[str, float] = {}
         self._headline_last: str = ""
+        self._journalist_last_ts: float = 0.0
+        self._journalist_last_msg: str = ""
+        self._dialogue_turns: deque[dict[str, Any]] = deque(maxlen=40)
+        self._execution: dict[str, Any] = {}
 
     # -- wiring ---------------------------------------------------------------
     def register(self) -> None:
@@ -115,6 +125,8 @@ class MetricsHub:
         self._bus.subscribe("order.update", self._on_order_update)
         self._bus.subscribe("world.agent.narrative", self._on_world_agent)
         self._bus.subscribe("world.headline", self._on_world_headline)
+        self._bus.subscribe("world.dialogue.turn", self._on_dialogue_turn)
+        self._bus.subscribe("execution.status", self._on_execution_status)
 
     # -- handlers -------------------------------------------------------------
     async def _on_ticker(self, event: Event) -> None:
@@ -165,6 +177,8 @@ class MetricsHub:
             "weights": p.get("weights"),
             "per_agent": p.get("per_agent"),
             "explain": p.get("explain"),
+            "agent_brain": p.get("agent_brain"),
+            "regime_brain": p.get("regime_brain"),
         }
 
     async def _on_route_plan(self, event: Event) -> None:
@@ -183,6 +197,12 @@ class MetricsHub:
             "countries": event.payload.get("countries"),
             "tariffs": event.payload.get("tariffs"),
             "alliances": event.payload.get("alliances"),
+            # Tier-3 population read-model + Tier-1/2 hierarchy telemetry so the
+            # dashboard can render the cognitive world, not just the macro grid.
+            "agent_population": event.payload.get("agent_population"),
+            "hierarchy_telemetry": event.payload.get("hierarchy_telemetry"),
+            "governor_llm": event.payload.get("governor_llm"),
+            "dialogue": event.payload.get("dialogue"),
             # bidirectional feedback-loop telemetry (macro<->micro coupling)
             "micro_impact": event.payload.get("micro_impact"),
             "market": event.payload.get("market"),
@@ -190,6 +210,18 @@ class MetricsHub:
 
     async def _on_sentinel_status(self, event: Event) -> None:
         self._sentinel = dict(event.payload)
+
+    async def _on_execution_status(self, event: Event) -> None:
+        self._execution = dict(event.payload)
+        routing = str(event.payload.get("execution_routing") or "")
+        if routing == "DEGRADED":
+            detail = str(event.payload.get("detail") or "exchange unreachable")
+            self._push_quant_event(
+                level="warn",
+                source="ccxt",
+                message=f"Execution DEGRADED — {detail}",
+                ts=event.ts,
+            )
 
     async def _on_emergency(self, event: Event) -> None:
         self._push_quant_event(
@@ -205,7 +237,7 @@ class MetricsHub:
         message = event.payload.get("message", "")
 
         if source in _WORLD_SOURCES:
-            if level in ("warn", "danger"):
+            if level in ("warn", "danger") or source in _WORLD_INFO_SOURCES:
                 self._push_world_event(
                     level=level, source=source, message=message, ts=event.ts
                 )
@@ -223,8 +255,17 @@ class MetricsHub:
 
     async def _on_quant_fill(self, event: Event) -> None:
         symbol = event.payload.get("asset") or event.payload.get("symbol") or "—"
+        status = str(event.payload.get("status") or "FILLED").upper()
         vol = float(event.payload.get("filledVolume") or event.payload.get("quantity") or 0)
         price = float(event.payload.get("fillPrice") or event.payload.get("price") or 0)
+        if status != "FILLED" or vol <= 0:
+            self._push_quant_event(
+                level="warn",
+                source="execution",
+                message=f"Order {status} {symbol} — {event.payload.get('detail') or 'no fill'}",
+                ts=event.ts,
+            )
+            return
         notional = vol * price
         level = "warn" if notional >= 250_000 else "ok"
         self._push_quant_event(
@@ -257,9 +298,14 @@ class MetricsHub:
         actor = str(event.payload.get("actor", ""))
         level = str(event.payload.get("level", "info"))
         now = asyncio.get_event_loop().time()
-        last = self._agent_last_ts.get(actor, 0.0)
+        country = str(event.payload.get("country", ""))
+        # Throttle each semantic speaker/country stream. Danger events used to
+        # bypass cooldown entirely, flooding the UI every simulation tick with
+        # the same corporate-flight sentence whose amount changed slightly.
+        feed_key = f"{actor}:{country}"
+        last = self._agent_last_ts.get(feed_key, 0.0)
         cooldown = AGENT_FEED_COOLDOWN_S  # wall-clock: readable even at 20x sim speed
-        if level != "danger" and now - last < cooldown:
+        if now - last < cooldown:
             return
         if self._world_agents:
             prev = self._world_agents[0]
@@ -271,7 +317,7 @@ class MetricsHub:
                 and text[:40] == str(prev.get("text", ""))[:40]
             ):
                 return
-        self._agent_last_ts[actor] = now
+        self._agent_last_ts[feed_key] = now
         self._world_agents.appendleft(
             {
                 "ts": event.ts.isoformat(),
@@ -286,26 +332,87 @@ class MetricsHub:
         )
 
     async def _on_world_headline(self, event: Event) -> None:
+        import asyncio
+
         message = str(event.payload.get("message", ""))
         if not message or message == self._headline_last:
             return
+        source = str(event.payload.get("source", "world"))
+        country = str(event.payload.get("country", ""))
+        now = asyncio.get_event_loop().time()
+        headline_key = f"{source}:{country}"
+        # Event headlines describe the same underlying state transition as the
+        # agent feed. Keep one material headline per source/country window.
+        if now - self._headline_last_ts.get(headline_key, 0.0) < AGENT_FEED_COOLDOWN_S:
+            return
+        self._headline_last_ts[headline_key] = now
         self._headline_last = message
         self._push_world_event(
             level=event.payload.get("level", "info"),
-            source=event.payload.get("source", "world"),
+            source=source,
             message=message,
             ts=event.ts,
         )
 
     async def _on_journalist_news(self, event: Event) -> None:
-        level = event.payload.get("level", "info")
-        if level not in ("warn", "danger"):
+        """Admit all non-empty Journalist levels (info/ok/warn/danger).
+
+        Previously only warn/danger reached the dashboard, so the terminal's
+        ordinary MACRO digests never appeared in the Event Log.
+        """
+        import asyncio
+
+        message = str(event.payload.get("message", "")).strip()
+        if not message:
             return
-        self._push_world_event(
-            level=level,
-            source="journalist",
-            message=event.payload.get("message", ""),
-            ts=event.ts,
+        now = asyncio.get_event_loop().time()
+        # Throttle near-identical digests; keep the feed readable at high speed.
+        if (
+            message == self._journalist_last_msg
+            and now - self._journalist_last_ts < AGENT_FEED_COOLDOWN_S
+        ):
+            return
+        if now - self._journalist_last_ts < 8.0 and message[:80] == self._journalist_last_msg[:80]:
+            return
+        self._journalist_last_ts = now
+        self._journalist_last_msg = message
+        level = str(event.payload.get("level", "info") or "info")
+        self._world_events.appendleft(
+            {
+                "ts": event.ts.isoformat(),
+                "level": level,
+                "source": "journalist",
+                "message": message,
+                "category": event.payload.get("category", ""),
+                "locale": event.payload.get("locale", ""),
+            }
+        )
+
+    async def _on_dialogue_turn(self, event: Event) -> None:
+        payload = dict(event.payload)
+        self._dialogue_turns.appendleft(payload)
+        # Surface the lead utterance into the agent feed so the UI chat updates
+        # even before a dedicated dialogue panel is rendered.
+        utterances = payload.get("utterances") or []
+        if not utterances:
+            return
+        lead = utterances[0] if isinstance(utterances[0], dict) else {}
+        text = str(lead.get("text", "")).strip()
+        if not text:
+            return
+        self._world_agents.appendleft(
+            {
+                "ts": event.ts.isoformat(),
+                "sim_day": payload.get("tick"),
+                "actor": lead.get("role") or lead.get("agent_id") or "Dialogue",
+                "country": lead.get("country", ""),
+                "text": text,
+                "level": payload.get("level", "info"),
+                "source": "dialogue",
+                "locale": lead.get("locale", "en"),
+                "metrics": lead.get("metrics") or [],
+                "provenance": payload.get("source", "dialogue"),
+            }
         )
 
     def _push_quant_event(
@@ -352,5 +459,7 @@ class MetricsHub:
             "events": list(self._quant_events),
             "world_events": list(self._world_events),
             "world_agents": list(self._world_agents),
+            "world_dialogue": list(self._dialogue_turns),
             "quant_mode": get_mode_manager().snapshot(),
+            "execution": dict(self._execution) if self._execution else None,
         }

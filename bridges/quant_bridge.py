@@ -29,6 +29,7 @@ from core.mode import QuantMode, current_mode
 from econith.world import AbidesStepKernel
 from quant.ccxt_bridge import CCXTBinanceBridge
 from quant.payloads import ExecutionPayload, OrderSide, OrderType
+from quant.pretrade_gate import PreTradeGate, edge_bps_from_signal
 
 logger = logging.getLogger("econith.bridges.quant")
 
@@ -53,6 +54,8 @@ class QuantExecutionBridge:
         self._ccxt = ccxt
         self._base_notional = base_notional
         self._marks: dict[str, float] = {}
+        # Mandatory pre-trade net-profit filter (Anti-Overtrading Protocol).
+        self._gate = PreTradeGate()
         # Optional ABIDES synthetic LOB. When present AND in SIMULATION, order
         # intents fill against the discrete order book instead of the CCXT
         # synthetic path. In REALITY it is never consulted (defense-in-depth on
@@ -89,6 +92,29 @@ class QuantExecutionBridge:
         payload = self._build_payload(event.payload)
         if payload is None:
             return
+
+        # === ORDER EXECUTION GATE (mandatory net-profit filter) ==============
+        # Expected Net Profit = Expected Gross - Fees - Slippage/Impact - Spread.
+        # A non-positive expectancy (or a risk-budget breach) drops the order.
+        gate = self._evaluate_pretrade(event.payload, payload)
+        if gate is not None and not gate.approved:
+            await self._bus.publish(
+                "order.rejected",
+                symbol=payload.symbol,
+                side=payload.side.value,
+                quantity=payload.quantity,
+                reason=gate.reason,
+                gate=gate.as_dict(),
+            )
+            await self._bus.publish(
+                "system.log", level="info", source="pretrade_gate",
+                message=(
+                    f"DROP {payload.symbol} {payload.side.value} — {gate.reason} "
+                    f"(net={gate.expected_net:.6f}, fees={gate.expected_fees:.6f})"
+                ),
+            )
+            return
+
         mode = current_mode()
         # SIMULATION + ABIDES available -> fill against the discrete LOB simulator
         # for realistic microstructure. Any failure degrades to the CCXT synthetic
@@ -177,6 +203,40 @@ class QuantExecutionBridge:
             if token.startswith("regime="):
                 return token.split("=", 1)[1]
         return "UNKNOWN"
+
+    # -- pre-trade net-profit gate -------------------------------------------
+    def _evaluate_pretrade(self, intent: dict, payload: ExecutionPayload):
+        """Score a candidate order against the net-profit protocol.
+
+        Returns ``None`` (no opinion — fail-open) when there is no live mark to
+        price the order, so the gate never blocks purely for lack of a quote.
+        """
+        mark = self._marks.get(payload.symbol)
+        if not mark or mark <= 0.0:
+            return None
+        direction = self._extract_float(intent, "dir=")
+        confidence = self._extract_confidence(intent)
+        regime = self._extract_regime(intent)
+        edge_bps = edge_bps_from_signal(direction, confidence, regime)
+        side = "BUY" if payload.side.value.startswith("LONG") else "SELL"
+        return self._gate.evaluate(
+            price=mark,
+            quantity=payload.quantity,
+            side=side,
+            expected_edge_bps=edge_bps,
+            edge_source="estimated",
+        )
+
+    @staticmethod
+    def _extract_float(intent: dict, prefix: str) -> float:
+        reason = str(intent.get("reason", ""))
+        for token in reason.split():
+            if token.startswith(prefix):
+                try:
+                    return float(token.split("=", 1)[1])
+                except ValueError:
+                    return 0.0
+        return 0.0
 
     @staticmethod
     def _client_id(symbol: str) -> str:

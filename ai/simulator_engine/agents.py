@@ -33,6 +33,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
 from ai.regime.classifier import HeuristicRegimeClassifier
+from ai.simulator_engine.adaptive_policy import ActionOption, AdaptivePolicy, PolicyDecision
 from ai.simulator_engine.cross_impact import MicrostructuralVolatilityVector
 from ai.simulator_engine.macro_vectors import WorldState
 from ai.simulator_engine.market_context import MarketSnapshot
@@ -122,6 +123,26 @@ class CorporateAI(MarketAwareAgent):
         # Each conglomerate runs its OWN classifier -> heterogeneous perception.
         self._clf = HeuristicRegimeClassifier(window=window)
         self._rng = random.Random(seed)
+        self._policy = AdaptivePolicy(
+            (
+                ActionOption("hold", {"stress": -0.15}, bias=0.15),
+                ActionOption(
+                    "expand",
+                    {"calm": 0.9, "confidence": 0.8, "bullish": 0.35, "stress": -1.2},
+                    bias=-0.15,
+                ),
+                ActionOption(
+                    "delever",
+                    {"stress": 1.7, "sell_pressure": 0.9, "volatile": 0.8,
+                     "confidence": -0.6},
+                    bias=-0.55,
+                ),
+            ),
+            learning_rate=0.14,
+            exploration=0.06,
+            temperature=0.28,
+            seed=(seed or 0) + 1_000,
+        )
 
     def _perceive(self, code: str, world: WorldState, m: MarketSnapshot):
         """Feed a firm-specific view of the tape into the internal classifier."""
@@ -140,16 +161,37 @@ class CorporateAI(MarketAwareAgent):
         c = world.countries[code]
         m = board.market
         internal = self._perceive(code, world, m)
-
-        crisis = (internal.label == "VOLATILE" and internal.confidence > 0.4) or m.is_crisis()
-        if not crisis:
+        confidence = c.geopolitical.business_confidence
+        decision = self._policy.decide(
+            code,
+            features={
+                "stress": m.stress,
+                "calm": 1.0 - m.stress,
+                "sell_pressure": m.sell_pressure,
+                "bullish": max(0.0, m.ai_direction) * m.ai_confidence,
+                "confidence": confidence,
+                "volatile": (
+                    internal.confidence if internal.label == "VOLATILE" else 0.0
+                ),
+            },
+            utility=self._utility(code, world, m),
+        )
+        if decision.action == "hold":
             return AgentDecision()
+        if decision.action == "expand":
+            return self._expand(code, world, m, internal, decision)
 
         # Flight intensity: severity of the perceived crisis, damped by appetite.
-        sev = _clamp(0.5 * m.stress + 0.5 * (internal.confidence if internal.label == "VOLATILE" else 0.0), 0.0, 1.0)
+        sev = _clamp(
+            0.35
+            + 0.4 * m.stress
+            + 0.25 * (
+                internal.confidence if internal.label == "VOLATILE" else m.sell_pressure
+            ),
+            0.0,
+            1.0,
+        )
         flee = _clamp(sev * (1.15 - self._appetite), 0.0, 1.0)
-        if flee < 0.05:
-            return AgentDecision()
 
         mobile = c.fiscal.fdi_inflow + 0.25 * c.fiscal.foreign_reserves
         flight_usd = mobile * 0.16 * flee
@@ -191,7 +233,7 @@ class CorporateAI(MarketAwareAgent):
             headline=f"Conglomerate deleveraging out of {c.name}",
         )
 
-        if internal.label == "VOLATILE" and internal.confidence > 0.4:
+        if internal.label == "VOLATILE" and internal.confidence > 0.55:
             trigger = (f"an internally-classified VOLATILE regime "
                        f"({internal.confidence*100:.0f}% conf)")
         else:
@@ -205,10 +247,70 @@ class CorporateAI(MarketAwareAgent):
             effect=(f"{c.name} 10y yields +{0.0035*flee*1e4:.0f}bps, currency "
                     f"-{0.018*flee*100:.1f}%, supply-chain friction rising"),
             level="danger",
-            metrics={"capital_flight_usd": flight_usd, "yield_shock_bps": 0.0035 * flee * 1e4},
+            metrics={
+                "capital_flight_usd": flight_usd,
+                "yield_shock_bps": 0.0035 * flee * 1e4,
+                "policy_confidence": decision.confidence,
+            },
             tags=("capital_flight", f"regime:{internal.label}"),
         )
         return AgentDecision(adjustments=adjustments, facts=[fact], micro_shocks=[micro])
+
+    @staticmethod
+    def _utility(code: str, world: WorldState, m: MarketSnapshot) -> float:
+        c = world.countries[code]
+        return (
+            0.35 * c.geopolitical.business_confidence
+            + 0.25 * c.industrial.capacity_utilization
+            + 0.20 * _clamp(c.fiscal.export_index / 120.0, 0.0, 1.0)
+            + 0.20 * _clamp((c.gdp_growth + 0.10) / 0.20, 0.0, 1.0)
+            - 0.45 * m.stress
+        )
+
+    def _expand(
+        self,
+        code: str,
+        world: WorldState,
+        m: MarketSnapshot,
+        internal,
+        decision: PolicyDecision,
+    ) -> AgentDecision:
+        """Execute an expansion selected by the adaptive objective policy."""
+        c = world.countries[code]
+        confidence = c.geopolitical.business_confidence
+        drive = _clamp((confidence - 0.5) * 2.0 + 0.3 * max(0.0, m.ai_direction), 0.0, 1.0)
+        drive *= 0.5 + 0.5 * self._appetite
+        drive = max(0.08, drive) * (0.55 + 0.45 * decision.confidence)
+
+        invest_usd = (0.08 * c.fiscal.fdi_inflow + 0.015 * c.fiscal.foreign_reserves) * drive
+        adjustments = [
+            Adjustment(code, "fiscal", "fdi_inflow", c.fiscal.fdi_inflow * 0.05 * drive,
+                       reason="expansion_capex"),
+            Adjustment(code, "industrial", "capacity_utilization", 0.006 * drive,
+                       reason="capacity_buildout"),
+            Adjustment(code, "labor", "unemployment", -0.0012 * drive,
+                       reason="hiring_wave"),
+            Adjustment(code, "fiscal", "export_index", 0.5 * drive,
+                       reason="new_orders"),
+            Adjustment(code, "industrial", "supply_chain_friction", -0.015 * drive,
+                       reason="supply_chain_reshoring"),
+        ]
+        fact = CausalFact(
+            actor="Corporate AI",
+            country=code,
+            action=f"committed ${invest_usd / 1e9:.1f}B to new capacity and hiring",
+            cause=(f"a {internal.label} regime with business confidence "
+                   f"{confidence:.2f} and market stress {m.stress:.2f}"),
+            effect=f"{c.name} capacity utilisation, exports and hiring tick up",
+            level="ok",
+            metrics={
+                "investment_usd": invest_usd,
+                "confidence": confidence,
+                "policy_confidence": decision.confidence,
+            },
+            tags=("corporate_expansion", f"regime:{internal.label}"),
+        )
+        return AgentDecision(adjustments=adjustments, facts=[fact])
 
 
 # ===========================================================================
@@ -220,8 +322,28 @@ class GovernmentAI(MarketAwareAgent):
     name = "government_ai"
     priority = 20  # runs AFTER corporates so it can read their capital-flight writes
 
-    def __init__(self, defend_speed: float = 1.0) -> None:
+    def __init__(self, defend_speed: float = 1.0, seed: int | None = 31) -> None:
         self._defend = defend_speed
+        self._rng = random.Random(seed)
+        self._policy = AdaptivePolicy(
+            (
+                ActionOption("hold", bias=0.18),
+                ActionOption(
+                    "stimulate",
+                    {"slack": 1.0, "inflation_room": 0.8, "stress": -0.7},
+                    bias=-0.30,
+                ),
+                ActionOption(
+                    "defend",
+                    {"capital_pressure": 1.5, "attack": 0.9, "stress": 0.45},
+                    bias=-0.45,
+                ),
+            ),
+            learning_rate=0.12,
+            exploration=0.05,
+            temperature=0.30,
+            seed=(seed or 0) + 2_000,
+        )
 
     def evaluate(self, code: str, world: WorldState, board: TickBlackboard) -> AgentDecision:
         c = world.countries[code]
@@ -233,10 +355,27 @@ class GovernmentAI(MarketAwareAgent):
         attack = max(0.0, -m.ai_direction) * m.ai_confidence * m.volatility
 
         pressure = _clamp(0.7 * drain_ratio + 0.6 * attack, 0.0, 1.0)
-        if pressure < 0.06:
+        slack = _clamp(max(0.0, c.labor.unemployment - 0.045) * 14.0, 0.0, 1.0)
+        inflation_room = _clamp(
+            max(0.0, 0.040 - c.monetary.inflation_cpi) * 30.0, 0.0, 1.0
+        )
+        policy = self._policy.decide(
+            code,
+            features={
+                "capital_pressure": pressure,
+                "attack": attack,
+                "stress": m.stress,
+                "slack": slack,
+                "inflation_room": inflation_room,
+            },
+            utility=self._utility(code, world, m),
+        )
+        if policy.action == "hold":
             return AgentDecision()
+        if policy.action == "stimulate":
+            return self._stimulate(code, world, m, policy)
 
-        defend = _clamp(pressure * self._defend, 0.0, 1.0)
+        defend = _clamp(max(0.08, pressure) * self._defend, 0.0, 1.0)
         board.govt_retaliation[code] = defend
         adjustments: list[Adjustment] = [
             # Defensive rate hike to arrest the currency slide.
@@ -268,8 +407,67 @@ class GovernmentAI(MarketAwareAgent):
             effect=(f"reserve requirement +{0.012*defend*100:.2f}pp to stem the "
                     f"outflow and defend {c.name}'s sovereign balance sheet"),
             level="danger" if defend > 0.5 else "warn",
-            metrics={"defense_intensity": defend, "rate_hike_bps": 0.0045 * defend * 1e4},
+            metrics={
+                "defense_intensity": defend,
+                "rate_hike_bps": 0.0045 * defend * 1e4,
+                "policy_confidence": policy.confidence,
+            },
             tags=("capital_controls", "retaliation"),
+        )
+        return AgentDecision(adjustments=adjustments, facts=[fact])
+
+    @staticmethod
+    def _utility(code: str, world: WorldState, m: MarketSnapshot) -> float:
+        c = world.countries[code]
+        inflation_gap = abs(c.monetary.inflation_cpi - 0.025)
+        return (
+            0.30 * _clamp((c.gdp_growth + 0.10) / 0.20, 0.0, 1.0)
+            + 0.25 * c.geopolitical.political_stability
+            + 0.20 * c.geopolitical.public_approval
+            - 0.30 * _clamp(inflation_gap / 0.10, 0.0, 1.0)
+            - 0.25 * c.labor.unemployment
+            - 0.20 * m.stress
+        )
+
+    def _stimulate(
+        self,
+        code: str,
+        world: WorldState,
+        m: MarketSnapshot,
+        policy: PolicyDecision,
+    ) -> AgentDecision:
+        """Execute stimulus selected by the adaptive objective policy."""
+        c = world.countries[code]
+        slack = max(0.0, c.labor.unemployment - 0.045) * 14.0     # labour slack
+        cool = max(0.0, 0.040 - c.monetary.inflation_cpi) * 30.0  # inflation room
+        room = _clamp(0.6 * slack + 0.4 * cool, 0.0, 1.0)
+
+        ease = _clamp(max(0.06, room) * self._defend, 0.0, 1.0)
+        adjustments = [
+            Adjustment(code, "monetary", "interest_rate", -0.0020 * ease,
+                       reason="growth_support"),
+            Adjustment(code, "fiscal", "public_investment_pct", 0.002 * ease,
+                       reason="infrastructure_program"),
+            Adjustment(code, "industrial", "infrastructure_index", 0.004 * ease,
+                       reason="public_works"),
+            Adjustment(code, "geopolitical", "consumer_confidence", 0.01 * ease,
+                       reason="stimulus_optimism"),
+        ]
+        fact = CausalFact(
+            actor="Government AI",
+            country=code,
+            action=(f"cut rates {0.0020 * ease * 1e4:.0f}bps and launched a "
+                    f"public-investment program"),
+            cause=(f"{c.labor.unemployment * 100:.1f}% unemployment with "
+                   f"{c.monetary.inflation_cpi * 100:.1f}% inflation left policy room"),
+            effect=f"{c.name} infrastructure spending and consumer confidence rise",
+            level="ok",
+            metrics={
+                "rate_cut_bps": 0.0020 * ease * 1e4,
+                "stimulus_intensity": ease,
+                "policy_confidence": policy.confidence,
+            },
+            tags=("fiscal_stimulus",),
         )
         return AgentDecision(adjustments=adjustments, facts=[fact])
 
@@ -292,8 +490,33 @@ class SocietalSentimentAI(MarketAwareAgent):
     name = "societal_ai"
     priority = 30  # last: integrates the fallout of corporate + government moves
 
-    def __init__(self, unrest_threshold: float = 0.6) -> None:
+    def __init__(self, unrest_threshold: float = 0.6, seed: int | None = 47) -> None:
         self._threshold = unrest_threshold
+        self._rng = random.Random(seed)
+        self._policy = AdaptivePolicy(
+            (
+                ActionOption("steady", bias=0.15),
+                ActionOption(
+                    "mobilise",
+                    {"unrest": 1.3, "worsening": 0.8, "stress": 0.5},
+                    bias=-0.65,
+                ),
+                ActionOption(
+                    "cut_spending",
+                    {"cost_of_living": 1.1, "joblessness": 0.5, "stress": 0.25},
+                    bias=-0.45,
+                ),
+                ActionOption(
+                    "recover",
+                    {"calm": 0.7, "improving": 0.9, "confidence": 0.45},
+                    bias=-0.35,
+                ),
+            ),
+            learning_rate=0.13,
+            exploration=0.06,
+            temperature=0.30,
+            seed=(seed or 0) + 3_000,
+        )
 
     def evaluate(self, code: str, world: WorldState, board: TickBlackboard) -> AgentDecision:
         c = world.countries[code]
@@ -329,7 +552,21 @@ class SocietalSentimentAI(MarketAwareAgent):
         facts: list[CausalFact] = []
         micro_shocks: list[MicrostructuralVolatilityVector] = []
         projected = g.social_unrest_index + delta
-        if projected > self._threshold and delta > 0.0:
+        policy = self._policy.decide(
+            code,
+            features={
+                "unrest": projected,
+                "worsening": max(0.0, delta) * 10.0,
+                "improving": max(0.0, -delta) * 10.0,
+                "cost_of_living": _clamp(cost_of_living, 0.0, 1.0),
+                "joblessness": _clamp(joblessness, 0.0, 1.0),
+                "stress": m.stress,
+                "calm": 1.0 - m.stress,
+                "confidence": g.consumer_confidence,
+            },
+            utility=self._utility(code, world, m),
+        )
+        if policy.action == "mobilise":
             facts.append(CausalFact(
                 actor="Societal AI",
                 country=code,
@@ -339,7 +576,11 @@ class SocietalSentimentAI(MarketAwareAgent):
                 effect=(f"{c.name} political stability sliding; investors price a "
                         f"sovereign risk premium"),
                 level="danger",
-                metrics={"unrest_index": projected, "stress": m.stress},
+                metrics={
+                    "unrest_index": projected,
+                    "stress": m.stress,
+                    "policy_confidence": policy.confidence,
+                },
                 tags=("civil_unrest", "systemic_event"),
             ))
             # Unrest -> risk premium -> its own microstructural sell-shock.
@@ -353,7 +594,50 @@ class SocietalSentimentAI(MarketAwareAgent):
                 origin=f"civil_unrest:{code}",
                 headline=f"Civil unrest risk premium on {c.name}",
             ))
+        elif policy.action == "cut_spending":
+            facts.append(CausalFact(
+                actor="Societal AI",
+                country=code,
+                action="households cut discretionary spending",
+                cause=(f"cost of living is biting with "
+                       f"{c.monetary.inflation_cpi * 100:.1f}% inflation"),
+                effect=f"{c.name} retail demand softens; wage demands build",
+                level="warn",
+                metrics={"inflation_pct": c.monetary.inflation_cpi * 100,
+                         "unrest_index": projected,
+                         "policy_confidence": policy.confidence},
+                tags=("cost_of_living",),
+            ))
+        elif policy.action == "recover":
+            facts.append(CausalFact(
+                actor="Societal AI",
+                country=code,
+                action="consumer sentiment recovered",
+                cause=(f"stable prices and a calm market "
+                       f"(stress {m.stress:.2f}) rebuilt household confidence"),
+                effect=f"{c.name} retail spending and approval ratings firm up",
+                level="ok",
+                metrics={"confidence": g.consumer_confidence,
+                         "unrest_index": projected,
+                         "policy_confidence": policy.confidence},
+                tags=("consumer_recovery",),
+            ))
         return AgentDecision(adjustments=adjustments, facts=facts, micro_shocks=micro_shocks)
+
+    @staticmethod
+    def _utility(code: str, world: WorldState, m: MarketSnapshot) -> float:
+        c = world.countries[code]
+        g = c.geopolitical
+        purchasing_power = 1.0 - _clamp(c.monetary.inflation_cpi / 0.15, 0.0, 1.0)
+        employment = 1.0 - _clamp(c.labor.unemployment, 0.0, 1.0)
+        return (
+            0.30 * purchasing_power
+            + 0.25 * employment
+            + 0.25 * g.consumer_confidence
+            + 0.20 * g.political_stability
+            - 0.35 * g.social_unrest_index
+            - 0.15 * m.stress
+        )
 
 
 # ===========================================================================

@@ -91,6 +91,7 @@ class Settings:
             f"{p}/world/tariff",
             f"{p}/world/mutate",
             f"{p}/world/scenario",
+            f"{p}/world/hypotheses",
             f"{p}/world/country",       # covers /world/country/{code}/mutate
             f"{p}/sentinel/inject",
             f"{p}/sentinel/reset",
@@ -99,6 +100,9 @@ class Settings:
             f"{p}/time/resume",
             f"{p}/order",               # execution-intent injection paths
             f"{p}/quant/routing/profile",
+            f"{p}/control/mode",
+            f"{p}/control/world-simulation",
+            f"{p}/control/world-bridge",
         )
 
 

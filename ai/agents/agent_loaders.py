@@ -32,6 +32,7 @@ from typing import Any
 import numpy as np
 
 from ai.agents.base import AgentSignal, BaseAgent
+from ai.agents.checkpoint_formats import CheckpointKind, classify_checkpoint
 
 logger = logging.getLogger("econith.ai.agent_loaders")
 
@@ -151,8 +152,25 @@ class TrainedPPOAgent(BaseAgent):
         if self._loaded:
             return self._model
         self._loaded = True
-        if not self._path.exists():
+        kind = classify_checkpoint(self._path)
+        if kind is CheckpointKind.MISSING:
             logger.warning("[%s] checkpoint missing: %s", self.name, self._path)
+            return None
+        if kind is CheckpointKind.TORCH_PT:
+            logger.warning(
+                "[%s] H200 .pt at %s is not SB3-compatible — trading desks need "
+                "stable-baselines3 .zip; using heuristic stub for this seat",
+                self.name,
+                self._path,
+            )
+            return None
+        if kind is not CheckpointKind.SB3_ZIP:
+            logger.warning(
+                "[%s] unsupported checkpoint kind %s at %s — heuristic stub",
+                self.name,
+                kind.value,
+                self._path,
+            )
             return None
         try:
             from stable_baselines3 import PPO
@@ -162,7 +180,11 @@ class TrainedPPOAgent(BaseAgent):
             self._model = PPO.load(str(self._path), device="cpu")
             logger.info("[%s] loaded PPO desk <- %s", self.name, self._path)
         except ImportError:
-            logger.warning("[%s] stable-baselines3 not installed -- desk offline", self.name)
+            logger.warning(
+                "[%s] stable-baselines3 not installed (optional INSTALL_ML) — "
+                "desk offline, heuristic stub active",
+                self.name,
+            )
             self._model = None
         except Exception as exc:  # noqa: BLE001 - never let a bad file crash boot
             logger.warning("[%s] failed to load PPO (%s)", self.name, exc)
@@ -250,10 +272,53 @@ def load_active_agents(
     for name in _PPO_AGENTS:
         path = resolved.get(name)
         if not path:
+            logger.info(
+                "[%s] no checkpoint in MODEL_DIR/registry — heuristic stub",
+                name,
+            )
+            continue
+        kind = classify_checkpoint(path)
+        if kind is CheckpointKind.TORCH_PT:
+            logger.warning(
+                "[%s] registry points at H200 .pt (%s); SB3 .zip required — heuristic",
+                name,
+                path,
+            )
             continue
         desk = TrainedPPOAgent(name, path)
         if desk.is_live:
             desks.append(desk)
+        else:
+            logger.info("[%s] checkpoint not loadable — heuristic stub (%s)", name, path)
     if desks:
         logger.info("live trading desks: %s", ", ".join(d.name for d in desks))
+    else:
+        logger.info(
+            "AI desks: all heuristic (no SB3 .zip under MODEL_DIR=%s)",
+            os.getenv("MODEL_DIR", "./models"),
+        )
     return desks
+
+
+def resolve_world_neural_checkpoint(
+    model_dir: str | Path | None = None,
+    registry: str | Path | None = None,
+) -> Path | None:
+    """Locate a torch ``.pt`` world_neural checkpoint, or None if absent/wrong kind."""
+    resolved = resolve_active_models(model_dir, registry)
+    path = resolved.get("world_neural")
+    if path is None:
+        return None
+    kind = classify_checkpoint(path)
+    if kind is CheckpointKind.TORCH_PT:
+        return path
+    if kind is CheckpointKind.SB3_ZIP:
+        logger.warning(
+            "world_neural expects H200 .pt state-dict, got SB3 zip at %s — skipped",
+            path,
+        )
+    elif kind is CheckpointKind.MISSING:
+        logger.info("world_neural checkpoint missing: %s", path)
+    else:
+        logger.warning("world_neural unsupported kind %s at %s", kind.value, path)
+    return None

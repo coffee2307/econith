@@ -169,6 +169,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--activate", action="store_true", help="verify then promote to live")
     p.add_argument("--verify-only", action="store_true", help="only check checksums")
     p.add_argument("--rollback", action="store_true", help="restore the previous active.yaml")
+    p.add_argument(
+        "--holdout",
+        default="./datasets/processed/quant_holdout.parquet",
+        help="holdout parquet for mandatory backtest gate on --activate",
+    )
+    p.add_argument(
+        "--backtest-report",
+        default="",
+        help="optional precomputed metrics JSON (skips running holdout)",
+    )
+    p.add_argument("--min-sharpe", type=float, default=-0.5)
+    p.add_argument("--max-drawdown", type=float, default=0.45)
+    p.add_argument("--min-rows", type=int, default=50)
+    p.add_argument(
+        "--skip-backtest",
+        action="store_true",
+        help="EMERGENCY ONLY: promote without backtest gate",
+    )
     return p
 
 
@@ -188,6 +206,22 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if ok else 1
 
     if args.activate:
+        from training.deploy_gate import gate_or_raise
+
+        holdout = Path(args.holdout) if args.holdout else None
+        metrics_path = Path(args.backtest_report) if args.backtest_report else None
+        if metrics_path is not None and not str(args.backtest_report).strip():
+            metrics_path = None
+        if holdout is not None and not holdout.exists() and metrics_path is None:
+            holdout = None
+        gate_or_raise(
+            holdout=holdout,
+            metrics_report=metrics_path,
+            min_sharpe=args.min_sharpe,
+            max_drawdown=args.max_drawdown,
+            min_rows=args.min_rows,
+            skip=bool(args.skip_backtest),
+        )
         activate(args.registry, args.target)
         return 0
 

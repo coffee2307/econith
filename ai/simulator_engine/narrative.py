@@ -106,7 +106,65 @@ class NarrativeEngine:
         tag = self._primary_tag(fact)
         m = fact.metrics
 
-        if fact.actor == "Corporate AI" or tag == "capital_flight":
+        if tag == "labor_strike":
+            d = m.get("dissatisfaction", 0.0)
+            ci = m.get("consumption_index", 1.0)
+            return (
+                f"{place}: household dissatisfaction hit {d*100:.0f}% and strikes "
+                f"broke out as real spending fell to {ci*100:.0f}% of trend."
+            )
+
+        if tag == "safe_haven_migration":
+            usd = m.get("flow_usd", 0.0)
+            ratio = m.get("deposit_ratio", 0.0)
+            return (
+                f"{place}: {self._money_en(usd)} ({ratio*100:.1f}% of deposits) "
+                f"rotated out of banks into crypto / safe havens this tick."
+            )
+
+        if tag == "demand_contraction":
+            ci = m.get("consumption_index", 1.0)
+            return (
+                f"{place}: consumer demand contracted to {ci*100:.0f}% of trend "
+                f"as households rebuilt precautionary savings."
+            )
+
+        if tag == "demand_expansion":
+            ci = m.get("consumption_index", 1.0)
+            return (
+                f"{place}: consumer demand expanded to {ci*100:.0f}% of trend on "
+                f"improving real incomes and confidence."
+            )
+
+        if tag == "corporate_expansion":
+            usd = m.get("investment_usd", 0.0)
+            return (
+                f"{place}: firms committed {self._money_en(usd)} to new plants "
+                f"and hiring as markets stay calm — supply chains re-shoring."
+            )
+
+        if tag == "fiscal_stimulus":
+            bps = m.get("rate_cut_bps", 0.0)
+            return (
+                f"{place}: government cut rates {bps:.0f} bps and launched a "
+                f"public-investment program to support growth."
+            )
+
+        if tag == "cost_of_living":
+            infl = m.get("inflation_pct", 0.0)
+            return (
+                f"{place}: households cut back as {infl:.1f}% inflation bites — "
+                f"retail demand softening, wage demands building."
+            )
+
+        if tag == "consumer_recovery":
+            conf = m.get("confidence", 0.0)
+            return (
+                f"{place}: consumer sentiment recovering (confidence {conf:.0%}) — "
+                f"retail spending firming up."
+            )
+
+        if tag == "capital_flight" or (fact.actor == "Corporate AI" and not tag):
             usd = m.get("capital_flight_usd", 0.0)
             bps = m.get("yield_shock_bps", 0.0)
             money = self._money_en(usd)
@@ -166,7 +224,65 @@ class NarrativeEngine:
         tag = self._primary_tag(fact)
         m = fact.metrics
 
-        if fact.actor == "Corporate AI" or tag == "capital_flight":
+        if tag == "labor_strike":
+            d = m.get("dissatisfaction", 0.0)
+            ci = m.get("consumption_index", 1.0)
+            return (
+                f"{place}: bất mãn của người dân đạt {d*100:.0f}% và đình công nổ ra "
+                f"khi chi tiêu thực giảm còn {ci*100:.0f}% so với xu hướng."
+            )
+
+        if tag == "safe_haven_migration":
+            usd = m.get("flow_usd", 0.0)
+            ratio = m.get("deposit_ratio", 0.0)
+            return (
+                f"{place}: {self._money_vi(usd)} ({ratio*100:.1f}% tiền gửi) rời khỏi "
+                f"ngân hàng, chảy sang crypto / tài sản trú ẩn trong tick này."
+            )
+
+        if tag == "demand_contraction":
+            ci = m.get("consumption_index", 1.0)
+            return (
+                f"{place}: cầu tiêu dùng co lại còn {ci*100:.0f}% so với xu hướng khi "
+                f"hộ gia đình tăng tiết kiệm phòng ngừa."
+            )
+
+        if tag == "demand_expansion":
+            ci = m.get("consumption_index", 1.0)
+            return (
+                f"{place}: cầu tiêu dùng mở rộng lên {ci*100:.0f}% so với xu hướng nhờ "
+                f"thu nhập thực và niềm tin cải thiện."
+            )
+
+        if tag == "corporate_expansion":
+            usd = m.get("investment_usd", 0.0)
+            return (
+                f"{place}: doanh nghiệp rót {self._money_vi(usd)} mở rộng nhà máy "
+                f"và tuyển dụng khi thị trường ổn định — chuỗi cung quay về nội địa."
+            )
+
+        if tag == "fiscal_stimulus":
+            bps = m.get("rate_cut_bps", 0.0)
+            return (
+                f"{place}: chính phủ hạ lãi suất {bps:.0f} điểm cơ bản và tung "
+                f"gói đầu tư công để kích thích tăng trưởng."
+            )
+
+        if tag == "cost_of_living":
+            infl = m.get("inflation_pct", 0.0)
+            return (
+                f"{place}: người dân thắt chi tiêu vì lạm phát {infl:.1f}% — "
+                f"sức mua bán lẻ giảm, áp lực đòi tăng lương gia tăng."
+            )
+
+        if tag == "consumer_recovery":
+            conf = m.get("confidence", 0.0)
+            return (
+                f"{place}: niềm tin tiêu dùng phục hồi (chỉ số {conf:.0%}) — "
+                f"chi tiêu bán lẻ khởi sắc trở lại."
+            )
+
+        if tag == "capital_flight" or (fact.actor == "Corporate AI" and not tag):
             usd = m.get("capital_flight_usd", 0.0)
             bps = m.get("yield_shock_bps", 0.0)
             money = self._money_vi(usd)

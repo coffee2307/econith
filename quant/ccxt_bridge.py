@@ -74,6 +74,12 @@ class FillReport:
     commission: float
     mode: str
     ts: datetime
+    status: str = "FILLED"  # FILLED | REJECTED | UNKNOWN
+    detail: str = ""
+
+    @property
+    def is_filled(self) -> bool:
+        return self.status == "FILLED" and self.filled_quantity > 0
 
     def to_ledger_entry(self) -> dict[str, object]:
         """Shape exactly matching the cockpit ``IMatchedOrderLog`` contract."""
@@ -89,7 +95,34 @@ class FillReport:
             "slippageDelta": self.slippage_delta,
             "commission": self.commission,
             "mode": self.mode,
+            "status": self.status,
+            "detail": self.detail,
         }
+
+    @classmethod
+    def rejected(
+        cls,
+        payload: "ExecutionPayload",
+        *,
+        reason: str,
+        status: str = "REJECTED",
+    ) -> "FillReport":
+        """Live-path failure report that must never look like a real fill."""
+        return cls(
+            order_id=f"{status}-{int(datetime.now(timezone.utc).timestamp() * 1e6)}",
+            client_order_id=payload.client_order_id,
+            symbol=payload.symbol,
+            side=payload.side.value,
+            order_type=payload.order_type.value,
+            filled_quantity=0.0,
+            fill_price=0.0,
+            slippage_delta=0.0,
+            commission=0.0,
+            mode="REALITY",
+            ts=datetime.now(timezone.utc),
+            status=status,
+            detail=reason,
+        )
 
 
 class CCXTBinanceBridge:
@@ -172,11 +205,13 @@ class CCXTBinanceBridge:
         # --- explicit SIMULATION or no credentials: never touch the network ---
         if current_mode() is not QuantMode.REALITY:
             logger.info("CCXT bridge idle -- SIMULATION mode uses synthetic fills")
+            await self._publish_execution_status()
             return
         if not self._credentialed:
             logger.info(
                 "CCXT bridge staying synthetic -- no real Binance trade credentials"
             )
+            await self._publish_execution_status()
             return
 
         # --- REALITY: attempt a live session, isolating every failure mode ----
@@ -184,6 +219,7 @@ class CCXTBinanceBridge:
             import ccxt.async_support as ccxt
         except ImportError:
             logger.warning("ccxt not installed -- REALITY execution unavailable")
+            await self._publish_execution_status()
             return
 
         exchange: object | None = None
@@ -207,6 +243,7 @@ class CCXTBinanceBridge:
                 exc,
             )
             await self._safe_dispose(exchange)
+            await self._publish_execution_status()
             return
         except Exception as exc:  # noqa: BLE001 - any startup fault must isolate
             logger.warning(
@@ -215,6 +252,7 @@ class CCXTBinanceBridge:
                 type(exc).__name__, exc,
             )
             await self._safe_dispose(exchange)
+            await self._publish_execution_status()
             return
 
         self._exchange = exchange
@@ -224,6 +262,7 @@ class CCXTBinanceBridge:
             self._execution_env,
             self._default_type,
         )
+        await self._publish_execution_status()
         await self._sync_demo_capital()
 
     async def _sync_demo_capital(self) -> None:
@@ -294,6 +333,18 @@ class CCXTBinanceBridge:
             "detail": detail,
         }
 
+    async def _publish_execution_status(self) -> None:
+        """Push routing state into MetricsHub / EventLog (DEGRADED surfaces as warn)."""
+        status = self.execution_status()
+        await self._bus.publish("execution.status", **status)
+        if status.get("execution_routing") == "DEGRADED":
+            await self._bus.publish(
+                "system.log",
+                level="warn",
+                source="ccxt",
+                message=f"Execution DEGRADED — {status.get('detail')}",
+            )
+
     # -- synthetic marks (SIMULATION) -----------------------------------------
     def update_sim_mark(self, symbol: str, price: float) -> None:
         """Feed a synthetic mark price from the WORLD engine."""
@@ -306,24 +357,51 @@ class CCXTBinanceBridge:
         Routes live ONLY when in REALITY mode with a fully-authenticated session
         (``is_live``); otherwise (SIMULATION, or a REALITY bridge that degraded
         on a network fault at startup) it produces a deterministic synthetic
-        fill. A live order that raises mid-session degrades to synthetic rather
-        than propagating, preserving the platform's uptime invariant.
+        fill. A live order that raises mid-session becomes REJECTED/UNKNOWN —
+        never a synthetic fill that would corrupt equity reconciliation.
         """
         if current_mode() is QuantMode.REALITY and self.is_live:
             try:
                 report = await self._execute_reality(payload)
             except Exception as exc:  # noqa: BLE001 - never break the exec loop
+                status = "UNKNOWN" if _looks_like_unknown_venue_state(exc) else "REJECTED"
                 logger.warning(
                     "[QUANT BRIDGE] Live execution failed (%s: %s); "
-                    "falling back to synthetic fill for %s.",
-                    type(exc).__name__, exc, payload.symbol,
+                    "reporting %s for %s (no synthetic fill).",
+                    type(exc).__name__, exc, status, payload.symbol,
                 )
-                report = self._execute_simulation(payload)
+                report = FillReport.rejected(
+                    payload,
+                    reason=f"{type(exc).__name__}: {exc}",
+                    status=status,
+                )
+                await self._bus.publish(
+                    "system.log",
+                    level="warn",
+                    source="ccxt",
+                    message=(
+                        f"Live order {status} for {payload.symbol} — "
+                        f"{type(exc).__name__}: {exc}"
+                    ),
+                )
+                await self._publish_execution_status()
         else:
             report = self._execute_simulation(payload)
-        await self._bus.publish("quant.fill", **report.to_ledger_entry())
-        if self.is_live and current_mode() is QuantMode.REALITY:
-            await self._publish_wallet_truth()
+
+        # Equity/ledger consumers must only see real or intentional synthetic fills.
+        if report.is_filled:
+            await self._bus.publish("quant.fill", **report.to_ledger_entry())
+            if self.is_live and current_mode() is QuantMode.REALITY:
+                await self._publish_wallet_truth()
+        else:
+            await self._bus.publish(
+                "order.update",
+                symbol=report.symbol,
+                side=report.side,
+                status="REJECTED",
+                algo="ccxt",
+                reason=report.detail or report.status,
+            )
         return report
 
     @staticmethod
@@ -478,3 +556,11 @@ class CCXTBinanceBridge:
             )
             reports.append(await self.execute(child_payload))
         return reports
+
+
+def _looks_like_unknown_venue_state(exc: BaseException) -> bool:
+    """Timeouts / disconnects after submit may leave order state unknown."""
+    name = type(exc).__name__.lower()
+    text = str(exc).lower()
+    tokens = ("timeout", "timed out", "network", "connection", "reset", "unreachable")
+    return any(t in name for t in tokens) or any(t in text for t in tokens)

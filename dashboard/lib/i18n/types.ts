@@ -310,6 +310,10 @@ export interface Dictionary {
     agentExchangeEmpty: string;
     agentExchangeLive: string;
     agentExchangeWaiting: string;
+    backendStatus: string;
+    backendLive: string;
+    backendTopologyOnly: string;
+    backendTopologyHint: string;
   };
   macro: {
     tabs: Record<TabId, string>;

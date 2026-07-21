@@ -21,6 +21,7 @@ venv/
 
 # data / models (local artifacts)
 datasets/
+data/rollouts/
 logs/
 models/
 checkpoints/

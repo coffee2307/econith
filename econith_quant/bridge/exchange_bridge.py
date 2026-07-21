@@ -7,10 +7,15 @@ Subscribes to ``order.intent``, slices it with the TWAP executor into passive
 maker child orders, and (in mock mode) simulates working/filled lifecycle
 transitions, persisting each to the recovery ledger. Every transition is also
 published on ``order.update`` for the dashboard.
+
+Mock TWAP is **opt-in** via ``ECONITH_MOCK_TWAP=true``. When CCXT execution is
+the live path (default), this bridge stays quiet so cockpit does not show a
+fake TWAP lifecycle beside real fills.
 """
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from core.event_bus import Event, EventBus
@@ -21,27 +26,47 @@ from econith_quant.recovery.state import TradeStateStore
 logger = logging.getLogger("econith.quant.bridge.exchange")
 
 
+def mock_twap_enabled() -> bool:
+    return os.getenv("ECONITH_MOCK_TWAP", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 class ExchangeBridge:
     def __init__(
         self,
         bus: EventBus,
         executor: TWAPExecutor | None = None,
         state: TradeStateStore | None = None,
+        *,
+        enabled: bool | None = None,
     ) -> None:
         self._bus = bus
         self._executor = executor or TWAPExecutor(slices=5)
         self._state = state or TradeStateStore()
         self._last_price: float = 60_000.0
+        self._enabled = mock_twap_enabled() if enabled is None else bool(enabled)
 
     def register(self) -> None:
+        if not self._enabled:
+            logger.info(
+                "exchange bridge mock TWAP disabled "
+                "(set ECONITH_MOCK_TWAP=true to enable legacy UI lifecycle)"
+            )
+            return
         self._bus.subscribe("md.ticker", self._on_ticker)
         self._bus.subscribe("order.intent", self._on_intent)
-        logger.info("exchange bridge registered")
+        logger.info("exchange bridge registered (mock TWAP enabled)")
 
     async def _on_ticker(self, event: Event) -> None:
         self._last_price = float(event.payload.get("price", self._last_price))
 
     async def _on_intent(self, event: Event) -> None:
+        if not self._enabled:
+            return
         p: dict[str, Any] = event.payload
         intent = OrderIntent(
             symbol=p.get("symbol", "BTCUSDT"),
@@ -91,4 +116,5 @@ class ExchangeBridge:
             status="FILLED",
             slices=len(children),
             algo="twap",
+            reason=intent.reason,
         )

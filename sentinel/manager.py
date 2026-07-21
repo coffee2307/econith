@@ -202,6 +202,9 @@ class Sentinel:
         so Sentinel equity and Cockpit Fuel Gauge equity are identical.
         """
         p = event.payload
+        status = str(p.get("status") or "FILLED").upper()
+        if status not in ("FILLED", "") or float(p.get("filledVolume") or 0) <= 0:
+            return
         try:
             asset = str(p["asset"]).upper()
             side = str(p["side"])

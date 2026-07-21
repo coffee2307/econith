@@ -157,7 +157,17 @@ def _calibrate_feature(feature: str, series: np.ndarray) -> dict[str, float]:
 
 
 def _load_panel(path: Path) -> dict[str, np.ndarray]:
-    """Load the historical panel as ``{column: np.ndarray}``; synth on failure."""
+    """Load the historical panel as ``{column: np.ndarray}``; synth on failure.
+
+    Also accepts a directory of monthly macro JSONL snapshots under
+    ``datasets/raw/macro/<source>/<YYYY-MM>.jsonl`` (live collector layout).
+    """
+    if path.is_dir():
+        panel = _load_macro_jsonl_dir(path)
+        if panel:
+            return panel
+        logger.warning("no usable macro JSONL under %s; using synthetic sample", path)
+        return _synthetic_panel()
     if path.exists():
         try:
             import pandas as pd
@@ -169,8 +179,56 @@ def _load_panel(path: Path) -> dict[str, np.ndarray]:
         except Exception as exc:  # noqa: BLE001 - fall through to synthetic
             logger.warning("could not read %s (%s); using synthetic sample", path, exc)
     else:
+        # Prefer live collector dumps when the placeholder parquet is absent.
+        macro_dir = _ROOT / "datasets" / "raw" / "macro"
+        if macro_dir.is_dir():
+            panel = _load_macro_jsonl_dir(macro_dir)
+            if panel:
+                logger.info("calibrating from collector JSONL under %s", macro_dir)
+                return panel
         logger.warning("input %s not found; using synthetic sample", path)
     return _synthetic_panel()
+
+
+def _load_macro_jsonl_dir(root: Path) -> dict[str, np.ndarray]:
+    """Best-effort extract of numeric feature series from collector JSONL."""
+    series: dict[str, list[float]] = {}
+    for path in sorted(root.rglob("*.jsonl")):
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                feats = row.get("features") or row
+                if not isinstance(feats, dict):
+                    continue
+                for key, val in feats.items():
+                    if isinstance(val, (int, float)) and np.isfinite(val):
+                        series.setdefault(str(key), []).append(float(val))
+        except OSError:
+            continue
+    if not series:
+        return {}
+    # Remap common collector keys onto the calibrator series map when possible.
+    aliases = {
+        "FEDFUNDS": "fed_funds_effective_rate",
+        "interest_rate": "fed_funds_effective_rate",
+        "CPIAUCSL": "consumer_price_index_yoy",
+        "inflation": "consumer_price_index_yoy",
+        "gdp_growth": "gdp_growth",
+        "DGS10": "treasury_10y_yield",
+        "DTWEXBGS": "dollar_index_dxy",
+    }
+    out: dict[str, np.ndarray] = {}
+    for k, vals in series.items():
+        target = aliases.get(k, k)
+        if len(vals) >= 8:
+            out[target] = np.asarray(vals, dtype="float64")
+    return out
 
 
 def _synthetic_panel(n: int = 2_520, seed: int = 7) -> dict[str, np.ndarray]:

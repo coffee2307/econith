@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from ai.quant.portfolio import PortfolioRiskModel, PortfolioState
 from config.environment import get_environment
 from core.event_bus import Event, EventBus
 from econith.quant.routing import EconithRouteKernel
@@ -62,12 +63,20 @@ class AIBridge:
         self._target_exposure = 0.0   # current desired exposure in [-1, 1]
         self._router = router or EconithRouteKernel()
         self._marks: dict[str, float] = dict(_DEFAULT_MARKS)
+        self._risk = PortfolioRiskModel()
+        self._derisk = 1.0
 
     def register(self) -> None:
         self._bus.subscribe("sentinel.status", self._on_sentinel)
         self._bus.subscribe("ai.signal", self._on_signal)
         self._bus.subscribe("md.ticker", self._on_ticker)
-        logger.info("ai bridge registered (sentinel-gated)")
+        self._bus.subscribe("meta.quant.directive", self._on_quant_directive)
+        logger.info("ai bridge registered (sentinel-gated + portfolio derisk)")
+
+    async def _on_quant_directive(self, event: Event) -> None:
+        """Core AI risk_appetite scales global size (portfolio path)."""
+        appetite = float(event.payload.get("risk_appetite", 1.0) or 1.0)
+        self._derisk = max(0.05, min(1.0, appetite))
 
     async def _on_ticker(self, event: Event) -> None:
         sym = str(event.payload.get("symbol", "")).upper()
@@ -108,24 +117,30 @@ class AIBridge:
             return
 
         side = OrderSide.BUY if delta > 0 else OrderSide.SELL
-        # Futures nets via opposing opens; reduceOnly fails when exchange has no position.
-        reduce_only = False
         is_reducing_exposure = (
             abs(target) < abs(self._target_exposure) - 1e-9 or action == "FLAT"
         )
+        # Closing/flattening may use reduceOnly; opening never should (no position yet).
+        reduce_only = bool(is_reducing_exposure)
 
         # --- Sentinel veto enforcement --------------------------------------
         if self._mode == "FROZEN":
             await self._veto("FROZEN", action)
             return
-        if self._mode == "REDUCE_ONLY" and not reduce_only and not is_reducing_exposure:
+        if self._mode == "REDUCE_ONLY" and not is_reducing_exposure:
             await self._veto("REDUCE_ONLY", action)
             return
 
         self._target_exposure = target
         ref_mark = self._mark("BTCUSDT")
-        base_qty = (self._base_notional / ref_mark) * abs(delta)
-        # Demo wallet is small — route BTC perp only until multi-asset sizing is tuned.
+        # Portfolio VaR haircut from a single-desk proxy book (BTC exposure).
+        state = PortfolioState(
+            symbols=["BTCUSDT"],
+            weights=[float(self._target_exposure)],
+        )
+        var_scalar = self._risk.derisk_scalar(state)
+        size_scalar = max(0.05, min(1.0, self._derisk * var_scalar))
+        base_qty = (self._base_notional / ref_mark) * abs(delta) * size_scalar        # Demo wallet is small — route BTC perp only until multi-asset sizing is tuned.
         route_symbol = "BTCUSDT" if self._demo_execution else (
             str(p.get("symbol", "")).upper() or None
         )
@@ -136,7 +151,12 @@ class AIBridge:
             reduce_only=reduce_only,
             symbol=route_symbol,
         )
-        await self._bus.publish("quant.route.plan", **plan.payload())
+        await self._bus.publish(
+            "quant.route.plan",
+            **plan.payload(),
+            portfolio_derisk=round(size_scalar, 4),
+            portfolio_var_scalar=round(var_scalar, 4),
+        )
         for leg in plan.legs:
             qty = max(leg.quantity, self._min_leg_qty(leg.symbol))
             intent = OrderIntent(

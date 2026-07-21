@@ -26,12 +26,34 @@ def social_source_present(repo_root: Path | None = None) -> bool:
 class SocialServiceBridge:
     """Lightweight HTTP client for the econith_social Flask API."""
 
-    def __init__(self, api_base_url: str) -> None:
+    def __init__(self, api_base_url: str, bus: Any | None = None) -> None:
         self._api_base = api_base_url.rstrip("/")
+        self._bus = bus
 
     @property
     def api_base_url(self) -> str:
         return self._api_base
+
+    async def publish_health_event(self) -> dict[str, Any]:
+        """Probe sidecar and optionally emit a system.log for Event Log honesty."""
+        health = await self.health()
+        if self._bus is not None:
+            reachable = bool(health.get("reachable"))
+            msg = (
+                "econith_social reachable"
+                if reachable
+                else f"econith_social unreachable — {health.get('error') or 'offline'}"
+            )
+            try:
+                await self._bus.publish(
+                    "system.log",
+                    level="ok" if reachable else "warn",
+                    source="social",
+                    message=msg,
+                )
+            except Exception:  # noqa: BLE001
+                logger.debug("social health bus publish failed", exc_info=True)
+        return health
 
     async def health(self) -> dict[str, Any]:
         source_present = social_source_present()

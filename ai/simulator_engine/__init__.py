@@ -20,6 +20,12 @@ from ai.simulator_engine.cross_impact import (
     macro_to_micro,
     quant_to_macro,
 )
+from ai.simulator_engine.hypothesis_runner import HypothesisRunner
+from ai.simulator_engine.hypothesis_schema import (
+    Hypothesis,
+    HypothesisOutcome,
+    HypothesisReport,
+)
 from ai.simulator_engine.llm_scenario import LLMScenarioEngine, ScenarioParse
 from ai.simulator_engine.market_context import MarketContext, MarketSnapshot
 from ai.simulator_engine.narrative import CausalFact, NarrativeEngine
@@ -29,6 +35,10 @@ __all__ = [
     "WorldKernel",
     "LLMScenarioEngine",
     "ScenarioParse",
+    "Hypothesis",
+    "HypothesisOutcome",
+    "HypothesisReport",
+    "HypothesisRunner",
     "MarketContext",
     "MarketSnapshot",
     "MicrostructuralVolatilityVector",

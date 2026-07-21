@@ -18,10 +18,15 @@ code changes. ``NeuralReactionModel`` is a ready stub demonstrating the seam.
 """
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
 from ai.simulator_engine.macro_vectors import WorldState
+
+logger = logging.getLogger("econith.ai.reaction_models")
 
 
 @dataclass(slots=True)
@@ -77,15 +82,8 @@ class CentralBankModel(ReactionModel):
         target = self._neutral + 1.5 * infl_gap + 0.5 * growth_gap
         rate_delta = _clamp(target - m.interest_rate, -self._step, self._step)
         if abs(rate_delta) > 1e-5:
-            policy_event: str | None = None
-            policy_level = "info"
-            if abs(infl_gap) > 0.02 and abs(rate_delta) >= self._step - 1e-6:
-                direction = "hikes" if rate_delta > 0 else "cuts"
-                policy_event = (
-                    f"{c.name} central bank {direction} rates "
-                    f"to fight {m.inflation_cpi*100:.1f}% inflation"
-                )
-                policy_level = "warn" if rate_delta > 0 else "ok"
+            # Physics-only: do NOT attach English headline templates. Rate moves
+            # surface through Tier-1 dialogue / grounded narratives when material.
             adj.append(
                 Adjustment(
                     code,
@@ -93,8 +91,6 @@ class CentralBankModel(ReactionModel):
                     "interest_rate",
                     rate_delta,
                     reason="taylor_rule",
-                    event=policy_event,
-                    event_level=policy_level,
                 )
             )
 
@@ -147,25 +143,23 @@ class TradeMinistryModel(ReactionModel):
                 if retal > 0.005:
                     adj.append(Adjustment(
                         code, "tariff", other, retal, reason="retaliation",
-                        event=(f"{c.name} imposes {(ours + retal)*100:.0f}% retaliatory "
-                               f"tariffs on {world.countries[other].name} imports"),
-                        event_level="danger",
                     ))
             # De-escalation: if both sides high and we're hurting, negotiate down.
             elif ours > 0.12 and incoming > 0.12 and c.gdp_growth < 0.015:
                 adj.append(Adjustment(
                     code, "tariff", other, -self._deesc, reason="negotiation",
-                    event=(f"{c.name} and {world.countries[other].name} open trade "
-                           f"talks; tariffs ease toward {(ours - self._deesc)*100:.0f}%"),
-                    event_level="ok",
                 ))
 
-            export_pressure += incoming  # higher foreign tariffs hurt our exports
+            # Only ABOVE-BASELINE tariffs hurt exports. Charging the normal
+            # ~3% MFN level every tick made exports a one-way ratchet that
+            # ground the index to its floor even in a peaceful world.
+            export_pressure += max(0.0, incoming - 0.05)
 
-        # Our exports erode with tariffs imposed on us.
+        # Our exports erode with excess tariffs imposed on us.
         exp_delta = _clamp(-3.0 * export_pressure, -2.0, 0.5)
-        adj.append(Adjustment(code, "fiscal", "export_index", exp_delta,
-                              reason="export_pressure"))
+        if abs(exp_delta) > 1e-9:
+            adj.append(Adjustment(code, "fiscal", "export_index", exp_delta,
+                                  reason="export_pressure"))
 
         # Supply-chain diversion: capture trade from third-party tariff wars
         # between pairs we are NOT party to, weighted by our trust with both.
@@ -182,9 +176,6 @@ class TradeMinistryModel(ReactionModel):
             gain = _clamp(self._diversion * diversion, 0.0, 3.0)
             adj.append(Adjustment(
                 code, "fiscal", "export_index", gain, reason="supply_chain_diversion",
-                event=(f"{c.name} captures diverted supply chains "
-                       f"(+{gain:.1f} export index)") if gain > 0.8 else None,
-                event_level="ok",
             ))
 
         # Trade balance tracks net export/import index drift.
@@ -224,11 +215,10 @@ class SentimentModel(ReactionModel):
             adj.append(Adjustment(code, "geopolitical", "social_unrest_index",
                                   0.01 * stress, reason="stress"))
             if stress > 0.5 and g.social_unrest_index > 0.45:
+                # Numeric pressure only — no canned "sees rising social unrest" headline.
                 adj.append(Adjustment(
-                    code, "geopolitical", "social_unrest_index", 0.0,
+                    code, "geopolitical", "social_unrest_index", 0.02 * stress,
                     reason="unrest_signal",
-                    event=f"{c.name} sees rising social unrest amid economic stress",
-                    event_level="danger",
                 ))
         return adj
 
@@ -237,23 +227,200 @@ class SentimentModel(ReactionModel):
 #  H200 swap stub -- same interface, NN/LLM-backed later
 # ===========================================================================
 class NeuralReactionModel(ReactionModel):
-    """Placeholder for a trained policy (PPO / LLM agent) served from H200.
-
-    Inject this in place of the heuristic models once a checkpoint exists:
-        WorldKernel(models=[NeuralReactionModel(endpoint="...")])
-    Until a model is wired, it proposes nothing (no-op) so the system stays safe.
+    """H200 ``.pt`` ReactionNet: maps country macro vector → 3 market signals,
+    then projects those signals into :class:`Adjustment` deltas.
     """
 
     name = "neural"
 
-    def __init__(self, endpoint: str | None = None) -> None:
+    def __init__(
+        self,
+        endpoint: str | None = None,
+        checkpoint: str | Path | None = None,
+        *,
+        scale: float = 0.35,
+    ) -> None:
         self.endpoint = endpoint
+        self._path = Path(checkpoint) if checkpoint else None
+        self._blob: dict[str, Any] | None = None
+        self._module: Any = None
+        self._loaded = False
+        self._scale = max(0.05, float(scale))
+        if self._path is not None:
+            self._try_load()
 
-    def react(self, code: str, world: WorldState) -> list[Adjustment]:  # noqa: ARG002
-        # TODO(H200): batch country feature vectors -> policy server -> deltas.
-        return []
+    def _try_load(self) -> None:
+        assert self._path is not None
+        from ai.agents.checkpoint_formats import CheckpointKind, classify_checkpoint
+
+        kind = classify_checkpoint(self._path)
+        if kind is CheckpointKind.SB3_ZIP:
+            logger.warning(
+                "[neural] SB3 .zip at %s is for trading desks, not world_neural — skipped",
+                self._path,
+            )
+            return
+        if kind is not CheckpointKind.TORCH_PT:
+            logger.warning("[neural] no usable .pt at %s (%s)", self._path, kind.value)
+            return
+        try:
+            import torch
+            import torch.nn as nn
+
+            try:
+                blob = torch.load(str(self._path), map_location="cpu", weights_only=False)
+            except TypeError:
+                blob = torch.load(str(self._path), map_location="cpu")
+            if not isinstance(blob, dict) or "state_dict" not in blob:
+                logger.warning("[neural] unexpected checkpoint schema at %s", self._path)
+                return
+            in_dim = int(blob.get("in_dim") or 0)
+            out_dim = int(blob.get("out_dim") or 3)
+            if in_dim <= 0:
+                logger.warning("[neural] in_dim missing in %s", self._path)
+                return
+
+            class ReactionNet(nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.net = nn.Sequential(
+                        nn.Linear(in_dim, 128),
+                        nn.ReLU(),
+                        nn.Linear(128, 64),
+                        nn.ReLU(),
+                        nn.Linear(64, out_dim),
+                        nn.Tanh(),
+                    )
+
+                def forward(self, x):  # noqa: ANN001
+                    return self.net(x)
+
+            module = ReactionNet()
+            module.load_state_dict(blob["state_dict"])
+            module.eval()
+            self._module = module
+            self._blob = blob
+            self._loaded = True
+            logger.info("[neural] loaded ReactionNet policy head <- %s", self._path)
+        except ImportError:
+            logger.warning(
+                "[neural] torch not installed (optional INSTALL_ML) — .pt offline"
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[neural] failed to load .pt (%s)", exc)
+
+    @property
+    def is_loaded(self) -> bool:
+        return self._loaded
+
+    def _predict(self, vector: list[float]) -> tuple[float, float, float] | None:
+        if not self._loaded or self._module is None or self._blob is None:
+            return None
+        try:
+            import torch
+            import numpy as np
+
+            x = np.asarray(vector, dtype="float64")
+            mean = np.asarray(self._blob.get("x_mean") or [], dtype="float64")
+            std = np.asarray(self._blob.get("x_std") or [], dtype="float64")
+            if mean.size == x.size and std.size == x.size:
+                std = np.where(std < 1e-8, 1.0, std)
+                x = (x - mean) / std
+            with torch.no_grad():
+                t = torch.tensor(x, dtype=torch.float32).unsqueeze(0)
+                y = self._module(t).squeeze(0).cpu().numpy()
+            vol = float(np.clip((float(y[0]) + 1.0) * 0.5, 0.0, 1.0))  # tanh→[0,1]
+            bias = float(np.clip(y[1], -1.0, 1.0))
+            prem = float(np.clip(y[2], -1.0, 1.0))
+            return vol, bias, prem
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("[neural] predict failed (%s)", exc)
+            return None
+
+    def react(self, code: str, world: WorldState) -> list[Adjustment]:
+        c = world.countries.get(code)
+        if c is None or not self.is_loaded:
+            return []
+        try:
+            vec = c.to_vector()
+        except Exception:  # noqa: BLE001
+            return []
+        pred = self._predict(list(vec))
+        if pred is None:
+            return []
+        vol, bias, prem = pred
+        s = self._scale
+        adj: list[Adjustment] = []
+        # Volatility → mild CPI / unrest pressure (bounded deltas).
+        if vol > 0.15:
+            adj.append(
+                Adjustment(
+                    code,
+                    "monetary",
+                    "inflation_cpi",
+                    0.0008 * vol * s,
+                    reason="neural_vol_pressure",
+                )
+            )
+            adj.append(
+                Adjustment(
+                    code,
+                    "geopolitical",
+                    "social_unrest_index",
+                    0.01 * vol * s,
+                    reason="neural_vol_unrest",
+                )
+            )
+        # Directional bias → growth nudge + opposing policy rate lean.
+        if abs(bias) > 0.05:
+            adj.append(
+                Adjustment(
+                    code,
+                    "",
+                    "gdp_growth",
+                    0.002 * bias * s,
+                    reason="neural_bias_growth",
+                )
+            )
+            adj.append(
+                Adjustment(
+                    code,
+                    "monetary",
+                    "interest_rate",
+                    -0.0005 * bias * s,
+                    reason="neural_bias_rate",
+                )
+            )
+        # Risk premium → yield / debt stress.
+        if abs(prem) > 0.05:
+            adj.append(
+                Adjustment(
+                    code,
+                    "monetary",
+                    "yield_10y",
+                    0.001 * prem * s,
+                    reason="neural_risk_premium",
+                )
+            )
+        return adj
 
 
 def default_models() -> list[ReactionModel]:
-    """Default heuristic agent stack (the DI seam)."""
-    return [CentralBankModel(), TradeMinistryModel(), SentimentModel()]
+    """Default heuristic agent stack (+ neural when a mapped head is loaded)."""
+    stack: list[ReactionModel] = [
+        CentralBankModel(),
+        TradeMinistryModel(),
+        SentimentModel(),
+    ]
+    try:
+        from ai.agents.agent_loaders import resolve_world_neural_checkpoint
+
+        path = resolve_world_neural_checkpoint()
+        if path is not None:
+            neural = NeuralReactionModel(checkpoint=path)
+            if neural.is_loaded:
+                stack.append(neural)
+                logger.info("[neural] live policy head armed <- %s", path)
+    except Exception as exc:  # noqa: BLE001 - never block boot on optional neural
+        logger.warning("world_neural optional load skipped (%s)", exc)
+    return stack

@@ -1,23 +1,13 @@
 "use client";
 
 /**
- * ECONITH World :: 50-nation simulation state slice.
+ * ECONITH World :: metrics/API adapter (backend is the sole simulation SoT).
  *
- * Owns the Hub & Proxy engine (`lib/worldModel`) and exposes a decoupled,
- * React-friendly view of the world:
- *
- *   - `countries`   projected `CountryMacro` map for ALL 50 nations (fully
- *                   editable — no "observed" lock),
- *   - `tariffs`     the pairwise tariff matrix,
- *   - `events`      the THROTTLED, human-readable log (LogQueue drains one entry
- *                   every `REVEAL_MS`, regardless of how fast the engine ticks),
- *   - `pendingCount` how many escalations are still queued behind the reveal,
- *   - `editFeature` / `imposeTariff` / `resetOverrides` mutation APIs that run
- *     the cross-node cascade logic and enqueue narrative events.
- *
- * The engine is a mutable `NodeMap` held in a ref; React state carries only the
- * cheap projected snapshots. The tick cadence follows the backend Time Engine
- * (`useMetrics().snapshot.time`) so speed 1x–20x stays consistent.
+ * Previously this context ran a client-side 50-nation Hub/Proxy engine
+ * (`stepWorld`, macroPulse, worldAgentReactions) that diverged from the
+ * backend WorldKernel. That dual-engine split produced hardcoded, fake-looking
+ * event logs. The context is now a thin view/mutation adapter over
+ * `snapshot.world` + `world_events` / `world_agents`.
  */
 import {
   createContext,
@@ -31,76 +21,22 @@ import {
 import type { CountryMacro } from "@/hooks/useMetricsStream";
 import { useMetrics } from "@/components/MetricsProvider";
 import { useLocale } from "@/contexts/LocaleContext";
-import { mutateCountry, setTariff as apiSetTariff } from "@/lib/api";
+import {
+  getControlState,
+  mutateCountry,
+  setTariff as apiSetTariff,
+} from "@/lib/api";
 import type { MacroFeature } from "@/constants/macroFeatures";
 import { isSimNation } from "@/constants/simNations";
-import { HUB_CODES } from "@/constants/worldGraph";
-import {
-  applyEdit,
-  applyTariff,
-  buildWorld,
-  ensureNode,
-  projectCountries,
-  releaseOverrides,
-  stepWorld,
-  type FieldAddr,
-  type SimEvent,
-} from "@/lib/worldModel";
-import {
-  buildPolicyEditReactions,
-  buildTariffReactions,
-  type PolicyAgentLine,
-} from "@/lib/worldAgentReactions";
+import { LIVE_BACKEND_CODES } from "@/constants/liveWorld";
+import { tierOf as graphTierOf } from "@/constants/worldGraph";
+import type { SimEvent } from "@/lib/worldModel";
+import type { PolicyAgentLine } from "@/lib/worldAgentReactions";
 
-const REVEAL_MS_BASE = 5000;
-const MAX_VISIBLE = 20;
-const MAX_PENDING = 8;
-const EVENT_COOLDOWN_MS_BASE = 45_000;
-const POLICY_COOLDOWN_MS_BASE = 8_000;
-const MACRO_PULSE_MS_BASE = 40_000;
-const BACKEND_DEDUP_MS_BASE = 90_000;
-const MAX_PENDING_BADGE = 8;
-const BACKEND_CODES = new Set(["USA", "CHN", "VNM", "JPN", "IND", "DEU"]);
-const HUB_SET = new Set<string>(HUB_CODES);
-
-/** Wall-clock interval scaled inversely by sim speed (20x → 4x faster events). */
-function scaledMs(baseMs: number, multiplier: number, floorMs: number): number {
-  const m = Math.max(1, multiplier);
-  return Math.max(floorMs, Math.round(baseMs / m));
-}
-
-const IMPORTANT_MESSAGE_KEYS = new Set([
-  "unrest",
-  "proxyOverride",
-  "hubAdjust",
-  "proxyContagion",
-  "tariffChange",
-  "supplyDiversion",
-  "geopoliticsAlert",
-  "emergency",
-  "macroPulse",
-]);
-
-function isImportantEvent(e: Omit<SimEvent, "id" | "ts">): boolean {
-  if (e.level === "danger" || e.level === "warn") return true;
-  if (e.messageKey === "macroPulse") return true;
-  if (IMPORTANT_MESSAGE_KEYS.has(e.messageKey)) return true;
-  return false;
-}
-
-function cooldownFor(e: Omit<SimEvent, "id" | "ts">, multiplier: number): number {
-  if (e.messageKey === "macroPulse") {
-    return scaledMs(MACRO_PULSE_MS_BASE, multiplier, 3_000);
-  }
-  if (["hubAdjust", "proxyOverride", "tariffChange", "supplyDiversion", "proxyContagion"].includes(e.messageKey)) {
-    return scaledMs(POLICY_COOLDOWN_MS_BASE, multiplier, 1_500);
-  }
-  return scaledMs(EVENT_COOLDOWN_MS_BASE, multiplier, 5_000);
-}
-
-function eventFingerprint(e: Omit<SimEvent, "id" | "ts">): string {
-  return `${e.messageKey}|${e.country}|${e.source}|${JSON.stringify(e.messageParams)}`;
-}
+const MAX_VISIBLE = 60;
+const BACKEND_DEDUP_MS = 12_000;
+/** Live backend macros today — only these accept mutate/tariff. */
+const BACKEND_CODES = new Set<string>(LIVE_BACKEND_CODES);
 
 export interface WorldSim {
   countries: Record<string, CountryMacro>;
@@ -114,290 +50,213 @@ export interface WorldSim {
   tierOf: (code: string) => "hub" | "proxy" | null;
   ensure: (code: string) => void;
   policyAgentLines: PolicyAgentLine[];
+  backendLive: (code: string) => boolean;
 }
 
 const WorldSimContext = createContext<WorldSim | null>(null);
 
-function addrOf(feature: MacroFeature): FieldAddr {
-  return { group: feature.group === "top" ? "top" : feature.group, field: feature.field };
+function addrGroup(feature: MacroFeature): string {
+  return feature.group === "top" ? "" : feature.group;
 }
 
 export function WorldSimProvider({ children }: { children: React.ReactNode }) {
   const { snapshot } = useMetrics();
   const { locale } = useLocale();
-  const running = snapshot?.time?.running ?? true;
-  const multiplier = snapshot?.time?.multiplier ?? 1;
-  const multiplierRef = useRef(multiplier);
-  useEffect(() => {
-    multiplierRef.current = multiplier;
-  }, [multiplier]);
-
-  // Mutable engine (never re-created); React state holds cheap projections.
-  const worldRef = useRef(buildWorld());
-  const tariffsRef = useRef<Record<string, Record<string, number>>>({});
-  const pendingRef = useRef<SimEvent[]>([]);
-  const seqRef = useRef(0);
-  const recentFingerprintsRef = useRef<Map<string, number>>(new Map());
-  const seenBackendRef = useRef<Map<string, number>>(new Map());
-  const macroPulseRef = useRef(0);
-
-  const [countries, setCountries] = useState<Record<string, CountryMacro>>(() =>
-    projectCountries(worldRef.current),
-  );
-  const [tariffs, setTariffs] = useState<Record<string, Record<string, number>>>({});
+  const [worldEnabled, setWorldEnabled] = useState(true);
   const [events, setEvents] = useState<SimEvent[]>([]);
-  const [pendingCount, setPendingCount] = useState(0);
+  const [draftOverrides, setDraftOverrides] = useState<Record<string, Record<string, number>>>({});
   const [policyAgentLines, setPolicyAgentLines] = useState<PolicyAgentLine[]>([]);
+  const seenBackendRef = useRef<Map<string, number>>(new Map());
+  const seqRef = useRef(0);
 
-  const project = useCallback(() => {
-    setCountries(projectCountries(worldRef.current));
+  useEffect(() => {
+    let mounted = true;
+    const refresh = async () => {
+      const state = await getControlState();
+      if (mounted && state) {
+        setWorldEnabled(state.world_simulation_enabled);
+      }
+    };
+    void refresh();
+    const id = setInterval(refresh, 5000);
+    return () => {
+      mounted = false;
+      clearInterval(id);
+    };
   }, []);
 
-  const enqueue = useCallback((raw: Omit<SimEvent, "id" | "ts">[]) => {
-    if (!raw.length) return;
-    const now = Date.now();
-    const stamped: SimEvent[] = [];
-    for (const e of raw) {
-      if (!isImportantEvent(e)) continue;
-      const fp = eventFingerprint(e);
-      const last = recentFingerprintsRef.current.get(fp) ?? 0;
-      const cd = cooldownFor(e, multiplierRef.current);
-      if (now - last < cd) continue;
-      recentFingerprintsRef.current.set(fp, now);
-      stamped.push({
-        ...e,
-        id: `evt-${seqRef.current++}`,
-        ts: now,
-      });
-    }
-    if (!stamped.length) return;
-    if (recentFingerprintsRef.current.size > 200) {
-      const cutoff = now - scaledMs(EVENT_COOLDOWN_MS_BASE, multiplierRef.current, 5_000) * 2;
-      for (const [k, t] of recentFingerprintsRef.current) {
-        if (t < cutoff) recentFingerprintsRef.current.delete(k);
-      }
-    }
-    // Backpressure: when the queue is full, only admit danger-level escalations.
-    let admitted = stamped;
-    if (pendingRef.current.length >= MAX_PENDING) {
-      admitted = stamped.filter((e) => e.level === "danger");
-      if (!admitted.length) return;
-    }
-    const next = [...pendingRef.current, ...admitted];
-    // Drop the oldest if the queue overflows (keeps the newest escalations).
-    pendingRef.current = next.slice(-MAX_PENDING);
-    setPendingCount(pendingRef.current.length);
-  }, []);
+  const countries = useMemo<Record<string, CountryMacro>>(() => {
+    const raw = snapshot?.world?.countries ?? {};
+    return raw as Record<string, CountryMacro>;
+  }, [snapshot?.world?.countries]);
 
-  /** User policy edits: show events + agent lines immediately (no reveal queue / cooldown). */
-  const emitPolicyBundle = useCallback(
-    (
-      raw: Omit<SimEvent, "id" | "ts">[],
-      agents: Omit<PolicyAgentLine, "id">[],
-    ) => {
-      if (!raw.length && !agents.length) return;
-      const now = Date.now();
-      const stamped: SimEvent[] = raw.map((e) => ({
-        ...e,
-        id: `evt-${seqRef.current++}`,
-        ts: now,
-      }));
-      if (stamped.length) {
-        setEvents((prev) => [...stamped, ...prev].slice(0, MAX_VISIBLE));
-      }
-      if (agents.length) {
-        const simDay = snapshot?.time?.sim_day;
-        setPolicyAgentLines((prev) => [
-          ...agents.map((a, i) => ({
-            ...a,
-            id: `pol-${now}-${i}`,
-            simDay: a.simDay ?? simDay,
-          })),
-          ...prev,
-        ].slice(0, 16));
-      }
-    },
-    [snapshot?.time?.sim_day],
+  const tariffs = useMemo<Record<string, Record<string, number>>>(
+    () => snapshot?.world?.tariffs ?? {},
+    [snapshot?.world?.tariffs],
   );
 
-  // ---- backend headlines + journalist (warn/danger) for Sự kiện tab ----
+  // ---- backend world_events → Event Log (includes Journalist info) ----------
   useEffect(() => {
+    if (!worldEnabled) return;
     const stream = snapshot?.world_events ?? [];
     const now = Date.now();
+    const admitted: SimEvent[] = [];
     for (const raw of stream) {
       const level = (["info", "ok", "warn", "danger"] as const).includes(
         raw.level as "info",
       )
         ? (raw.level as SimEvent["level"])
         : "info";
-      if (level !== "warn" && level !== "danger" && raw.source !== "journalist") {
-        continue;
-      }
-      const key = `${raw.source}|${raw.message?.slice(0, 120)}`;
+      const source = raw.source || "world";
+      const message = String(raw.message ?? "").trim();
+      if (!message) continue;
+      // Strip "[sim-date] Country: " so dated system.log and plain headline match.
+      const normalized = message
+        .replace(/^\[[^\]]+\]\s*/, "")
+        .replace(/^[^:]+:\s*/, "")
+        .slice(0, 120);
+      const key = `${source}|${normalized}`;
       const last = seenBackendRef.current.get(key) ?? 0;
-      const dedupMs = scaledMs(BACKEND_DEDUP_MS_BASE, multiplier, 12_000);
-      if (now - last < dedupMs) continue;
+      if (now - last < BACKEND_DEDUP_MS) continue;
       seenBackendRef.current.set(key, now);
       const messageKey =
-        raw.source === "journalist" ? "journalist" : "geopoliticsAlert";
-      enqueue([
-        {
-          level,
-          source: raw.source || "world",
-          country: "Global",
-          messageKey,
-          messageParams: { text: raw.message },
-        },
-      ]);
+        source === "journalist" ? "journalist" : "geopoliticsAlert";
+      admitted.push({
+        id: `be-${seqRef.current++}`,
+        ts: Date.parse(raw.ts) || now,
+        level,
+        source,
+        country: "Global",
+        messageKey,
+        messageParams: { text: message },
+      });
     }
-  }, [snapshot?.world_events, enqueue, multiplier]);
+    if (!admitted.length) return;
+    if (seenBackendRef.current.size > 300) {
+      const cutoff = now - BACKEND_DEDUP_MS * 4;
+      for (const [k, t] of seenBackendRef.current) {
+        if (t < cutoff) seenBackendRef.current.delete(k);
+      }
+    }
+    // Stream arrives newest-first; prepend new unique rows.
+    setEvents((prev) => {
+      const existing = new Set(prev.map((e) => `${e.source}|${JSON.stringify(e.messageParams)}`));
+      const fresh = admitted.filter(
+        (e) => !existing.has(`${e.source}|${JSON.stringify(e.messageParams)}`),
+      );
+      if (!fresh.length) return prev;
+      return [...fresh, ...prev].slice(0, MAX_VISIBLE);
+    });
+  }, [snapshot?.world_events, worldEnabled]);
 
-  // ---- periodic macro pulse (localized, client sim) — scales with speed ----
-  useEffect(() => {
-    if (!running) return;
-    const pulseMs = scaledMs(MACRO_PULSE_MS_BASE, multiplier, 3_000);
-    const tick = () => {
-      const hubs = HUB_CODES.filter((c) => worldRef.current.has(c));
-      if (!hubs.length) return;
-      const code = hubs[macroPulseRef.current % hubs.length];
-      macroPulseRef.current += 1;
-      const node = worldRef.current.get(code);
-      if (!node) return;
-      enqueue([
-        {
-          level: "info",
-          source: "world",
-          country: code,
-          messageKey: "macroPulse",
-          messageParams: {
-            country: code,
-            growth: (node.gdp_growth * 100).toFixed(1),
-            inflation: (node.vectors.monetary.inflation_cpi * 100).toFixed(1),
-          },
-        },
-      ]);
-    };
-    const id = setInterval(tick, pulseMs);
-    const boot = setTimeout(tick, Math.min(4_000, pulseMs));
-    return () => {
-      clearInterval(id);
-      clearTimeout(boot);
-    };
-  }, [running, enqueue, multiplier]);
-
-  // ---- engine tick loop (fast) : advance macro state on the sim cadence ----
-  useEffect(() => {
-    if (!running) return;
-    const cadence = Math.max(300, 1200 / Math.sqrt(multiplier));
-    const dt = 0.5 * Math.sqrt(multiplier);
-    const id = setInterval(() => {
-      const spontaneous = stepWorld(worldRef.current, dt);
-      enqueue(spontaneous);
-      project();
-    }, cadence);
-    return () => clearInterval(id);
-  }, [running, multiplier, enqueue, project]);
-
-  // ---- LogQueue drainer : reveal scales with sim speed ----
-  useEffect(() => {
-    const revealMs = scaledMs(REVEAL_MS_BASE, multiplier, 600);
-    const id = setInterval(() => {
-      const queue = pendingRef.current;
-      if (queue.length === 0) return;
-      const next = queue.shift()!;
-      pendingRef.current = queue;
-      setPendingCount(queue.length);
-      setEvents((prev) => [next, ...prev].slice(0, MAX_VISIBLE));
-    }, revealMs);
-    return () => clearInterval(id);
-  }, [multiplier]);
-
-  // ---- mutation APIs ------------------------------------------------------
   const editFeature = useCallback(
     (code: string, feature: MacroFeature, uiValue: number) => {
-      // UI shows percentages for fraction fields; the model stores decimals.
       const native = feature.fraction ? uiValue / 100 : uiValue;
-      const addr = addrOf(feature);
-      const labelKey = feature.key;
-      const { events: evs, meta } = applyEdit(
-        worldRef.current, code, addr, native, feature.key, !!feature.fraction,
-      );
-      const agents = buildPolicyEditReactions({
-        locale,
-        simDay: snapshot?.time?.sim_day,
-        country: code,
-        labelKey,
-        fraction: !!feature.fraction,
-        newValue: native,
-        meta,
-      });
-      emitPolicyBundle(evs, agents);
-      project();
-      // Best-effort forward to the backend for the nations it actually simulates,
-      // so the Quant feedback loop still fires for those hubs.
-      if (BACKEND_CODES.has(code)) {
-        const group = feature.group === "top" ? "" : feature.group;
-        void mutateCountry(code, group, feature.field, native);
+      setDraftOverrides((prev) => ({
+        ...prev,
+        [code]: { ...(prev[code] ?? {}), [feature.key]: uiValue },
+      }));
+      if (!BACKEND_CODES.has(code)) {
+        // Topology-only nation: keep local draft, do not fake a cascade.
+        return;
       }
+      const group = addrGroup(feature);
+      void mutateCountry(code, group, feature.field, native).then(() => {
+        setDraftOverrides((prev) => {
+          const next = { ...prev };
+          if (next[code]) {
+            const copy = { ...next[code] };
+            delete copy[feature.key];
+            if (Object.keys(copy).length) next[code] = copy;
+            else delete next[code];
+          }
+          return next;
+        });
+      });
+      const now = Date.now();
+      const text =
+        locale === "vi"
+          ? `${code}: đã gửi điều chỉnh ${feature.key} = ${uiValue.toFixed(2)} tới backend.`
+          : `${code}: submitted ${feature.key} = ${uiValue.toFixed(2)} to backend.`;
+      setPolicyAgentLines((prev) =>
+        [
+          {
+            id: `pol-${now}`,
+            ts: new Date(now).toISOString(),
+            simDay: snapshot?.time?.sim_day,
+            actor: "Government AI",
+            country: code,
+            text,
+            level: "warn" as const,
+            source: "policy" as const,
+          },
+          ...prev,
+        ].slice(0, 12),
+      );
     },
-    [emitPolicyBundle, locale, project, snapshot?.time?.sim_day],
+    [locale, snapshot?.time?.sim_day],
   );
 
   const imposeTariff = useCallback(
     (src: string, dst: string, rate: number) => {
-      const prev = tariffsRef.current[src]?.[dst] ?? 0;
-      const nextMatrix = {
-        ...tariffsRef.current,
-        [src]: { ...(tariffsRef.current[src] ?? {}), [dst]: rate },
-      };
-      tariffsRef.current = nextMatrix;
-      setTariffs(nextMatrix);
-      const { events: evs, meta } = applyTariff(worldRef.current, src, dst, rate, prev);
-      const agents = buildTariffReactions({
-        locale,
-        simDay: snapshot?.time?.sim_day,
-        meta,
-      });
-      emitPolicyBundle(evs, agents);
-      project();
-      if (BACKEND_CODES.has(src) && BACKEND_CODES.has(dst)) {
-        void apiSetTariff(src, dst, rate);
-      }
+      if (!BACKEND_CODES.has(src) || !BACKEND_CODES.has(dst)) return;
+      void apiSetTariff(src, dst, rate);
+      const now = Date.now();
+      const pct = `${(rate * 100).toFixed(0)}%`;
+      const text =
+        locale === "vi"
+          ? `${src} áp thuế ${pct} lên ${dst} — đã gửi backend.`
+          : `${src} set a ${pct} tariff on ${dst} — submitted to backend.`;
+      setPolicyAgentLines((prev) =>
+        [
+          {
+            id: `tar-${now}`,
+            ts: new Date(now).toISOString(),
+            simDay: snapshot?.time?.sim_day,
+            actor: "Government AI",
+            country: src,
+            text,
+            level: "warn" as const,
+            source: "policy" as const,
+          },
+          ...prev,
+        ].slice(0, 12),
+      );
     },
-    [emitPolicyBundle, locale, project, snapshot?.time?.sim_day],
+    [locale, snapshot?.time?.sim_day],
   );
 
-  const resetOverrides = useCallback(
-    (code: string) => {
-      releaseOverrides(worldRef.current, code);
-      project();
-    },
-    [project],
-  );
-
-  const isOverridden = useCallback((code: string, featureKey: string) => {
-    return worldRef.current.get(code)?.overrides.has(featureKey) ?? false;
+  const resetOverrides = useCallback((code: string) => {
+    setDraftOverrides((prev) => {
+      const next = { ...prev };
+      delete next[code];
+      return next;
+    });
   }, []);
+
+  const isOverridden = useCallback(
+    (code: string, featureKey: string) =>
+      Boolean(draftOverrides[code] && featureKey in draftOverrides[code]),
+    [draftOverrides],
+  );
 
   const tierOf = useCallback((code: string): "hub" | "proxy" | null => {
-    return worldRef.current.get(code)?.tier ?? null;
+    if (!isSimNation(code)) return null;
+    return graphTierOf(code);
   }, []);
 
-  const ensure = useCallback(
-    (code: string) => {
-      if (!code || !isSimNation(code) || worldRef.current.has(code)) return;
-      ensureNode(worldRef.current, code);
-      project();
-    },
-    [project],
-  );
+  const ensure = useCallback((_code: string) => {
+    // No client-side node spawning — backend owns the live nation set.
+  }, []);
+
+  const backendLive = useCallback((code: string) => BACKEND_CODES.has(code), []);
 
   const value = useMemo<WorldSim>(
     () => ({
       countries,
       tariffs,
       events,
-      pendingCount,
+      pendingCount: 0,
       editFeature,
       imposeTariff,
       resetOverrides,
@@ -405,12 +264,26 @@ export function WorldSimProvider({ children }: { children: React.ReactNode }) {
       tierOf,
       ensure,
       policyAgentLines,
+      backendLive,
     }),
-    [countries, tariffs, events, pendingCount, editFeature, imposeTariff,
-     resetOverrides, isOverridden, tierOf, ensure, policyAgentLines],
+    [
+      countries,
+      tariffs,
+      events,
+      editFeature,
+      imposeTariff,
+      resetOverrides,
+      isOverridden,
+      tierOf,
+      ensure,
+      policyAgentLines,
+      backendLive,
+    ],
   );
 
-  return <WorldSimContext.Provider value={value}>{children}</WorldSimContext.Provider>;
+  return (
+    <WorldSimContext.Provider value={value}>{children}</WorldSimContext.Provider>
+  );
 }
 
 export function useWorldSim(): WorldSim {

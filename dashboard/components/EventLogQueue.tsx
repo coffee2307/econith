@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faBell, faLayerGroup } from "@fortawesome/free-solid-svg-icons";
 import type { SimEvent } from "@/lib/worldModel";
@@ -37,6 +37,29 @@ export function EventLogQueue({
       : pendingCount > 0
         ? `+${pendingCount}`
         : null;
+  // Chat-style feed: full history, oldest at the top, newest appended at the
+  // bottom. Only literal duplicates (same source/country/message + params) are
+  // collapsed — story-level spam is now suppressed at the source (kernel gate).
+  const chatEvents = useMemo(() => {
+    const seen = new Set<string>();
+    const kept = events.filter((event) => {
+      const key = `${event.source}|${event.country}|${event.messageKey}|${JSON.stringify(event.messageParams)}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    return kept.reverse(); // prop arrives newest-first
+  }, [events]);
+
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    // Follow the conversation like a chat window: stick to the bottom unless
+    // the user has scrolled up to read history.
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
+  }, [chatEvents.length]);
 
   return (
     <div className={embedded ? "flex min-h-0 flex-1 flex-col overflow-hidden" : "flex min-h-0 min-w-0 flex-col overflow-hidden border-l border-line bg-surface"}>
@@ -59,14 +82,14 @@ export function EventLogQueue({
           </span>
         </div>
       ) : null}
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4">
         <div className="space-y-2">
-          {events.length === 0 ? (
+          {chatEvents.length === 0 ? (
             <p className="font-mono text-xs text-faint">
               {t("world.waitingEvents")}
             </p>
           ) : (
-            events.map((e) => <QueuedRow key={e.id} e={e} />)
+            chatEvents.map((e) => <QueuedRow key={e.id} e={e} />)
           )}
         </div>
       </div>

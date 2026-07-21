@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Literal
 
@@ -35,13 +36,17 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from api.endpoints.control import build_control_router
 from api.endpoints.social import build_social_router
 from api.endpoints.vendors import build_vendors_router
 from ai.inference.predictor import Predictor
 from ai.journalist import JournalistLLM, OpenAICompatibleLLMBackend
 from ai.world_agents import synthesize_agent_exchange
 from ai.meta import CoreAIOrchestrator
+from ai.simulator_engine.hypothesis_generator import HypothesisGenerator
+from ai.simulator_engine.hypothesis_runner import HypothesisRunner
 from ai.simulator_engine.llm_scenario import LLMScenarioEngine
+from ai.simulator_engine.rollout_export import SealedRolloutWriter
 from ai.simulator_engine.sovereign_graph import SovereignWorldGraph, default_world
 from ai.simulator_engine.world_kernel import WorldKernel
 from bridges.social_bridge import SocialServiceBridge
@@ -56,7 +61,9 @@ from core.cockpit import CockpitTelemetryHub, build_cockpit_router
 from core.engine import get_engine
 from core.locale_prefs import dashboard_locale, set_dashboard_locale
 from core.ingestion import MacroIngestionHub, MacroIngestionSettings
-from core.mode import QuantMode, get_mode_manager
+from core.mode import get_mode_manager
+from core.observability import configure_json_logging
+from core.system_controller import get_system_controller
 from core.telemetry import MetricsHub
 from econith_quant.bridge.ai_bridge import AIBridge
 from econith_quant.bridge.exchange_bridge import ExchangeBridge
@@ -69,6 +76,9 @@ from quant.ccxt_bridge import CCXTBinanceBridge
 from sentinel.manager import Sentinel
 
 logging.basicConfig(level=logging.INFO)
+# Prefer structured JSON logs when ECONITH_JSON_LOGS=true (ops / Loki-ready).
+if (os.getenv("ECONITH_JSON_LOGS") or "").strip().lower() in ("1", "true", "yes", "on"):
+    configure_json_logging(force=True)
 logger = logging.getLogger("econith")
 settings = get_settings()
 
@@ -100,7 +110,7 @@ async def lifespan(app: FastAPI):
     vendor_registry = build_default_registry(engine.bus)
     vendor_status = await vendor_registry.initialize()
     vendor_registry.register_all()
-    social_bridge = SocialServiceBridge(settings.social_api_url)
+    social_bridge = SocialServiceBridge(settings.social_api_url, bus=engine.bus)
 
     # =====================================================================
     #  SUBSCRIBERS FIRST (registered before producers so no frame is missed)
@@ -134,24 +144,41 @@ async def lifespan(app: FastAPI):
     cockpit_hub.register()
 
     journalist_backend = None
-    if env.has_llm_credentials:
+    llm_pool = None
+    if env.has_any_llm:
         try:
-            from core.llm_pool import LLMKeyPool
+            from core.llm_pool import LLMKeyPool, RoutedLLMPool
 
-            llm_pool = LLMKeyPool.from_raw(env.llm_api_key)
+            remote_pool = (
+                LLMKeyPool.from_raw(env.llm_api_key)
+                if env.has_llm_credentials
+                else None
+            )
+            llm_pool = RoutedLLMPool(
+                remote_pool,
+                local_base_url=env.local_llm_base_url,
+                local_model=env.local_llm_model_name,
+                local_enabled=env.local_llm_enabled,
+                local_first=env.local_llm_first,
+                local_timeout_s=env.local_llm_timeout_s,
+                local_max_tokens=env.local_llm_max_tokens,
+                local_queue_timeout_s=env.local_llm_queue_timeout_s,
+                local_context_tokens=env.local_llm_context_tokens,
+            )
             journalist_backend = OpenAICompatibleLLMBackend(
                 key_pool=llm_pool,
                 base_url=env.llm_base_url,
                 model=env.llm_model_name,
             )
             logger.info(
-                "journalist backend: external LLM enabled (%d key(s), %s @ %s)",
+                "LLM routing enabled: local=%s (%s @ %s), remote=%d key(s)",
+                env.local_llm_enabled,
+                env.local_llm_model_name,
+                env.local_llm_base_url,
                 len(llm_pool.keys),
-                env.llm_model_name,
-                env.llm_base_url,
             )
         except Exception:  # noqa: BLE001
-            logger.exception("failed to initialize journalist external LLM backend")
+            logger.exception("failed to initialize routed LLM backend")
     journalist = JournalistLLM(engine.bus, backend=journalist_backend)
     journalist.register()
 
@@ -167,7 +194,8 @@ async def lifespan(app: FastAPI):
     ai_bridge = AIBridge(engine.bus)
     ai_bridge.register()
 
-    # Legacy mock TWAP bridge: retained purely for its order.update UI feed.
+    # Legacy mock TWAP bridge: opt-in only (ECONITH_MOCK_TWAP=true).
+    # Default off so CCXT fills are not shadowed by fake TWAP lifecycle events.
     exchange_bridge = ExchangeBridge(engine.bus)
     exchange_bridge.register()
 
@@ -184,9 +212,29 @@ async def lifespan(app: FastAPI):
     quant_exec.register()
 
     # --- ECONITH World layer (legacy kernel + sovereign graph) -----------
-    world_kernel = WorldKernel(engine.bus)
+    world_kernel = WorldKernel(
+        engine.bus,
+        governor_llm_pool=llm_pool,
+        governor_llm_base_url=env.llm_base_url,
+        governor_llm_model=env.llm_model_name,
+        governor_llm_cadence_ticks=env.local_llm_governor_cadence_ticks,
+    )
     world_kernel.register()
     llm_scenario = LLMScenarioEngine(engine.bus, world_kernel)
+    hypothesis_runner = HypothesisRunner(
+        engine.bus,
+        world_kernel,
+        llm_scenario,
+        controller=get_system_controller(),
+        generator=HypothesisGenerator(
+            world_kernel,
+            llm_pool=llm_pool,
+            llm_base_url=env.llm_base_url,
+            llm_model=env.llm_model_name,
+        ),
+        rollout_writer=SealedRolloutWriter(),
+        feature_snapshot=predictor.feature_snapshot,
+    )
 
     sovereign_world: SovereignWorldGraph = default_world(engine.bus)
     sovereign_world.register(engine.pipeline)  # wires the 4 agents into 5 phases
@@ -211,11 +259,17 @@ async def lifespan(app: FastAPI):
     await journalist.start()     # starts the narrative synthesis flush loop
     await core_ai.start()        # starts the cross-asset context fusion loop
     await ccxt_bridge.connect()  # authenticates only in REALITY mode
+    await hypothesis_runner.start()
+    try:
+        await social_bridge.publish_health_event()
+    except Exception:  # noqa: BLE001
+        logger.debug("social health event skipped", exc_info=True)
 
     # Mount the cockpit router (GET /cockpit/snapshot + WS /stream/cockpit).
     app.include_router(build_cockpit_router(cockpit_hub, settings.api_prefix))
     app.include_router(build_vendors_router(api_prefix=settings.api_prefix, settings=settings))
     app.include_router(build_social_router(api_prefix=settings.api_prefix, settings=settings))
+    app.include_router(build_control_router(api_prefix=settings.api_prefix, settings=settings))
 
     components.update(
         env=env,
@@ -235,6 +289,7 @@ async def lifespan(app: FastAPI):
         quant_exec=quant_exec,
         world_kernel=world_kernel,
         llm_scenario=llm_scenario,
+        hypothesis_runner=hypothesis_runner,
         sovereign_world=sovereign_world,
         world_bridge=world_bridge,
         streamer=streamer,
@@ -258,6 +313,7 @@ async def lifespan(app: FastAPI):
         # =================================================================
         await streamer.stop()
         await alt_provider.stop()
+        await hypothesis_runner.stop()
         await ccxt_bridge.close()
         await macro_hub.stop()
         await journalist.stop()
@@ -353,6 +409,10 @@ def _llm_scenario() -> LLMScenarioEngine:
     return components["llm_scenario"]  # type: ignore[return-value]
 
 
+def _hypothesis_runner() -> HypothesisRunner:
+    return components["hypothesis_runner"]  # type: ignore[return-value]
+
+
 def _world_kernel() -> WorldKernel:
     return components["world_kernel"]  # type: ignore[return-value]
 
@@ -446,20 +506,32 @@ async def resume_time() -> dict:
 
 
 # --- quant operating mode (REALITY vs SIMULATION) ----------------------------
+# Always route through SystemController so QuantControls (/mode) and the Main
+# Control Dashboard (/control/mode) cannot desync operating_mode vs quant_mode.
 @app.get(f"{settings.api_prefix}/mode")
 async def get_quant_mode() -> dict:
-    return get_mode_manager().snapshot()
+    ctrl = get_system_controller().snapshot()
+    snap = get_mode_manager().snapshot()
+    return {
+        **snap,
+        "operating_mode": ctrl.operating_mode,
+        "system": ctrl.as_dict(),
+    }
 
 
 @app.post(f"{settings.api_prefix}/mode")
 async def set_quant_mode(req: ModeRequest) -> dict:
-    mgr = get_mode_manager()
-    mgr.set(QuantMode(req.mode))
+    state = get_system_controller().set_mode(req.mode)
     # Re-authenticate the CCXT session when entering REALITY.
     ccxt = components.get("ccxt_bridge")
-    if ccxt is not None and mgr.is_reality():
+    if ccxt is not None and state.quant_mode == "REALITY":
         await ccxt.connect()  # type: ignore[attr-defined]
-    return mgr.snapshot()
+    snap = get_mode_manager().snapshot()
+    return {
+        **snap,
+        "operating_mode": state.operating_mode,
+        "system": state.as_dict(),
+    }
 
 
 # --- sentinel controls (drive the risk demo) ---------------------------------
@@ -502,6 +574,24 @@ async def world_scenario(req: ScenarioRequest) -> dict:
     if not req.prompt.strip():
         return {"error": "prompt is empty"}
     return await _llm_scenario().run_scenario(req.prompt)
+
+
+@app.get(f"{settings.api_prefix}/world/hypotheses")
+async def world_hypotheses() -> dict:
+    runner = components.get("hypothesis_runner")
+    if runner is None:
+        return {"runs": [], "armed": False}
+    return {
+        **runner.report_dict(),  # type: ignore[union-attr]
+        "armed": runner.is_armed(),  # type: ignore[union-attr]
+    }
+
+
+@app.post(f"{settings.api_prefix}/world/hypotheses/run-once")
+async def world_hypotheses_run_once() -> dict:
+    """One-shot hypothesis cycle (useful without waiting for the background loop)."""
+    outcome = await _hypothesis_runner().run_once(force=True)
+    return outcome.model_dump(mode="json")
 
 
 @app.get(f"{settings.api_prefix}/world/state")
@@ -553,6 +643,10 @@ async def world_agent_exchange(req: AgentExchangeRequest) -> dict:
         api_key=env.llm_api_key,
         base_url=env.llm_base_url,
         model=env.llm_model_name,
+        local_enabled=env.local_llm_enabled,
+        local_base_url=env.local_llm_base_url,
+        local_model=env.local_llm_model_name,
+        local_first=env.local_llm_first,
     )
 
 

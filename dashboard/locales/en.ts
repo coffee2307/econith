@@ -130,7 +130,7 @@ export const en: Dictionary = {
       },
       explainableAi: {
         title: "Explainable trading AI",
-        desc: "Sub-millisecond SHAP attribution exported as transparent JSON for fund-grade oversight.",
+        desc: "Weighted feature attribution exported as transparent JSON for fund-grade oversight (not SHAP).",
       },
       antiOverfit: {
         title: "Anti-overfitting validation",
@@ -369,6 +369,11 @@ export const en: Dictionary = {
       "Waiting for Corporate / Government / Societal AI moves from the live world kernel…",
     agentExchangeLive: "Live sim",
     agentExchangeWaiting: "Waiting",
+    backendStatus: "Kernel",
+    backendLive: "LIVE mutate",
+    backendTopologyOnly: "topology only",
+    backendTopologyHint:
+      "Globe topology only — backend currently simulates USA/CHN/VNM/JPN/IND/DEU.",
   },
   macro: {
     tabs: tabLabels as Dictionary["macro"]["tabs"],
@@ -398,9 +403,14 @@ export const en: Dictionary = {
     contagion: "contagion",
     corporate: "corporate",
     society: "society",
+    government: "government",
     journalist: "world wire",
     world: "world",
     sentinel: "sentinel",
+    regime: "regime",
+    hypothesis: "hypothesis",
+    scenario: "scenario",
+    status: "status",
   },
   simDirs: { rose: "rose", eased: "eased" },
   simTariff: {

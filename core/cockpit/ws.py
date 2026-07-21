@@ -82,6 +82,9 @@ class CockpitTelemetryHub:
     # -- handlers -------------------------------------------------------------
     async def _on_fill(self, event: Event) -> None:
         p = event.payload
+        status = str(p.get("status") or "FILLED").upper()
+        if status not in ("FILLED", "") or float(p.get("filledVolume") or 0) <= 0:
+            return
         try:
             entry = MatchedOrderLog.model_validate(p)
         except Exception:  # noqa: BLE001 - a malformed fill must not desync the hub

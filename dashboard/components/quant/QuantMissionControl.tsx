@@ -261,15 +261,34 @@ function AiEnsemblePanel({
             : <Empty />}
         </MiniTable>
         <MiniTable title={tLabel("quant.featureAttribution")}>
-          {ai?.explain?.attribution?.length
-            ? ai.explain.attribution.slice(0, 5).map((a) => (
-                <Row
-                  key={a.feature}
-                  left={a.feature}
-                  right={fmtSigned(a.importance, 3)}
-                  rightClass={a.importance >= 0 ? "text-long" : "text-short"}
-                />
-              ))
+          {ai?.explain?.method ? (
+            <Row left="method" right={String(ai.explain.method)} />
+          ) : null}
+          {(ai?.explain?.top_features?.length
+            ? ai.explain.top_features
+            : ai?.explain?.attribution
+          )?.length
+            ? (ai.explain.top_features?.length
+                ? ai.explain.top_features
+                : ai.explain.attribution!
+              )
+                .slice(0, 5)
+                .map((a) => {
+                  const importance =
+                    "importance" in a && typeof a.importance === "number"
+                      ? a.importance
+                      : Number((a as { weight?: number }).weight ?? 0);
+                  const feature =
+                    "feature" in a ? String(a.feature) : String((a as { feature?: string }).feature);
+                  return (
+                    <Row
+                      key={feature}
+                      left={feature}
+                      right={fmtSigned(importance, 3)}
+                      rightClass={importance >= 0 ? "text-long" : "text-short"}
+                    />
+                  );
+                })
             : <Empty />}
         </MiniTable>
       </div>

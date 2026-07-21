@@ -42,13 +42,17 @@ export interface AltState {
 
 export interface AttributionEntry {
   feature: string;
-  importance: number;
+  importance?: number;
+  weight?: number;
 }
+
 
 export interface AiExplain {
   action?: string;
   direction?: number;
+  method?: string;
   attribution?: AttributionEntry[];
+  top_features?: AttributionEntry[];
 }
 
 export interface AiState {
@@ -60,6 +64,8 @@ export interface AiState {
   weights?: Record<string, number>;
   per_agent?: Record<string, number>;
   explain?: AiExplain;
+  agent_brain?: string;
+  regime_brain?: string;
 }
 
 export interface RoutingLeg {
@@ -200,6 +206,7 @@ export interface MetricsSnapshot {
   events: LogEvent[];
   world_events?: LogEvent[];
   world_agents?: WorldAgentEvent[];
+  world_dialogue?: Array<Record<string, unknown>>;
   quant_mode?: QuantModeState;
 }
 

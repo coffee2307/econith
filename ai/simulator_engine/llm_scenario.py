@@ -349,17 +349,36 @@ class LLMScenarioEngine:
         )
 
     def _headline(self, category: ScenarioCategory, sev: float, subjects: list[str]) -> str:
-        names = ", ".join(
-            self._kernel.world.countries[c].name for c in subjects
+        from core.locale_prefs import dashboard_locale
+        from ai.simulator_engine.log_i18n import format_scenario_headline
+
+        names = [
+            self._kernel.world.countries[c].name
+            for c in subjects
             if c in self._kernel.world.countries
-        ) or "Global"
-        tone = "catastrophic" if sev > 0.85 else "major" if sev > 0.6 else "moderate"
-        label = category.value.replace("_", " ")
-        return f"{tone.title()} {label} scenario affecting {names}"
+        ]
+        # Prefer localized place names when UI is Vietnamese.
+        locale = dashboard_locale()
+        if locale.lower().startswith("vi"):
+            from ai.simulator_engine.narrative import NarrativeEngine
+
+            ne = NarrativeEngine()
+            names = [
+                ne._place_vi(c)  # noqa: SLF001
+                for c in subjects
+                if c in self._kernel.world.countries
+            ] or names
+        return format_scenario_headline(category.value, sev, names, locale)
 
     # -- orchestration --------------------------------------------------------
-    async def run_scenario(self, prompt: str) -> dict[str, Any]:
-        """Parse, apply the unified mutation, inject the micro shock, announce."""
+    async def run_scenario(
+        self, prompt: str, *, announce: bool = True
+    ) -> dict[str, Any]:
+        """Parse, apply the unified mutation, inject the micro shock, announce.
+
+        ``announce=False`` still mutates + publishes ``world.scenario`` but skips
+        Event Log spam — used by HypothesisRunner which logs its own line.
+        """
         if not prompt.strip():
             return {"error": "prompt is empty"}
 
@@ -382,19 +401,6 @@ class LLMScenarioEngine:
         if parse.micro.is_active():
             await self._kernel.publish_micro_shock(parse.micro)
 
-        # 4) announce a rich, causal narrative on the unified event log.
-        level = "danger" if parse.severity > 0.7 else "warn"
-        summary_bits: list[str] = []
-        if applied:
-            summary_bits.append("macro[" + "; ".join(applied) + "]")
-        if tariff_applied:
-            summary_bits.append("trade[" + "; ".join(tariff_applied) + "]")
-        summary_bits.append(
-            f"micro[vol x{parse.micro.volatility_multiplier:.2f}, "
-            f"OBI {parse.micro.order_flow_shock:+.2f}]"
-        )
-        message = f"Scenario '{prompt}' -> {parse.narrative}. Effects: " + " ".join(summary_bits)
-
         await self._bus.publish(
             "world.scenario",
             prompt=prompt,
@@ -406,14 +412,40 @@ class LLMScenarioEngine:
             tariff_actions=[a.model_dump() for a in parse.tariff_actions],
             micro_impact=parse.micro.model_dump(),
         )
-        await self._bus.publish(
-            "system.log", level=level, source="scenario", message=message
-        )
-        await self._bus.publish(
-            "world.event", sim_day=self._kernel.world.sim_day,
-            country=parse.subjects[0] if parse.subjects else "Global",
-            message=parse.narrative, level=level,
-        )
+
+        if announce:
+            from core.locale_prefs import dashboard_locale
+            from ai.simulator_engine.log_i18n import format_scenario_log
+
+            # 4) announce a rich, causal narrative on the unified event log.
+            level = "danger" if parse.severity > 0.7 else "warn"
+            locale = dashboard_locale()
+            vi = locale.lower().startswith("vi")
+            summary_bits: list[str] = []
+            if applied:
+                label = "vĩ mô" if vi else "macro"
+                summary_bits.append(f"{label}[" + "; ".join(applied) + "]")
+            if tariff_applied:
+                label = "thương mại" if vi else "trade"
+                summary_bits.append(f"{label}[" + "; ".join(tariff_applied) + "]")
+            micro_label = "vi mô" if vi else "micro"
+            summary_bits.append(
+                f"{micro_label}[vol x{parse.micro.volatility_multiplier:.2f}, "
+                f"OBI {parse.micro.order_flow_shock:+.2f}]"
+            )
+            message = format_scenario_log(
+                prompt, parse.narrative, " ".join(summary_bits), locale
+            )
+            await self._bus.publish(
+                "system.log", level=level, source="scenario", message=message
+            )
+            await self._bus.publish(
+                "world.event",
+                sim_day=self._kernel.world.sim_day,
+                country=parse.subjects[0] if parse.subjects else "Global",
+                message=parse.narrative,
+                level=level,
+            )
 
         return {
             "prompt": prompt,

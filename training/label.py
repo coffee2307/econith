@@ -213,7 +213,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    """Delegate to multi-symbol-safe labeler (avoids cross-asset contamination)."""
+    from training.quant.label_symbol import build_parser as _sym_parser
+    from training.quant.label_symbol import label_dataset
+
+    logger.info("label.py delegates to training.quant.label_symbol (per-symbol safe)")
+    args = _sym_parser().parse_args(argv)
     if not (0.0 < args.holdout_ratio < 0.9):
         raise SystemExit("--holdout-ratio must be between 0 and 0.9")
     label_dataset(args.input, args.output, args.holdout_ratio)

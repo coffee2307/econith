@@ -84,6 +84,8 @@ class Predictor:
         self._impact_left = 0
         self._impact_dur = 1
         self._mode = get_mode_manager()
+        self._quant_bias = 0.0
+        self._risk_appetite = 1.0
 
     # -- brain assembly (trained checkpoints with heuristic fallback) ---------
     @staticmethod
@@ -101,15 +103,17 @@ class Predictor:
         trained = {a.name: a for a in load_active_agents()}
         roster = [trained.get(name, defaults[name]) for name in _ROSTER]
         brain = "trained" if trained else "heuristic"
-        if trained:
+        logger.info(
+            "AI desks: %s",
+            ", ".join(
+                f"{n}={'PPO' if n in trained else 'heuristic'}" for n in _ROSTER
+            ),
+        )
+        if not trained:
             logger.info(
-                "AI desks: %s",
-                ", ".join(
-                    f"{n}={'PPO' if n in trained else 'stub'}" for n in _ROSTER
-                ),
+                "heuristic policy active — mount ./models with SB3 .zip or set "
+                "TREND_CHECKPOINT / MEAN_REV_CHECKPOINT / SCALPER_CHECKPOINT"
             )
-        else:
-            logger.info("AI desks: heuristic stubs (no trained checkpoints found)")
         return roster, brain
 
     @staticmethod
@@ -131,7 +135,17 @@ class Predictor:
         self._bus.subscribe("alt.funding_rate", self._on_funding)
         self._bus.subscribe("alt.liquidation", self._on_liquidation)
         self._bus.subscribe("world.micro_impact", self._on_micro_impact)
-        logger.info("predictor registered to feature + world-coupling topics")
+        self._bus.subscribe("meta.quant.directive", self._on_quant_directive)
+        logger.info(
+            "predictor registered to feature + world-coupling topics "
+            f"(desks={self._agent_brain}, regime={self._regime_brain})"
+        )
+
+    async def _on_quant_directive(self, event: Event) -> None:
+        """Advisory Core AI lean — clamps keep a bad directive from seizing control."""
+        p = event.payload
+        self._quant_bias = max(-0.5, min(0.5, float(p.get("directional_bias", 0.0) or 0.0)))
+        self._risk_appetite = max(0.2, min(1.0, float(p.get("risk_appetite", 1.0) or 1.0)))
 
     async def start(self) -> None:
         if self._running:
@@ -275,6 +289,21 @@ class Predictor:
             allocation = self._switcher.allocate(regime)
             signals = [agent.act(coupled) for agent in self._agents]
             decision = fuse_signals(signals, allocation)
+            # Core AI advisory lean (does not override Sentinel / fusion structure).
+            if abs(self._quant_bias) > 1e-9 or self._risk_appetite < 0.999:
+                lean = max(
+                    -1.0,
+                    min(1.0, float(decision.direction) + self._quant_bias * 0.35),
+                )
+                lean *= self._risk_appetite
+                from dataclasses import replace
+                from ai.ensemble.decision_fusion import _action
+
+                decision = replace(
+                    decision,
+                    direction=round(lean, 4),
+                    action=_action(lean),
+                )
             attribution = build_attribution(signals, allocation)
             explain = attribution_to_json(decision.action, decision.direction, attribution)
 
@@ -298,3 +327,15 @@ class Predictor:
     @property
     def feature_count(self) -> int:
         return len(self._features)
+
+    @property
+    def agent_brain(self) -> str:
+        return self._agent_brain
+
+    @property
+    def regime_brain(self) -> str:
+        return self._regime_brain
+
+    def feature_snapshot(self) -> dict[str, Any]:
+        """Shallow copy of the live feature vector for sealed rollout export."""
+        return dict(self._features)

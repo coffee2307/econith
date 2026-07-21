@@ -14,8 +14,10 @@ Time Engine), every tick the kernel:
        (:func:`cross_impact.macro_to_micro`) and publishes it as
        ``world.micro_impact`` -- the shock signature the Quant engine ingests,
     2. gathers proposals from (a) the classic macro reaction models and (b) the
-       intelligence-driven, market-aware ensemble (Corporate / Government /
-       Societal AIs) playing an intra-tick game over a shared blackboard,
+       intelligence-driven hierarchical cognitive world (Tier-1 governors,
+       Tier-2 Nash bargaining, Tier-3 belief clusters) whose continuous
+       actions and threshold-crossing events emerge from conflicting
+       objective functions — never from hardcoded scenario scripts,
     3. computes the **quant->macro** feedback (:func:`cross_impact.quant_to_macro`)
        -- capital flight, FX depreciation, sovereign-yield blowout, imported
        inflation and civil-unrest pressure driven by the live tape,
@@ -30,17 +32,13 @@ the LLM scenario engine.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import math
 import random
 from dataclasses import asdict, dataclass, field
 from datetime import date, timedelta
 
-from ai.simulator_engine.agents import (
-    AgentDecision,
-    MarketAwareAgent,
-    TickBlackboard,
-    default_intelligent_agents,
-)
 from ai.simulator_engine.cross_impact import (
     CrisisEvent,
     CrisisType,
@@ -63,6 +61,8 @@ from ai.simulator_engine.reaction_models import (
 from core.event_bus import Event, EventBus
 from core.mode import get_mode_manager
 from econith.world import MesaSovereignKernel
+from econith.world.core.dialogue_orchestrator import DialogueOrchestrator
+from econith.world.core.hierarchy_broker import HierarchyBroker
 
 logger = logging.getLogger("econith.world.kernel")
 
@@ -83,8 +83,8 @@ LOGICAL_FIELDS: dict[str, tuple[str | None, str]] = {
 # Clamp bounds for the most-mutated fields (fraction-like unless noted).
 _BOUNDS: dict[str, tuple[float, float]] = {
     "interest_rate": (0.0, 0.25),
-    "inflation_cpi": (-0.05, 0.60),
-    "inflation_ppi": (-0.05, 0.60),
+    "inflation_cpi": (-0.03, 0.15),
+    "inflation_ppi": (-0.03, 0.18),
     "corporate_tax": (0.0, 0.60),
     "individual_tax": (0.0, 0.75),
     "vat": (0.0, 0.40),
@@ -102,8 +102,10 @@ _BOUNDS: dict[str, tuple[float, float]] = {
     "fx_spot": (0.01, 1.0e6),
     # feedback-loop targets
     "reserve_requirement": (0.0, 0.50),
-    "yield_10y": (-0.02, 0.35),
-    "yield_2y": (-0.02, 0.35),
+    "yield_10y": (-0.02, 0.15),
+    "yield_2y": (-0.02, 0.15),
+    "credit_growth": (-0.30, 0.40),
+    "velocity_of_money": (0.5, 12.0),
     "foreign_reserves": (0.0, 1.0e14),
     "fdi_inflow": (0.0, 1.0e13),
     "fdi_outflow": (0.0, 1.0e13),
@@ -111,6 +113,7 @@ _BOUNDS: dict[str, tuple[float, float]] = {
     "supply_chain_friction": (0.0, 1.0),
     "public_investment_pct": (0.0, 0.20),
     "sanctions_exposure": (0.0, 1.0),
+    "money_supply_m2": (1e9, 5e13),
 }
 
 _COMPANIES = ("Xamsung", "Pineapple", "Macrosoft", "Googol", "Volksauto")
@@ -121,14 +124,29 @@ _AMBIENT = (
     "{company} signs strategic supply deal in {country}.",
 )
 
-_AGENT_ACTORS = frozenset({"Corporate AI", "Government AI", "Societal AI", "Sovereign"})
+_AGENT_ACTORS = frozenset({
+    "Corporate AI", "Government AI", "Societal AI", "Sovereign",
+    "Household", "Central Bank", "Labor",
+})
 
 # Which log source each narrative actor maps to (for the dashboard event feed).
 _ACTOR_SOURCE = {
     "Corporate AI": "corporate",
     "Government AI": "government",
     "Societal AI": "society",
+    "Household": "society",
+    "Labor": "society",
+    "Central Bank": "government",
     "Market": "regime",
+    "Sovereign": "sovereign",
+}
+
+# Emergent event kind -> (actor, level). Narratives are rendered from metrics.
+_EMERGENT_META: dict[str, tuple[str, str]] = {
+    "labor_strike": ("Labor", "danger"),
+    "safe_haven_migration": ("Household", "warn"),
+    "demand_contraction": ("Household", "warn"),
+    "demand_expansion": ("Household", "ok"),
 }
 
 
@@ -363,15 +381,19 @@ class CountryEntity:
         cushion = 0.5 * demo.youth_productivity_index + 0.5 * demo.education_level
         deflation = _clamp01((0.6 * shock + 0.4 * stress) * (0.5 + fragility) * (1.0 - 0.4 * cushion))
         if deflation > 0.01:
+            # NOTE: gdp_growth is an ANNUALIZED rate mutated once per sim-day.
+            # The old -0.05*deflation shaved up to 5pp of annual growth PER DAY,
+            # a self-feeding doom loop (stress -> deflation -> growth -> stress)
+            # that no stabilizer could win against. Keep the drag real but small.
             adjustments += [
                 Adjustment(self.code, "geopolitical", "consumer_confidence",
                            -0.12 * deflation * scale, reason="consumption_deflation"),
                 Adjustment(self.code, "geopolitical", "business_confidence",
                            -0.08 * deflation * scale, reason="demand_contraction"),
                 Adjustment(self.code, "", "gdp_growth",
-                           -0.05 * deflation * scale, reason="aging_demand_collapse"),
+                           -0.008 * deflation * scale, reason="aging_demand_collapse"),
                 Adjustment(self.code, "industrial", "capacity_utilization",
-                           -0.03 * deflation * scale, reason="idle_capacity"),
+                           -0.01 * deflation * scale, reason="idle_capacity"),
             ]
 
         # --- 2) Capital flight: aging + war + unrest drain the war-chest ------
@@ -379,7 +401,10 @@ class CountryEntity:
             0.45 * shock + 0.25 * stab.geopolitical_stress
             + 0.20 * stab.societal_unrest_index + 0.10 * demo.aging_index
         )
-        if flight_drive > 0.08:
+        if flight_drive > 0.15:
+            # Threshold raised + fx push softened: ambient background stress
+            # (aging, mild unrest) used to depreciate every currency 2%/day
+            # forever — a compounding one-way slide no anchor could offset.
             adjustments += [
                 Adjustment(self.code, "fiscal", "foreign_reserves",
                            -0.06 * flight_drive * self.treasury_reserves * scale,
@@ -388,7 +413,7 @@ class CountryEntity:
                            -0.10 * flight_drive * self.state.fiscal.fdi_inflow * scale,
                            reason="fdi_reversal"),
                 Adjustment(self.code, "monetary", "fx_spot",
-                           self.state.monetary.fx_spot * 0.02 * flight_drive * scale,
+                           self.state.monetary.fx_spot * 0.008 * (flight_drive - 0.15) * scale,
                            reason="currency_depreciation"),
                 Adjustment(self.code, "monetary", "yield_10y",
                            0.004 * flight_drive * scale, reason="sovereign_risk_premium"),
@@ -421,16 +446,13 @@ class CountryEntity:
                            -0.03 * unrest_push * scale, reason="legitimacy_erosion"),
             ]
 
-        # --- 5) Climate black-swan: stochastic disaster hit ------------------
-        disaster_p = bswan.climate_disaster_exposure * 0.02 * scale
+        # --- 5) Climate black-swan: rare physics-only hit (no canned headline)
+        disaster_p = bswan.climate_disaster_exposure * 0.002 * scale
         if self._rng.random() < disaster_p:
             hit = _clamp01(0.4 + 0.6 * bswan.climate_disaster_exposure)
             adjustments += [
                 Adjustment(self.code, "industrial", "agricultural_output",
-                           -6.0 * hit, reason="climate_disaster",
-                           event=f"{self.name} struck by a climate disaster "
-                                 f"(-{6.0*hit:.1f} agri idx, food security hit)",
-                           event_level="danger"),
+                           -6.0 * hit, reason="climate_disaster"),
                 Adjustment(self.code, "", "gdp_growth", -0.02 * hit, reason="disaster_output_loss"),
                 Adjustment(self.code, "industrial", "food_security_index",
                            -0.05 * hit, reason="crop_failure"),
@@ -479,18 +501,20 @@ class WorldKernel:
         bus: EventBus,
         world: WorldState | None = None,
         models: list[ReactionModel] | None = None,
-        agents: list[MarketAwareAgent] | None = None,
+        agents: list | None = None,  # retained for DI compatibility; unused
         market: MarketContext | None = None,
         narrator: NarrativeEngine | None = None,
         event_probability: float = 0.18,
         max_events_per_tick: int = 6,
+        governor_llm_pool=None,
+        governor_llm_base_url: str = "",
+        governor_llm_model: str = "",
+        governor_llm_cadence_ticks: int = 20,
     ) -> None:
         self._bus = bus
         self._world = world or default_world()
         self._models = models or default_models()               # classic macro agents
-        self._agents = sorted(                                   # market-aware ensemble
-            agents or default_intelligent_agents(), key=lambda a: a.priority
-        )
+        self._agents = agents or []  # legacy seam; hierarchy broker owns cognition
         self._market = market or MarketContext()
         self._narrator = narrator or NarrativeEngine(seed=7)
         self._event_p = event_probability
@@ -501,16 +525,81 @@ class WorldKernel:
         # Dual-mode coupling + H200 anti-overfitting domain randomization.
         self._mode = get_mode_manager()
         self._randomizer = DomainRandomizer(low=0.05, high=0.15)
+        self._meta_vol_pressure = 0.0
         # Object-oriented entity kernel: one autonomous CountryEntity per nation.
         self._entities: dict[str, CountryEntity] = {
             code: CountryEntity(state) for code, state in self._world.countries.items()
         }
         # Matrix-based geopolitical causal graph (trade / alliance / cultural).
         self._graph = GeopoliticalCausalGraph(self._world)
+        # Narrative gate: while a stress episode persists, the SAME agent story
+        # (actor+country+tag) would otherwise re-fire every tick with slightly
+        # different numbers. Emit it once per cooldown window, unless severity
+        # escalates. key -> (sim_day_emitted, severity_rank)
+        self._narrative_gate: dict[str, tuple[int, int]] = {}
+        # STRUCTURAL ANCHORS: snapshot of ratchet-prone fields at boot. Several
+        # dynamics only ever push one way (unrest up, fx down, exports down,
+        # agri down after disasters, FDI multiplicatively to 0) — without a
+        # recovery force they saturate their clamps and the whole world locks
+        # into a permanent doom state (36% unemployment, demand ~= 0).
+        self._macro_anchors: dict[str, dict[tuple[str, str], float]] = {}
+        _anchor_specs = (
+            ("monetary", "fx_spot"),
+            ("monetary", "money_supply_m2"),
+            ("fiscal", "export_index"),
+            ("fiscal", "import_index"),
+            ("fiscal", "trade_balance_pct"),
+            ("fiscal", "current_account_pct"),
+            ("fiscal", "fdi_inflow"),
+            ("fiscal", "foreign_reserves"),
+            ("industrial", "agricultural_output"),
+            ("industrial", "food_security_index"),
+            ("industrial", "capacity_utilization"),
+            ("industrial", "supply_chain_friction"),
+            ("geopolitical", "social_unrest_index"),
+            ("geopolitical", "political_stability"),
+        )
+        for code, cstate in self._world.countries.items():
+            anchors: dict[tuple[str, str], float] = {}
+            for group, fname in _anchor_specs:
+                vec = getattr(cstate, group, None)
+                if vec is not None and hasattr(vec, fname):
+                    anchors[(group, fname)] = float(getattr(vec, fname))
+            self._macro_anchors[code] = anchors
         # PHASE-2 injection queue: anomalies / REST mutations / LLM scenarios.
         self._pending: list[dict] = []
         # Native ECONITH Mesa-style sovereign step kernel (no external scheduler).
         self._mesa_kernel = MesaSovereignKernel()
+        # Hierarchical cognitive world (replaces the old hardcoded market-aware
+        # ensemble AND the flat agent-cluster). Tier 1 governors (control law or
+        # LLM JSON) -> Tier 2 Nash wage bargaining -> Tier 3 six-thousand belief
+        # clusters solving continuous consumption/portfolio problems. Scenarios
+        # emerge from conflicting objective functions, never scripts.
+        self._broker = HierarchyBroker()
+        self._last_broker_telemetry = None
+        # Tier-1 governors deliberate asynchronously on a slower cognitive
+        # cadence. Physics never waits on network I/O: the broker keeps applying
+        # the last valid structured directive, with its deterministic control law
+        # as the fail-safe whenever the provider is unavailable or returns bad JSON.
+        self._governor_llm_pool = governor_llm_pool
+        self._governor_llm_base_url = governor_llm_base_url
+        self._governor_llm_model = governor_llm_model
+        self._governor_llm_cadence = max(1, int(governor_llm_cadence_ticks))
+        self._governor_llm_task: asyncio.Task | None = None
+        self._governor_llm_status = (
+            "ready" if governor_llm_pool is not None else "disabled"
+        )
+        self._governor_llm_last_tick: int | None = None
+        # Material-triggered multi-agent dialogue (enum-first, validated).
+        self._dialogue = DialogueOrchestrator(
+            valid_codes=tuple(self._world.countries),
+            pool=governor_llm_pool,
+            base_url=governor_llm_base_url,
+            model=governor_llm_model,
+            on_directives=self._broker.set_llm_directives,
+            cooldown_ticks=15,
+        )
+        self._last_dialogue_bundle = None
         # TITAN scale-out tensor engine (50 hubs + 100 proxies). Co-steps with the
         # classic entity loop; Sentinel still consumes the EventBus snapshot from
         # the original path. REALITY mode-gates are unchanged.
@@ -530,6 +619,7 @@ class WorldKernel:
     def state_dict(self) -> dict:
         base = self._world.to_dict()
         base["entities"] = {code: ent.to_dict() for code, ent in self._entities.items()}
+        base["agent_population"] = self._broker.snapshot()
         return base
 
     def entity(self, code: str) -> CountryEntity | None:
@@ -557,13 +647,22 @@ class WorldKernel:
         self._bus.subscribe("alt.funding_rate", self._on_funding)
         self._bus.subscribe("alt.open_interest", self._on_open_interest)
         self._bus.subscribe("sentinel.status", self._on_sentinel)
+        self._bus.subscribe("meta.world.directive", self._on_world_directive)
 
         n = self._world.countries
         feats = next(iter(n.values())).feature_count_template() if n else 0
         logger.info(
             "unified kernel registered: %d countries x %d features, "
-            "%d macro models + %d market-aware agents",
-            len(n), feats, len(self._models), len(self._agents),
+            "%d macro models + hierarchical broker (%d belief clusters, "
+            "Tier1 governors + Tier2 bargaining + Tier3 population)",
+            len(n), feats, len(self._models), self._broker.micro.n_clusters,
+        )
+
+    async def _on_world_directive(self, event: Event) -> None:
+        """Core AI scenario pressure — scales outbound micro shock modestly."""
+        p = event.payload
+        self._meta_vol_pressure = max(
+            0.0, min(1.0, float(p.get("volatility_pressure", 0.0) or 0.0))
         )
 
     # -- Quant -> World ingestion handlers ------------------------------------
@@ -615,7 +714,16 @@ class WorldKernel:
         PHASE 1 SNAPSHOT -> PHASE 2 APPLY EVENTS -> PHASE 3 RESOLVE CONFLICTS ->
         PHASE 4 UPDATE WORLD -> PHASE 5 EMIT SIGNALS. Each phase fully completes
         before the next begins, so no phase observes a half-mutated world.
+
+        COMPUTE GUARDRAIL: when the operator's *Enable World Simulation* switch
+        is OFF the entire agent pipeline suspends — the tick early-returns, state
+        is frozen, and no CPU/GPU/RAM is spent so the box runs on standard market
+        pipelines only.
         """
+        from core.system_controller import get_system_controller
+
+        if not get_system_controller().world_pipeline_active():
+            return
         self._sim_day = int(event.payload.get("sim_day", self._sim_day + 1))
         self._world.sim_day = self._sim_day
         multiplier = int(event.payload.get("multiplier", 1))
@@ -631,11 +739,11 @@ class WorldKernel:
     def _phase1_snapshot(self, scale: float) -> dict:
         """Freeze the tick's inputs so later phases see a stable world view."""
         sim = self._mode.is_simulation()
-        # Domain randomization (SIMULATION only): scramble synthetic macro state
-        # within +/-5%..15% per tick so continuous H200 RL cannot overfit. Inert
-        # (and the real data plane untouched) in REALITY mode.
-        if sim:
-            self._randomizer.randomize_world(self._world, _clamp_field)
+        # Do NOT randomize the authoritative World state in-place. Repeated
+        # multiplicative perturbations caused a random walk that pushed CPI and
+        # other macro variables to their clamps within seconds. Domain
+        # randomization belongs in generated training episodes; the interactive
+        # runtime only jitters the outbound micro-impact observation in phase 5.
         snap = self._market.snapshot()
         return {
             "sim": sim,
@@ -729,35 +837,125 @@ class WorldKernel:
             for code in self._world.codes():
                 proposals.extend(model.react(code, self._world))
 
-        # 2) market-aware ensemble (corporates -> governments -> society).
-        board = TickBlackboard(market=snap)
-        for agent in self._agents:
-            for code in self._world.codes():
-                decision: AgentDecision = agent.evaluate(code, self._world, board)
-                proposals.extend(decision.adjustments)
-                facts.extend(decision.facts)
-                ctx["agent_shocks"].extend(decision.micro_shocks)
+        # 2) HIERARCHICAL COGNITIVE WORLD (Tier1 governors -> Tier2 Nash wage
+        # bargaining -> Tier3 six-thousand belief clusters). Replaces the old
+        # hardcoded market-aware ensemble and the flat cluster. Emergent events
+        # and macro injections arise from conflicting objective functions, and
+        # the household flows produce the micro-shock fed to the Quant brain.
+        br_props, br_facts, br_shock = self._hierarchy_behavior(ctx, snap)
+        proposals.extend(br_props)
+        facts.extend(br_facts)
+        if br_shock is not None:
+            ctx["agent_shocks"].append(br_shock)
 
-        # 3) ENTITY BEHAVIOUR MATRIX: each autonomous CountryEntity best-responds
+        # 4) ENTITY BEHAVIOUR MATRIX: each autonomous CountryEntity best-responds
         #    to the propagated external shock (aging + war -> consumption collapse
         #    + capital flight, etc.). Routed through the Mesa scheduler when
         #    available, else the native loop — identical physics either way.
         proposals.extend(self._entity_behavior(external, snap.stress, scale))
 
-        # 4) Quant -> World macro feedback (capital flight, FX, yields, unrest).
+        # 5) Quant -> World macro feedback (capital flight, FX, yields, unrest).
         feedback = quant_to_macro(self._world, snap)
         fb_props, fb_facts = self._feedback_to_proposals(feedback)
         proposals.extend(fb_props)
         facts.extend(fb_facts)
 
-        # 5) apply everything simultaneously, then step derived macro.
+        # 6) apply everything simultaneously, then step derived macro.
         ctx["legacy_events"] = self._apply(proposals, scale)
         self._step_derived(scale)
 
-        # 6) regime-transition narrative (Quant regime flip explained by macro).
+        # 6b) NORMALIZATION LAYER: pull the most drift-prone macro variables back
+        # toward economically-coherent anchors so no single one-directional push
+        # can saturate its clamp (the failure mode that pinned CPI/yields at the
+        # ceiling). Damped mean reversion => the world reaches a steady state.
+        self._stabilize_macro(scale)
+
+        # 7) regime-transition narrative (Quant regime flip explained by macro).
         transition = self._regime_transition_fact(snap, ctx["coupling"])
         if transition is not None:
             facts.insert(0, transition)
+
+    def _stabilize_macro(self, scale: float) -> None:
+        """Damped mean-reversion of drift-prone macro variables toward anchors.
+
+        Every tick each variable relaxes a fraction ``k`` toward a coherent
+        target (inflation -> core/target blend; yields -> policy-rate curve;
+        credit -> nominal growth). Combined with the tightened clamps this
+        removes the runaway-then-saturate behaviour and yields a steady state
+        that still moves with genuine shocks — the reversion is gentle enough
+        that a real crisis still shows before it decays.
+        """
+        k = min(0.25, 0.10 * float(scale))
+        # Inflation gets a stronger pull: the legacy reaction models carry a
+        # standing inflationary bias that, uncapped, parks headline CPI in the
+        # low-teens. A firmer reversion overpowers that drift and settles CPI in
+        # a realistic single-digit band around the core/target anchor.
+        k_infl = min(0.60, 0.40 * float(scale))
+        for c in self._world.countries.values():
+            m = getattr(c, "monetary", None)
+            if m is None:
+                continue
+            # Inflation anchors to a blend of the central-bank target and the
+            # slower-moving core measure — headline can deviate, not diverge.
+            target_infl = getattr(m, "inflation_target", 0.02)
+            core = getattr(m, "core_inflation", target_infl)
+            anchor_infl = 0.5 * target_infl + 0.5 * core
+            m.inflation_cpi = _clamp_field(
+                "inflation_cpi", m.inflation_cpi + k_infl * (anchor_infl - m.inflation_cpi)
+            )
+            # Yield curve reverts to a policy-rate-anchored shape (2y ~ rate+50bps,
+            # 10y ~ rate + a term premium that widens with inflation).
+            rate = getattr(m, "interest_rate", 0.03)
+            if hasattr(m, "yield_2y"):
+                y2_anchor = rate + 0.005
+                m.yield_2y = _clamp_field(
+                    "yield_2y", m.yield_2y + k * (y2_anchor - m.yield_2y)
+                )
+            if hasattr(m, "yield_10y"):
+                term_premium = 0.015 + 0.5 * max(0.0, m.inflation_cpi - anchor_infl)
+                y10_anchor = rate + term_premium
+                m.yield_10y = _clamp_field(
+                    "yield_10y", m.yield_10y + k * (y10_anchor - m.yield_10y)
+                )
+            # Credit growth reverts toward nominal GDP growth (real growth + CPI).
+            if hasattr(m, "credit_growth"):
+                nominal = getattr(c, "gdp_growth", 0.02) + m.inflation_cpi
+                credit_anchor = max(-0.15, min(0.30, nominal + 0.02))
+                m.credit_growth = _clamp_field(
+                    "credit_growth", m.credit_growth + k * (credit_anchor - m.credit_growth)
+                )
+
+        # STRUCTURAL RECOVERY: ratchet-prone fields (unrest, fx, exports, agri,
+        # FDI, stability...) heal slowly toward their boot anchors. The pull is
+        # deliberately weak vs shock pushes — a crisis still bites for many sim
+        # days — but it removes the one-way absorbing states that previously
+        # parked the world at the clamps forever.
+        k_struct = min(0.06, 0.02 * float(scale))
+        # Social fabric heals faster than trade structure: without a stronger
+        # pull, the constant cultural-friction push finds its equilibrium at
+        # unrest ~0.7 / stability ~0.25 — a permanent doom mood.
+        k_geo = min(0.12, 0.05 * float(scale))
+        for code, cstate in self._world.countries.items():
+            anchors = self._macro_anchors.get(code)
+            if not anchors:
+                continue
+            for (group, fname), anchor in anchors.items():
+                vec = getattr(cstate, group, None)
+                if vec is None or not hasattr(vec, fname):
+                    continue
+                cur = float(getattr(vec, fname))
+                if not math.isfinite(cur):
+                    setattr(vec, fname, anchor)
+                    continue
+                k_field = k_geo if group == "geopolitical" else k_struct
+                setattr(vec, fname, _clamp_field(
+                    fname, cur + k_field * (anchor - cur)))
+            # gdp_growth itself gets a weak pull to potential so a shock decays
+            # instead of parking at the clamp boundary.
+            if math.isfinite(cstate.gdp_growth):
+                cstate.gdp_growth += k_struct * (0.02 - cstate.gdp_growth)
+            else:
+                cstate.gdp_growth = 0.02
 
     def _entity_behavior(
         self, external: dict[str, float], stress: float, scale: float
@@ -783,6 +981,239 @@ class WorldKernel:
             out.extend(ent.calculate_behavior(stress, external.get(code, 0.0), scale))
         return out
 
+    def _hierarchy_behavior(
+        self, ctx: dict, snap
+    ) -> tuple[list[Adjustment], list[CausalFact], MicrostructuralVolatilityVector | None]:
+        """Step the 3-tier cognitive world and project its outputs into Adjustments.
+
+        Tier-1/2/3 run inside :class:`HierarchyBroker`. Macro injections become
+        simultaneous Adjustments; threshold-crossing events become CausalFacts
+        whose metrics drive the narrative engine (no hardcoded scenario scripts).
+        Household deposit/crypto flows become a micro-shock for the Quant brain.
+        """
+        macro = self._broker_macro_view()
+        trade_tension = float(self._world.aggregate().get("trade_tension", 0.0) or 0.0)
+        result = self._broker.step(macro, trade_tension=trade_tension, dt=float(ctx["scale"]))
+        self._last_broker_telemetry = result.telemetry
+        self._maybe_schedule_governor_deliberation(
+            macro,
+            result.emergent_events,
+            tick=result.telemetry.tick,
+        )
+        # Causal dialogue: only when physics crossed material thresholds.
+        try:
+            from core.locale_prefs import dashboard_locale
+
+            locale = dashboard_locale()
+        except Exception:  # noqa: BLE001
+            locale = "en"
+        bundle = self._dialogue.maybe_schedule(
+            tick=result.telemetry.tick,
+            events=result.emergent_events,
+            macro=macro,
+            locale=locale,
+        )
+        if bundle is not None:
+            self._last_dialogue_bundle = bundle
+            ctx["dialogue_bundle"] = bundle
+
+        proposals: list[Adjustment] = []
+        for code, deltas in result.macro_injections.items():
+            if code not in self._world.countries:
+                continue
+            country = self._world.countries[code]
+            for field_name, delta in deltas.items():
+                if abs(delta) < 1e-12:
+                    continue
+                if field_name == "money_supply_m2_pct":
+                    # Fractional M2 change -> absolute USD delta.
+                    abs_delta = country.monetary.money_supply_m2 * float(delta)
+                    proposals.append(Adjustment(
+                        code, "monetary", "money_supply_m2", abs_delta,
+                        reason="tier1:money_supply",
+                    ))
+                    continue
+                if field_name == "gdp_growth":
+                    proposals.append(Adjustment(
+                        code, "", "gdp_growth", float(delta),
+                        reason="hierarchy:feedback",
+                    ))
+                    continue
+                group = self._field_group(field_name)
+                if group is None:
+                    continue
+                proposals.append(Adjustment(
+                    code, group, field_name, float(delta),
+                    reason="hierarchy:injection",
+                ))
+
+        facts: list[CausalFact] = []
+        # Cap facts per tick so the narrative gate stays legible; pick the most
+        # intense events first (they are the ones that actually crossed thresholds).
+        ranked_events = sorted(
+            result.emergent_events, key=lambda e: e.intensity, reverse=True
+        )
+        for event in ranked_events[:8]:
+            # Broker spans 150 nations; classic WorldState may only own hubs.
+            if event.node not in self._world.countries:
+                continue
+            actor, level = _EMERGENT_META.get(event.kind, ("Household", "info"))
+            # Escalate level with intensity for the most severe crossings.
+            if event.kind == "safe_haven_migration" and event.intensity > 0.6:
+                level = "danger"
+            facts.append(CausalFact(
+                actor=actor,
+                country=event.node,
+                action=event.kind,
+                cause=f"threshold crossed at intensity {event.intensity:.3f}",
+                effect=f"{event.kind} cascade in {event.node}",
+                level=level,
+                metrics={k: float(v) for k, v in event.metrics.items()},
+                tags=(event.kind,),
+            ))
+
+        shock: MicrostructuralVolatilityVector | None = None
+        mp = result.micro_params
+        if mp:
+            vol = float(mp.get("volatility_multiplier", 1.0))
+            oflow = float(mp.get("order_flow_shock", 0.0))
+            drain = float(mp.get("liquidity_drain", 0.0))
+            spread = float(mp.get("spread_widening_bps", 0.0))
+            if abs(vol - 1.0) > 1e-3 or abs(oflow) > 1e-3 or drain > 1e-3:
+                qs = result.quant_state
+                shock = MicrostructuralVolatilityVector(
+                    volatility_multiplier=vol,
+                    order_flow_shock=oflow,
+                    liquidity_drain=drain,
+                    spread_widening_bps=spread,
+                    regime_pressure={
+                        "VOLATILE": 1.2 * qs.liquidity_stress + 0.8 * qs.dissatisfaction,
+                        "CALM": -1.0 * qs.liquidity_stress - 0.6 * qs.dissatisfaction,
+                        "TRENDING": 0.5 * abs(qs.safe_haven_flow),
+                        "MEAN_REVERTING": 0.0,
+                    },
+                    duration_ticks=3,
+                    origin="hierarchy:household_flows",
+                    headline=(
+                        f"Household feedback: haven flow {qs.safe_haven_flow:.2f}, "
+                        f"liq stress {qs.liquidity_stress:.2f}, "
+                        f"V shock {qs.money_velocity_shock:+.2f}"
+                    ),
+                )
+                # Stash quant state on the context for telemetry.
+                ctx["quant_state_input"] = qs.as_vector()
+                ctx["quant_state_names"] = qs.names()
+        return proposals, facts, shock
+
+    def _maybe_schedule_governor_deliberation(
+        self, macro: dict[str, dict[str, float]], events: list, *, tick: int
+    ) -> None:
+        """Start a real Tier-1 LLM deliberation without blocking the world tick."""
+        if self._governor_llm_pool is None:
+            return
+        if tick % self._governor_llm_cadence != 0:
+            return
+        if self._governor_llm_task is not None and not self._governor_llm_task.done():
+            return
+
+        # Deliberate only for a rotating pair of live sovereigns per cadence.
+        # A CPU-bound local 8B model reliably emits two validated JSON rows;
+        # asking it for all six at once exceeded the token budget and truncated
+        # the object. Non-selected sovereigns keep their control-law policy.
+        all_governors = tuple(self._world.countries)
+        if not all_governors:
+            return
+        start = ((tick // self._governor_llm_cadence) * 2) % len(all_governors)
+        governors = tuple(
+            all_governors[(start + i) % len(all_governors)]
+            for i in range(min(2, len(all_governors)))
+        )
+        self._governor_llm_status = "running"
+        self._governor_llm_last_tick = tick
+        self._governor_llm_task = asyncio.create_task(
+            self._run_governor_deliberation(
+                {code: dict(values) for code, values in macro.items()},
+                list(events),
+                governors,
+            ),
+            name=f"tier1-governors-{tick}",
+        )
+
+    async def _run_governor_deliberation(
+        self,
+        macro: dict[str, dict[str, float]],
+        events: list,
+        governors: tuple[str, ...],
+    ) -> None:
+        source = await self._broker.async_deliberate(
+            macro,
+            events,
+            pool=self._governor_llm_pool,
+            base_url=self._governor_llm_base_url,
+            model=self._governor_llm_model,
+            governors=governors,
+        )
+        self._governor_llm_status = "active" if source == "llm" else "fallback"
+        logger.info(
+            "Tier-1 governor deliberation completed: source=%s tick=%s governors=%d",
+            source,
+            self._governor_llm_last_tick,
+            len(governors),
+        )
+
+    @staticmethod
+    def _field_group(field_name: str) -> str | None:
+        """Map a flat macro field onto the CountryState vector group."""
+        monetary = {
+            "interest_rate", "inflation_cpi", "credit_growth", "velocity_of_money",
+            "money_supply_m2", "discount_rate", "yield_10y", "yield_2y",
+        }
+        fiscal = {
+            "corporate_tax", "avg_import_tariff", "public_investment_pct",
+            "fdi_inflow", "foreign_reserves",
+        }
+        geopolitical = {
+            "social_unrest_index", "consumer_confidence", "business_confidence",
+            "political_stability", "public_approval",
+        }
+        if field_name in monetary:
+            return "monetary"
+        if field_name in fiscal:
+            return "fiscal"
+        if field_name in geopolitical:
+            return "geopolitical"
+        return None
+
+    def _broker_macro_view(self) -> dict[str, dict[str, float]]:
+        """Flatten CountryState into the dense per-nation dict the broker expects."""
+        out: dict[str, dict[str, float]] = {}
+        for code, c in self._world.countries.items():
+            out[code] = {
+                "interest_rate": c.monetary.interest_rate,
+                "inflation_cpi": c.monetary.inflation_cpi,
+                "inflation_target": c.monetary.inflation_target,
+                "unemployment": c.labor.unemployment,
+                "gdp_growth": c.gdp_growth,
+                "gdp": c.gdp,
+                "corporate_tax": c.fiscal.corporate_tax,
+                "govt_debt_to_gdp": c.fiscal.govt_debt_to_gdp,
+                "budget_deficit_pct": c.fiscal.budget_deficit_pct,
+                "avg_import_tariff": c.fiscal.avg_import_tariff,
+                "money_supply_m2": c.monetary.money_supply_m2,
+                "productivity_index": c.labor.productivity_index,
+                "labor_cost_index": c.labor.labor_cost_index,
+                "union_density": c.labor.union_density,
+                "capital_control": 0.0,  # derived below from reserve requirements
+                "txn_friction": float(c.industrial.supply_chain_friction),
+                "political_stability": c.geopolitical.political_stability,
+                "consumer_confidence": c.geopolitical.consumer_confidence,
+            }
+            # Proxy capital controls from elevated reserve requirements.
+            out[code]["capital_control"] = max(
+                0.0, min(1.0, (c.monetary.reserve_requirement - 0.10) / 0.25)
+            )
+        return out
+
     # -- PHASE 5 :: EMIT SIGNALS ---------------------------------------------
     async def _phase5_emit_signals(self, ctx: dict) -> None:
         """Pack the updated matrix into telemetry + broadcast the micro shock."""
@@ -798,6 +1229,25 @@ class WorldKernel:
         # PHASE-3 verdict: the Sentinel veto attenuates/zeroes the outbound shock.
         if veto_scale < 1.0:
             effective = self._attenuate_shock(effective, veto_scale)
+        if self._meta_vol_pressure > 0.0 and sim:
+            # Amplify vol / OBI modestly from Core AI world directive.
+            boost = 1.0 + 0.75 * self._meta_vol_pressure
+            effective = MicrostructuralVolatilityVector(
+                volatility_multiplier=min(
+                    4.0, 1.0 + (effective.volatility_multiplier - 1.0) * boost
+                ),
+                order_flow_shock=max(
+                    -1.0, min(1.0, effective.order_flow_shock * boost)
+                ),
+                liquidity_drain=min(1.0, effective.liquidity_drain * boost),
+                spread_widening_bps=effective.spread_widening_bps * boost,
+                regime_pressure={
+                    k: v * boost for k, v in effective.regime_pressure.items()
+                },
+                duration_ticks=effective.duration_ticks,
+                origin=effective.origin,
+                headline=effective.headline,
+            )
         self._last_micro = effective
 
         # SOVEREIGNTY: emit the Quant-facing coupling ONLY in SIMULATION and only
@@ -810,6 +1260,26 @@ class WorldKernel:
 
         # Emit the unified event log (narrative facts + legacy + ambient).
         await self._emit_all(ctx["facts"], ctx["legacy_events"])
+
+        # Publish material dialogue turns (fallback sync + any fresher LLM bundle).
+        bundle = ctx.get("dialogue_bundle") or self._dialogue.last_bundle
+        if bundle is not None and bundle is not getattr(self, "_published_dialogue", None):
+            self._published_dialogue = bundle
+            await self._bus.publish("world.dialogue.turn", **bundle.as_dict())
+            # Also emit lead utterances as agent narratives (grounded text).
+            for utt in bundle.utterances[:3]:
+                await self._bus.publish(
+                    "world.agent.narrative",
+                    sim_day=self._sim_day,
+                    actor=utt.role,
+                    country=utt.country,
+                    text=utt.text,
+                    level=bundle.level,
+                    source="dialogue",
+                    locale=utt.locale,
+                    metrics=[m.as_dict() for m in utt.metrics],
+                    provenance=bundle.source,
+                )
 
     @staticmethod
     def _attenuate_shock(
@@ -899,7 +1369,11 @@ class WorldKernel:
                     c = self._world.countries.get(p.code)
                     if c is not None:
                         if p.group == "":
-                            setattr(c, p.field, getattr(c, p.field) + p.delta * scale)
+                            # Top-level fields (gdp_growth, ...) MUST clamp too:
+                            # unbounded shock accumulation here was the doom-loop
+                            # entry point (gdp_growth -> -37% -> unemployment 36%).
+                            setattr(c, p.field, _clamp_field(
+                                p.field, getattr(c, p.field) + p.delta * scale))
                         else:
                             cur = c.get_field(p.group, p.field)
                             if cur is not None:
@@ -953,15 +1427,14 @@ class WorldKernel:
         severity = {"danger": 4, "warn": 3, "ok": 2, "info": 1}
         ranked = sorted(facts, key=lambda f: severity.get(f.level, 0), reverse=True)
 
-        # Agent feed: one narrative per tick (highest-severity, non-duplicate cause).
-        seen_cause: set[str] = set()
+        # Agent feed: highest-severity fact whose story gate is open. While a
+        # stress episode persists the same story would re-fire every tick with
+        # drifting numbers, so each actor+country+tag story fires once per
+        # cooldown window unless its severity escalates.
         for fact in ranked:
-            cause_key = fact.cause[:48]
-            if cause_key in seen_cause:
-                continue
-            seen_cause.add(cause_key)
-            await self._emit_agent_narrative(fact, locale=locale)
-            break
+            if self._narrative_gate_open(fact, severity, channel="feed"):
+                await self._emit_agent_narrative(fact, locale=locale)
+                break
 
         # World "Sự kiện" headline: policy warn/legacy OR top macro fact.
         headline: dict | None = None
@@ -969,14 +1442,16 @@ class WorldKernel:
             if leg.get("level") in ("warn", "danger") and leg.get("text"):
                 headline = leg
                 break
-        if headline is None and ranked:
-            fact = ranked[0]
-            headline = {
-                "country": fact.country,
-                "text": self._narrator.compose(fact, locale=locale),
-                "level": fact.level,
-                "source": _ACTOR_SOURCE.get(fact.actor, "world"),
-            }
+        if headline is None:
+            for fact in ranked:
+                if self._narrative_gate_open(fact, severity, channel="headline"):
+                    headline = {
+                        "country": fact.country,
+                        "text": self._narrator.compose(fact, locale=locale),
+                        "level": fact.level,
+                        "source": _ACTOR_SOURCE.get(fact.actor, "world"),
+                    }
+                    break
         if headline:
             await self._bus.publish(
                 "world.headline",
@@ -987,6 +1462,42 @@ class WorldKernel:
                 source=headline.get("source", "world"),
                 locale=locale,
             )
+
+    _NARRATIVE_COOLDOWN_DAYS = 45
+    _GLOBAL_TAG_COOLDOWN_DAYS = 20
+
+    def _narrative_gate_open(
+        self, fact: CausalFact, severity: dict[str, int], *, channel: str
+    ) -> bool:
+        """True if this actor+country+tag story may be emitted this tick.
+
+        A story that already fired stays muted for a cooldown window of sim
+        days unless it comes back with strictly higher severity. Additionally,
+        the same *tag* (e.g. labor_strike) may only headline once globally per
+        ``_GLOBAL_TAG_COOLDOWN_DAYS`` so the feed does not look like the same
+        template stamped across every country.
+        """
+        tag = fact.tags[0] if getattr(fact, "tags", None) else fact.cause[:32]
+        key = f"{channel}|{fact.actor}|{fact.country}|{tag}"
+        rank = severity.get(fact.level, 0)
+        last = self._narrative_gate.get(key)
+        if (
+            last is not None
+            and self._sim_day - last[0] < self._NARRATIVE_COOLDOWN_DAYS
+            and rank <= last[1]
+        ):
+            return False
+        gkey = f"{channel}|tag|{tag}"
+        glast = self._narrative_gate.get(gkey)
+        if (
+            glast is not None
+            and self._sim_day - glast[0] < self._GLOBAL_TAG_COOLDOWN_DAYS
+            and rank <= glast[1]
+        ):
+            return False
+        self._narrative_gate[key] = (self._sim_day, rank)
+        self._narrative_gate[gkey] = (self._sim_day, rank)
+        return True
 
     async def _emit_agent_narrative(self, fact: CausalFact, *, locale: str) -> None:
         text = self._narrator.compose(fact, locale=locale)
@@ -1001,7 +1512,9 @@ class WorldKernel:
             source=source,
             locale=locale,
         )
-        if fact.level == "danger":
+        # Regime flips already land on the Event Log via world.headline —
+        # publishing system.log here duplicates the same line with a date prefix.
+        if fact.level == "danger" and source != "regime":
             message = f"[{self._sim_date()}] {fact.country}: {text}"
             await self._bus.publish(
                 "system.log", level=fact.level, source=source, message=message
@@ -1041,8 +1554,11 @@ class WorldKernel:
                 source=source,
             )
 
-        # Routine central-bank / ambient lines stay out of the dashboard feed.
-        if level == "danger" or source in ("corporate", "government", "society", "regime"):
+        # Routine ambient lines stay out of the dashboard feed. Regime flips are
+        # already published via world.headline — skip system.log to avoid twins.
+        if source == "regime":
+            pass
+        elif level == "danger" or source in ("corporate", "government", "society"):
             await self._bus.publish(
                 "system.log", level=level, source=source, message=message
             )
@@ -1069,6 +1585,24 @@ class WorldKernel:
             tariffs=self._world.tariffs,
             alliances=self._world.alliances,
             entities={code: ent.to_dict() for code, ent in self._entities.items()},
+            agent_population=self._broker.snapshot(),
+            hierarchy_telemetry=(
+                asdict(self._last_broker_telemetry)
+                if self._last_broker_telemetry is not None
+                else None
+            ),
+            governor_llm={
+                "enabled": self._governor_llm_pool is not None,
+                "status": self._governor_llm_status,
+                "model": self._governor_llm_model,
+                "cadence_ticks": self._governor_llm_cadence,
+                "last_deliberation_tick": self._governor_llm_last_tick,
+            },
+            dialogue=(
+                self._dialogue.last_bundle.as_dict()
+                if self._dialogue.last_bundle is not None
+                else None
+            ),
             micro_impact=micro.model_dump(),
             market=asdict(market),
         )
@@ -1076,9 +1610,26 @@ class WorldKernel:
         bias -= aggregate["trade_tension"]
         # Fold the macro coupling's directional OBI bias into the quant signal.
         bias += 0.5 * micro.order_flow_shock
-        await self._bus.publish(
-            "world.quant_signal", sim_day=self._sim_day, macro_bias=round(bias, 4)
-        )
+        quant_payload: dict = {
+            "sim_day": self._sim_day,
+            "macro_bias": round(bias, 4),
+        }
+        # Live PPO features from the hierarchy feedback loop (velocity, haven
+        # flows, credit impulse, sentiment) — consumed by the Quant brain.
+        if self._last_broker_telemetry is not None:
+            snap = self._broker.snapshot()
+            micro_snap = snap.get("micro", {}) if isinstance(snap, dict) else {}
+            quant_payload["hierarchy"] = {
+                "tick": snap.get("tick") if isinstance(snap, dict) else None,
+                "llm_source": snap.get("llm_source") if isinstance(snap, dict) else None,
+                "n_clusters": micro_snap.get("n_clusters"),
+                "mean_dissatisfaction": micro_snap.get("mean_dissatisfaction"),
+                "demand_index": micro_snap.get("demand_index"),
+                "qe_boost": self._last_broker_telemetry.qe_boost,
+                "negotiation_rounds": self._last_broker_telemetry.negotiation_rounds,
+                "step_ms": round(self._last_broker_telemetry.step_ms, 3),
+            }
+        await self._bus.publish("world.quant_signal", **quant_payload)
 
     # -- external mutators (FastAPI / scenario) -------------------------------
     async def mutate_country(self, code: str, group: str, field: str, value: float) -> dict:

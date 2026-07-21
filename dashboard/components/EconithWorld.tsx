@@ -655,8 +655,16 @@ export default function EconithWorld() {
                       : t("world.referenceOnly")
                   }
                 />
+                <StatRow
+                  label={t("world.backendStatus")}
+                  value={
+                    sim.backendLive(popup.code)
+                      ? t("world.backendLive")
+                      : t("world.backendTopologyOnly")
+                  }
+                />
               </dl>
-              {isSimNation(popup.code) ? (
+              {isSimNation(popup.code) && sim.backendLive(popup.code) ? (
               <button
                 onClick={() => {
                   selectCountry(popup.code);
@@ -667,6 +675,10 @@ export default function EconithWorld() {
               >
                 {t("world.inspectFeatures")}
               </button>
+              ) : isSimNation(popup.code) ? (
+                <p className="mt-2 text-[10px] leading-snug text-muted">
+                  {t("world.backendTopologyHint")}
+                </p>
               ) : null}
             </div>
           ) : null}

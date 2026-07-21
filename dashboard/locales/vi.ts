@@ -182,7 +182,7 @@ export const vi: Dictionary = {
       },
       explainableAi: {
         title: "AI giao dịch giải thích được",
-        desc: "Phân bổ SHAP dưới mili giây xuất JSON minh bạch cho giám sát cấp quỹ.",
+        desc: "Phân bổ đặc trưng có trọng số (weighted attribution), xuất JSON minh bạch — không phải SHAP.",
       },
       antiOverfit: {
         title: "Xác thực chống overfitting",
@@ -423,6 +423,11 @@ export const vi: Dictionary = {
       "Đang chờ Corporate / Government / Societal AI phản ứng từ world kernel…",
     agentExchangeLive: "Sim trực tiếp",
     agentExchangeWaiting: "Đang chờ",
+    backendStatus: "Kernel",
+    backendLive: "LIVE — chỉnh được",
+    backendTopologyOnly: "chỉ topology",
+    backendTopologyHint:
+      "Chỉ là topology globe — backend hiện chỉ mô phỏng USA/CHN/VNM/JPN/IND/DEU.",
   },
   macro: {
     tabs: tabLabels as Dictionary["macro"]["tabs"],
@@ -452,9 +457,14 @@ export const vi: Dictionary = {
     contagion: "lan truyền",
     corporate: "doanh nghiệp",
     society: "xã hội",
+    government: "chính phủ",
     journalist: "tin thế giới",
     world: "thế giới",
     sentinel: "cảnh báo",
+    regime: "chế độ",
+    hypothesis: "giả thuyết",
+    scenario: "kịch bản",
+    status: "trạng thái",
   },
   simDirs: { rose: "tăng", eased: "giảm" },
   simTariff: {
