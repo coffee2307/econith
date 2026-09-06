@@ -90,11 +90,11 @@
     "fabricated": false
   },
   "protocol": "oos_beta",
-  "beta": -0.0005291059078326821,
+  "beta": -0.0005085542199662192,
   "lag": 0,
-  "fingerprint": "1418434e9e071900",
+  "fingerprint": "9c78923db7400332",
   "point_estimate": {
-    "mae_e1_minus_mae_b0": -3.0297277546498247e-07,
+    "mae_e1_minus_mae_b0": -2.93327955900452e-07,
     "e1_better_point": true,
     "metrics": {
       "B0": {
@@ -108,41 +108,41 @@
       "E1": {
         "label": "E1_world_coupled",
         "n": 7440,
-        "mae": 0.0016492709930995965,
-        "rmse": 0.002220882366488595,
-        "mape": 0.32714722755601766,
+        "mae": 0.001649280637919161,
+        "rmse": 0.002220899734285965,
+        "mape": 0.32716517916273985,
         "directional_accuracy": 0.3438634225030246
       },
       "C1": {
         "label": "C1_random_control",
         "n": 7440,
-        "mae": 0.0016495696778915949,
-        "rmse": 0.002221246346253775,
-        "mape": 0.3271692351086446,
-        "directional_accuracy": 0.3547519827933862
+        "mae": 0.0016495663774665542,
+        "rmse": 0.0022212433793056736,
+        "mape": 0.3271748184922401,
+        "directional_accuracy": 0.35461755612313484
       }
     },
     "comparison": {
-      "mae_improvement_pct_e1_vs_b0": 0.01836672872709059,
-      "rmse_improvement_pct_e1_vs_b0": 0.016589205446594264,
+      "mae_improvement_pct_e1_vs_b0": 0.01778204324077388,
+      "rmse_improvement_pct_e1_vs_b0": 0.015807312787513694,
       "e1_better_mae_than_b0": true,
       "e1_better_mae_than_c1": true,
       "passes_random_control": true,
       "directional_accuracy_delta_e1_b0": -0.0006721333512568761
     },
     "vol_multiplier_stats": {
-      "mean": 1.8661787600000002,
-      "std": 0.01577972702116231,
-      "min": 1.8463,
-      "max": 1.9969,
-      "unique_approx": 396
+      "mean": 1.87731924,
+      "std": 0.015504825630183659,
+      "min": 1.8573,
+      "max": 2.0075,
+      "unique_approx": 385
     },
     "n_test": 7440
   },
   "diebold_mariano": {
-    "dm_stat": -1.534402189388721,
-    "p_value_two_sided": 0.12493073932935106,
-    "mean_loss_diff": -3.02972775464813e-07,
+    "dm_stat": -1.531060008814809,
+    "p_value_two_sided": 0.1257545623315215,
+    "mean_loss_diff": -2.9332795590023184e-07,
     "n": 7440.0,
     "hac_lag": 59.0,
     "note": "dm_stat<0 means E1 (A) has lower abs loss than B0 (B) on OOS test."
@@ -151,12 +151,12 @@
     "n": 200,
     "block_size": 500,
     "ci95": [
-      -6.125563194428647e-07,
-      -5.842653760469078e-08
+      -5.795622591713273e-07,
+      -3.81880053421882e-08
     ],
     "p_share_diff_ge_0": 0.01,
-    "mean_diff": -3.040051942713041e-07,
-    "std_diff": 1.4181710322954872e-07,
+    "mean_diff": -2.955702778140569e-07,
+    "std_diff": 1.3868429005015101e-07,
     "scope": "OOS test mask only",
     "interpretation": "observed = MAE(E1)-MAE(B0); negative favors E1. p_share_diff_ge_0 is the bootstrap share of non-negative diffs."
   },
@@ -174,23 +174,23 @@
       "E1": {
         "label": "E1_world_coupled",
         "n": 24881,
-        "mae": 0.0020607201266407554,
-        "rmse": 0.0028205753632313197,
-        "mape": 0.3927227755988352,
+        "mae": 0.0020608469619689336,
+        "rmse": 0.0028207173182638505,
+        "mape": 0.3927574935538219,
         "directional_accuracy": 0.3446945337620579
       },
       "C1": {
         "label": "C1_random_control",
         "n": 24881,
-        "mae": 0.0020604488213478494,
-        "rmse": 0.0028168956802276687,
-        "mape": 0.3927404431183386,
-        "directional_accuracy": 0.407556270096463
+        "mae": 0.0020604106285868093,
+        "rmse": 0.002816880353208817,
+        "mape": 0.3927311794704001,
+        "directional_accuracy": 0.4060691318327974
       }
     },
     "comparison_full_panel": {
-      "mae_improvement_pct_e1_vs_b0": -0.02170643380733069,
-      "rmse_improvement_pct_e1_vs_b0": -0.13504010332185054,
+      "mae_improvement_pct_e1_vs_b0": -0.027862672976574243,
+      "rmse_improvement_pct_e1_vs_b0": -0.14007973922757652,
       "e1_better_mae_than_b0": false,
       "e1_better_mae_than_c1": false,
       "passes_random_control": false,
@@ -208,23 +208,23 @@
       "E1": {
         "label": "E1_world_coupled",
         "n": 7440,
-        "mae": 0.0016541586688488623,
-        "rmse": 0.0022273952612265847,
-        "mape": 0.32771534848675826,
+        "mae": 0.001653545502792227,
+        "rmse": 0.002226445110576661,
+        "mape": 0.32747843331309917,
         "directional_accuracy": 0.3449388358650356
       },
       "C1": {
         "label": "C1_random_control",
         "n": 7440,
-        "mae": 0.0016499003437584208,
-        "rmse": 0.0022218259254864216,
-        "mape": 0.3272816114024094,
-        "directional_accuracy": 0.40543083747815567
+        "mae": 0.0016499277457649366,
+        "rmse": 0.002221845948391939,
+        "mape": 0.32727860193395675,
+        "directional_accuracy": 0.4046242774566474
       }
     },
     "comparison_test_mask": {
-      "mae_improvement_pct_e1_vs_b0": -0.27793254916997934,
-      "rmse_improvement_pct_e1_vs_b0": -0.27661922372368825,
+      "mae_improvement_pct_e1_vs_b0": -0.24076137228916747,
+      "rmse_improvement_pct_e1_vs_b0": -0.23384374665138508,
       "e1_better_mae_than_b0": false,
       "e1_better_mae_than_c1": false,
       "passes_random_control": false,
@@ -235,11 +235,11 @@
     "repeats": 5,
     "unique_fingerprints": 1,
     "reproducible_rate": 1.0,
-    "mae_e1_mean": 0.0016492709930995965,
+    "mae_e1_mean": 0.001649280637919161,
     "mae_e1_variance": 0.0,
     "mae_e1_std": 0.0,
     "output_similarity": "identical",
-    "vol_eval_fingerprint": "1418434e9e071900"
+    "vol_eval_fingerprint": "9c78923db7400332"
   },
   "limitations": [
     "Block bootstrap on OOS test; DM uses Newey-West with h=fwd_vol_horizon.",
