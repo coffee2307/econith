@@ -51,6 +51,9 @@ def run() -> dict:
         "hist_vol_window": 60,
         "fwd_vol_horizon": 60,
         "seed": 42,
+        "macro_sample_every": 10,
+        "max_rows": 30000,
+        "stride": 5,
     }
     sync_ok = True
     sync_issues = []
@@ -62,6 +65,9 @@ def run() -> dict:
         if got is not None and got != expected:
             sync_ok = False
             sync_issues.append(f"{k}: expected {expected!r}, got {got!r}")
+        elif got is None:
+            sync_ok = False
+            sync_issues.append(f"{k}: expected {expected!r}, got None")
 
     runs = []
     fps = []

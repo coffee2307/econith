@@ -39,6 +39,7 @@ def world_from_macro_row(
     if fed_funds_pct is not None and np.isfinite(fed_funds_pct):
         rate = _pct_to_frac(float(fed_funds_pct))
         usa.monetary.interest_rate = float(np.clip(rate, 0.0, 0.25))
+        usa.monetary.real_interest_rate = float(np.clip(rate - max(0.0, usa.monetary.inflation_cpi), -0.10, 0.25))
 
     if treasury_10y_pct is not None and np.isfinite(treasury_10y_pct):
         y = _pct_to_frac(float(treasury_10y_pct))
@@ -105,9 +106,15 @@ def apply_scenario_shock(
         usa.monetary.interest_rate = float(
             np.clip(usa.monetary.interest_rate + 0.025 * sev, 0.0, 0.25)
         )
+        usa.monetary.real_interest_rate = float(
+            np.clip(usa.monetary.interest_rate - usa.monetary.inflation_cpi, -0.10, 0.30)
+        )
     elif kind in {"inflation_spike", "inflation"}:
         usa.monetary.inflation_cpi = float(
             np.clip(usa.monetary.inflation_cpi + 0.04 * sev, -0.03, 0.15)
+        )
+        usa.monetary.real_interest_rate = float(
+            np.clip(usa.monetary.interest_rate - usa.monetary.inflation_cpi, -0.10, 0.30)
         )
     elif kind in {"tariff", "trade"}:
         world.set_tariff(

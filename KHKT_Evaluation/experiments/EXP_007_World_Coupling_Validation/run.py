@@ -215,8 +215,10 @@ def run() -> dict:
     }
     io_utils.write_json(RESULTS / "metrics.json", payload)
     csv_rows = [on0_row] + scenario_rows
-    io_utils.write_csv(RESULTS / "raw_results.csv", csv_rows)
-    io_utils.write_csv(RESULTS / "metrics.csv", csv_rows)
+    fieldnames = sorted({k for row in csv_rows for k in row.keys()})
+    normalized_rows = [{k: row.get(k) for k in fieldnames} for row in csv_rows]
+    io_utils.write_csv(RESULTS / "raw_results.csv", normalized_rows, fieldnames=fieldnames)
+    io_utils.write_csv(RESULTS / "metrics.csv", normalized_rows, fieldnames=fieldnames)
     plotting.save_bar_chart(
         PLOTS / "world_on_off_vol.png",
         plot_labels,

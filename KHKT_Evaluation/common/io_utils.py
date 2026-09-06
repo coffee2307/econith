@@ -47,19 +47,22 @@ def write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=_default), encoding="utf-8")
 
 
-def write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+def write_csv(path: Path, rows: list[dict[str, Any]], fieldnames: list[str] | None = None) -> None:
     import csv
 
     path.parent.mkdir(parents=True, exist_ok=True)
     if not rows:
         path.write_text("", encoding="utf-8")
         return
-    keys = list(rows[0].keys())
+    if fieldnames is None:
+        fieldnames = list(rows[0].keys())
+    else:
+        fieldnames = list(fieldnames)
     with path.open("w", encoding="utf-8", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=keys)
+        w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
         for row in rows:
-            w.writerow(row)
+            w.writerow({k: row.get(k) for k in fieldnames})
 
 
 def write_markdown(path: Path, text: str) -> None:
