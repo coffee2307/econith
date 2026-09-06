@@ -1,0 +1,10 @@
+experiment,status,rq,fabricated
+EXP_001,completed,RQ1,False
+EXP_002,completed,RQ2,False
+EXP_003,completed,RQ3,False
+EXP_004,completed,RQ1_control,False
+EXP_005,completed,,False
+EXP_006,completed,RQ1,False
+EXP_007,completed,RQ3,False
+EXP_008,completed,RQ2,False
+EXP_009,completed,RQ4,False

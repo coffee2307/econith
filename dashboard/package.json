@@ -1,0 +1,36 @@
+{
+  "name": "econith-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ECONITH :: control dashboard (game simulator)",
+  "scripts": {
+    "dev": "next dev --experimental-https -H 0.0.0.0 -p 3000",
+    "dev:http": "next dev -H 0.0.0.0 -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@fortawesome/fontawesome-svg-core": "6.7.2",
+    "@fortawesome/free-brands-svg-icons": "6.7.2",
+    "@fortawesome/free-solid-svg-icons": "6.7.2",
+    "@fortawesome/react-fontawesome": "0.2.2",
+    "next": "^16.2.9",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "react-globe.gl": "2.38.0",
+    "three": "0.185.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "@types/react": "19.0.2",
+    "@types/react-dom": "19.0.2",
+    "@types/three": "0.185.0",
+    "autoprefixer": "10.4.20",
+    "eslint": "9.17.0",
+    "eslint-config-next": "15.1.3",
+    "postcss": "8.4.49",
+    "tailwindcss": "3.4.17",
+    "typescript": "5.7.2"
+  }
+}

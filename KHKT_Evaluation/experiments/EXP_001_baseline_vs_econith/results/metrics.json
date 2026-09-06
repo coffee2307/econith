@@ -1,0 +1,252 @@
+{
+  "experiment": "EXP_001",
+  "status": "completed",
+  "rq": "RQ1",
+  "seed": 42,
+  "fabricated": false,
+  "dataset": {
+    "path": "F:\\econith\\datasets\\features\\BTCUSDT_features.parquet",
+    "rows": 30000,
+    "columns": [
+      "symbol",
+      "ts_ms",
+      "price",
+      "bid_sz",
+      "ask_sz",
+      "trade_qty",
+      "indicator_obi",
+      "indicator_volume_delta",
+      "macro_avg_hourly_earnings",
+      "macro_avg_weekly_hours",
+      "macro_breakeven_inflation_10y",
+      "macro_breakeven_inflation_5y",
+      "macro_building_permits",
+      "macro_capacity_utilization_total",
+      "macro_case_shiller_home",
+      "macro_cny_usd",
+      "macro_consumer_price_index",
+      "macro_consumer_sentiment",
+      "macro_core_cpi",
+      "macro_core_pce",
+      "macro_durable_goods_orders",
+      "macro_fed_balance_sheet",
+      "macro_fed_funds_daily",
+      "macro_fed_funds_effective_rate",
+      "macro_housing_starts",
+      "macro_hy_oas_spread",
+      "macro_ig_oas_spread",
+      "macro_industrial_production",
+      "macro_initial_jobless_claims",
+      "macro_jpy_usd",
+      "macro_m2_money_supply",
+      "macro_monetary_base",
+      "macro_nominal_gdp",
+      "macro_nonfarm_payrolls",
+      "macro_overnight_rrp",
+      "macro_pce_price_index",
+      "macro_ppi_all_commodities",
+      "macro_real_gdp",
+      "macro_real_gdp_growth",
+      "macro_retail_sales",
+      "macro_sofr",
+      "macro_ted_spread",
+      "macro_treasury_10y_yield",
+      "macro_treasury_2y_yield",
+      "macro_treasury_30y_yield",
+      "macro_treasury_3m_yield",
+      "macro_treasury_general_account",
+      "macro_unemployment_rate",
+      "macro_unemployment_u6",
+      "macro_usd_broad_index",
+      "macro_usd_eur",
+      "macro_vix",
+      "macro_wb_broad_money_pct_gdp",
+      "macro_wb_current_account_pct_gdp",
+      "macro_wb_debt_to_gdp",
+      "macro_wb_fdi_pct_gdp",
+      "macro_wb_foreign_reserves_usd",
+      "macro_wb_gdp_growth_pct",
+      "macro_wb_gdp_per_capita_growth",
+      "macro_wb_inflation_cpi_pct",
+      "macro_wb_trade_balance_pct_gdp",
+      "macro_wb_unemployment_ilo",
+      "macro_yield_spread_10y_2y",
+      "tradfi_COPPER",
+      "tradfi_DXY",
+      "tradfi_EURUSD",
+      "tradfi_GBPUSD",
+      "tradfi_GOLD",
+      "tradfi_NASDAQ",
+      "tradfi_NATGAS",
+      "tradfi_OIL",
+      "tradfi_SILVER",
+      "tradfi_SPX500",
+      "tradfi_US10Y",
+      "tradfi_USDCNH",
+      "tradfi_USDJPY",
+      "tradfi_VIX"
+    ],
+    "ts_min": 1650020400000,
+    "ts_max": 1785020400000,
+    "fabricated": false
+  },
+  "config": {
+    "id": "EXP_001",
+    "rq": "RQ1",
+    "seed": 42,
+    "symbol": "BTCUSDT",
+    "protocol": "oos_beta",
+    "train_frac": 0.7,
+    "max_rows": 30000,
+    "stride": 5,
+    "hist_vol_window": 60,
+    "fwd_vol_horizon": 60,
+    "macro_sample_every": 10,
+    "status_if_missing_data": "blocked"
+  },
+  "protocol": "oos_beta",
+  "beta": 0.006742032115914304,
+  "lag": 0,
+  "n_train": 20881,
+  "n_test": 8940,
+  "boundary_purge": {
+    "fwd_vol_horizon": 60,
+    "train_n_split": 21000,
+    "purge_lo": 20940,
+    "n_train_after_purge": 20940,
+    "n_test_split": 9000,
+    "note": "Excluded train indices whose 60-step (horizon) forecast window crosses the train/test boundary; test set unchanged."
+  },
+  "fingerprint": "e2bc3fe0db72a5bd",
+  "vol_multiplier_stats": {
+    "mean": 1.8833738666666666,
+    "std": 0.02162573537205665,
+    "min": 1.8573,
+    "max": 2.0075,
+    "unique_approx": 506
+  },
+  "metrics": {
+    "B0": {
+      "label": "B0_market_only",
+      "n": 8940,
+      "mae": 0.001578296621397314,
+      "rmse": 0.0021302289087254856,
+      "mape": 0.32474252535472803,
+      "directional_accuracy": 0.34500503412014766
+    },
+    "E1": {
+      "label": "E1_world_coupled",
+      "n": 8940,
+      "mae": 0.0015837533501191316,
+      "rmse": 0.0021360497831848057,
+      "mape": 0.3246777934214821,
+      "directional_accuracy": 0.34634746615952566
+    },
+    "C1": {
+      "label": "C1_random_control",
+      "n": 8940,
+      "mae": 0.0015802823654440374,
+      "rmse": 0.0021315778949738237,
+      "mape": 0.3248508090152883,
+      "directional_accuracy": 0.4267815191855912
+    }
+  },
+  "comparison": {
+    "mae_improvement_pct_e1_vs_b0": -0.3457353103237798,
+    "rmse_improvement_pct_e1_vs_b0": -0.2732511250541058,
+    "e1_better_mae_than_b0": false,
+    "e1_better_mae_than_c1": false,
+    "passes_random_control": false,
+    "directional_accuracy_delta_e1_b0": 0.0013424320393780054
+  },
+  "aux": {
+    "delta_vol_mae": {
+      "B0": 0.00013396513509720428,
+      "E1": 0.00013414104300944827,
+      "C1": 0.00017443821023673797
+    },
+    "regime_directional_accuracy": {
+      "B0": 0.34500503412014766,
+      "E1": 0.34634746615952566,
+      "C1": 0.4267815191855912
+    }
+  },
+  "protocol_legacy": {
+    "formula": "E1 = B0 * (vol_mult / mean); C1 = B0 * shuffle(scale)",
+    "metrics_full_panel": {
+      "B0": {
+        "label": "B0_market_only",
+        "n": 29881,
+        "mae": 0.002214617952386802,
+        "rmse": 0.0030832288463932063,
+        "mape": 0.39993230822881826,
+        "directional_accuracy": 0.34421017402945114
+      },
+      "E1": {
+        "label": "E1_world_coupled",
+        "n": 29881,
+        "mae": 0.002218663526720088,
+        "rmse": 0.0030924238875261207,
+        "mape": 0.40029228140605644,
+        "directional_accuracy": 0.34471218206157966
+      },
+      "C1": {
+        "label": "C1_random_control",
+        "n": 29881,
+        "mae": 0.0022148048397883464,
+        "rmse": 0.0030833545342116332,
+        "mape": 0.3999306685051513,
+        "directional_accuracy": 0.41526104417670684
+      }
+    },
+    "comparison_full_panel": {
+      "mae_improvement_pct_e1_vs_b0": -0.18267594773743892,
+      "rmse_improvement_pct_e1_vs_b0": -0.2982276564929925,
+      "e1_better_mae_than_b0": false,
+      "e1_better_mae_than_c1": false,
+      "passes_random_control": false,
+      "directional_accuracy_delta_e1_b0": 0.0005020080321285203
+    },
+    "metrics_test_mask": {
+      "B0": {
+        "label": "B0_market_only",
+        "n": 8940,
+        "mae": 0.001578296621397314,
+        "rmse": 0.0021302289087254856,
+        "mape": 0.32474252535472803,
+        "directional_accuracy": 0.34500503412014766
+      },
+      "E1": {
+        "label": "E1_world_coupled",
+        "n": 8940,
+        "mae": 0.0015813252089032434,
+        "rmse": 0.0021332569951560483,
+        "mape": 0.32460782129082033,
+        "directional_accuracy": 0.3452287727933773
+      },
+      "C1": {
+        "label": "C1_random_control",
+        "n": 8940,
+        "mae": 0.0015796426536521925,
+        "rmse": 0.0021310062883854422,
+        "mape": 0.3249452039512181,
+        "directional_accuracy": 0.4129097214453518
+      }
+    },
+    "comparison_test_mask": {
+      "mae_improvement_pct_e1_vs_b0": -0.19188962739134616,
+      "rmse_improvement_pct_e1_vs_b0": -0.14214840565535594,
+      "e1_better_mae_than_b0": false,
+      "e1_better_mae_than_c1": false,
+      "passes_random_control": false,
+      "directional_accuracy_delta_e1_b0": 0.00022373867322966756
+    }
+  },
+  "notes": [
+    "B0 = historical rolling vol persistence (market only).",
+    "E1 (oos_beta) = B0 + beta * (L_lag(vol_mult)-1); beta/lag fit on purged train, metrics on test.",
+    "Train purge: exclude indices whose fwd_vol_horizon window crosses the train/test boundary.",
+    "C1 = B0 + beta * shuffle(L_lag(vol_mult)-1) after beta is fixed (random control).",
+    "protocol_legacy retains crude multiplicative E1=B0*(vol_mult/mean) for historical contrast."
+  ]
+}

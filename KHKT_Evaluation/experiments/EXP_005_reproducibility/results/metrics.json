@@ -1,0 +1,120 @@
+{
+  "experiment": "EXP_005",
+  "status": "completed",
+  "rq": "RQ4",
+  "fabricated": false,
+  "rq1_config": {
+    "id": "EXP_001",
+    "rq": "RQ1",
+    "seed": 42,
+    "symbol": "BTCUSDT",
+    "protocol": "oos_beta",
+    "train_frac": 0.7,
+    "max_rows": 30000,
+    "stride": 5,
+    "hist_vol_window": 60,
+    "fwd_vol_horizon": 60,
+    "macro_sample_every": 10,
+    "status_if_missing_data": "blocked"
+  },
+  "rq1_config_sync_ok": true,
+  "rq1_config_sync_issues": [],
+  "repeats": [
+    {
+      "repeat": 1,
+      "status": "completed",
+      "protocol": "oos_beta",
+      "beta": 0.006742032115914304,
+      "lag": 0,
+      "n_train": 20881,
+      "n_test": 8940,
+      "boundary_purge": {
+        "fwd_vol_horizon": 60,
+        "train_n_split": 21000,
+        "purge_lo": 20940,
+        "n_train_after_purge": 20940,
+        "n_test_split": 9000,
+        "note": "Excluded train indices whose 60-step (horizon) forecast window crosses the train/test boundary; test set unchanged."
+      },
+      "metrics": {
+        "B0": {
+          "label": "B0_market_only",
+          "n": 8940,
+          "mae": 0.001578296621397314,
+          "rmse": 0.0021302289087254856,
+          "mape": 0.32474252535472803,
+          "directional_accuracy": 0.34500503412014766
+        },
+        "E1": {
+          "label": "E1_world_coupled",
+          "n": 8940,
+          "mae": 0.0015837533501191316,
+          "rmse": 0.0021360497831848057,
+          "mape": 0.3246777934214821,
+          "directional_accuracy": 0.34634746615952566
+        },
+        "C1": {
+          "label": "C1_random_control",
+          "n": 8940,
+          "mae": 0.0015802823654440374,
+          "rmse": 0.0021315778949738237,
+          "mape": 0.3248508090152883,
+          "directional_accuracy": 0.4267815191855912
+        }
+      }
+    },
+    {
+      "repeat": 2,
+      "status": "completed",
+      "protocol": "oos_beta",
+      "beta": 0.006742032115914304,
+      "lag": 0,
+      "n_train": 20881,
+      "n_test": 8940,
+      "boundary_purge": {
+        "fwd_vol_horizon": 60,
+        "train_n_split": 21000,
+        "purge_lo": 20940,
+        "n_train_after_purge": 20940,
+        "n_test_split": 9000,
+        "note": "Excluded train indices whose 60-step (horizon) forecast window crosses the train/test boundary; test set unchanged."
+      },
+      "metrics": {
+        "B0": {
+          "label": "B0_market_only",
+          "n": 8940,
+          "mae": 0.001578296621397314,
+          "rmse": 0.0021302289087254856,
+          "mape": 0.32474252535472803,
+          "directional_accuracy": 0.34500503412014766
+        },
+        "E1": {
+          "label": "E1_world_coupled",
+          "n": 8940,
+          "mae": 0.0015837533501191316,
+          "rmse": 0.0021360497831848057,
+          "mape": 0.3246777934214821,
+          "directional_accuracy": 0.34634746615952566
+        },
+        "C1": {
+          "label": "C1_random_control",
+          "n": 8940,
+          "mae": 0.0015802823654440374,
+          "rmse": 0.0021315778949738237,
+          "mape": 0.3248508090152883,
+          "directional_accuracy": 0.4267815191855912
+        }
+      }
+    }
+  ],
+  "fingerprints": [
+    "cfafb263d33a2c94d5d7477cf1dfdc8cb82ea6ac550a50e42705671ebc91d72d",
+    "cfafb263d33a2c94d5d7477cf1dfdc8cb82ea6ac550a50e42705671ebc91d72d"
+  ],
+  "reproducible": true,
+  "notes": [
+    "Compares SHA256 of EXP_001 metrics across repeats with identical RQ1 main config.",
+    "Must use EXP_001 protocol=oos_beta, train_frac=0.70, hist/fwd=60, boundary purge.",
+    "World bridge is deterministic given the same macro panel (no RNG in vol_mult path)."
+  ]
+}

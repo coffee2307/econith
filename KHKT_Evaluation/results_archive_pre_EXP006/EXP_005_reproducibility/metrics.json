@@ -1,0 +1,60 @@
+{
+  "experiment": "EXP_005",
+  "status": "completed",
+  "fabricated": false,
+  "repeats": [
+    {
+      "repeat": 1,
+      "status": "completed",
+      "metrics": {
+        "B0": {
+          "label": "B0_market_only",
+          "n": 29881,
+          "mae": 0.002214617952386802,
+          "rmse": 0.0030832288463932063,
+          "mape": 0.39993230822881826,
+          "directional_accuracy": 0.34421017402945114
+        },
+        "E1": {
+          "label": "E1_world_coupled",
+          "n": 29881,
+          "mae": 0.0022146179523868026,
+          "rmse": 0.0030832288463932063,
+          "mape": 0.3999323082288184,
+          "directional_accuracy": 0.34421017402945114
+        }
+      }
+    },
+    {
+      "repeat": 2,
+      "status": "completed",
+      "metrics": {
+        "B0": {
+          "label": "B0_market_only",
+          "n": 29881,
+          "mae": 0.002214617952386802,
+          "rmse": 0.0030832288463932063,
+          "mape": 0.39993230822881826,
+          "directional_accuracy": 0.34421017402945114
+        },
+        "E1": {
+          "label": "E1_world_coupled",
+          "n": 29881,
+          "mae": 0.0022146179523868026,
+          "rmse": 0.0030832288463932063,
+          "mape": 0.3999323082288184,
+          "directional_accuracy": 0.34421017402945114
+        }
+      }
+    }
+  ],
+  "fingerprints": [
+    "34b9db476763d4d22355280b72faed55f4807752dcfbb489d1cfb45da79bb7fd",
+    "34b9db476763d4d22355280b72faed55f4807752dcfbb489d1cfb45da79bb7fd"
+  ],
+  "reproducible": true,
+  "notes": [
+    "Compares SHA256 of EXP_001 metrics across repeats with identical config/seed.",
+    "World bridge is deterministic given the same macro panel (no RNG in vol_mult path)."
+  ]
+}

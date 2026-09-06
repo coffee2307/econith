@@ -1,0 +1,10 @@
+# EXP_003 — World coupling ablation (RQ3)
+id: EXP_003
+rq: RQ3
+seed: 42
+max_rows: 30000
+stride: 5
+scenario_kind: rate_hike
+severity: 0.7
+dd_freeze_threshold: 0.03
+signal: sign_obi

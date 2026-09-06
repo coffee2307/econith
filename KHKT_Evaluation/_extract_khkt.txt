@@ -1,0 +1,284 @@
+PARAS=242 TABLES=8
+1|normal|ECONITH
+2|normal|Economic Intelligence Through Simulation & Quant Research
+4|normal|Giáo Viên Hướng Dẫn: Nguyễn Thành Đô
+5|normal|Người Thực Hiện: Phạm Nhật Quang
+9|normal|BÁO CÁO DỰ ÁN NGHIÊN CỨU / KỸ THUẬT
+11|normal|ECONITH là nền tảng nghiên cứu mô phỏng tài chính và kinh tế, được phát triển để nghiên cứu cách các biến động kinh tế vĩ mô, như lãi suất, lạm phát hoặc thuế quan, ảnh hưởng đến thị trường tài chính. Hệ thống kết hợp mô hình mô phỏng đa tác nhân với trí tuệ nhân tạo định lượng (AI Quant), cho phép xây dựng các kịch bản thí nghiệm trong môi trường có kiểm soát, có thể lặp lại và đánh giá bằng các chỉ số định lượng. 
+12|normal|Tài liệu này mô tả hệ thống dựa trên những thành phần đã được triển khai trong codebase hiện tại và không đưa ra các tuyên bố vượt quá phạm vi đã được kiểm chứng. 
+22|normal|01  ·  TÓM TẮT DỰ ÁN
+23|Heading 2|1.1. Định vị
+24|normal|ECONITH là nền tảng nghiên cứu mô phỏng tài chính – kinh tế, kết hợp mô hình đa tác nhân với AI định lượng nhằm nghiên cứu ảnh hưởng của các cú sốc kinh tế vĩ mô đến thị trường tài chính. Hệ thống gồm hai thành phần chính: ECONITH World, chịu trách nhiệm mô phỏng môi trường giả lập nền kinh tế toàn cầu; và ECONITH Quant, chịu trách nhiệm phân tích phản ứng của thị trường. Hai thành phần được thiết kế độc lập để bảo đảm dữ liệu mô phỏng không ảnh hưởng đến dữ liệu thực.
+26|Heading 2|1.2. Tính mới
+27|normal|Kết hợp mô phỏng kinh tế đa tác nhân và AI định lượng trong cùng một nền tảng nghiên cứu.
+28|normal|Xây dựng cơ chế liên kết giữa biến động kinh tế vĩ mô và phản ứng của thị trường tài chính.
+29|normal|Cho phép tạo kịch bản giả định, thực hiện mô phỏng và ghi nhận kết quả để phục vụ nghiên cứu.
+30|normal|Tích hợp hệ thống giám sát rủi ro và theo dõi toàn bộ quá trình thực nghiệm.
+31|normal|Tập trung xây dựng môi trường thí nghiệm có kiểm soát, không hướng đến dự đoán chính xác tương lai hay mô phỏng hoàn chỉnh nền kinh tế.
+33|Heading 2|1.3. Tính khoa học
+34|normal|Đề tài được thực hiện theo quy trình nghiên cứu và phát triển, bao gồm thu thập dữ liệu, xây dựng hệ thống, hiệu chỉnh mô hình, thực hiện thí nghiệm và đánh giá kết quả. Việc đánh giá được thực hiện thông qua mô phỏng các kịch bản lịch sử, so sánh với mô hình đối chứng và kiểm tra khả năng tái lập của kết quả. Các chỉ số đánh giá được xác định rõ, bao gồm sai số dự báo, mức độ biến động và các chỉ số rủi ro. Nếu kết quả thực nghiệm không chứng minh được giả thuyết ban đầu thì vẫn được xem là kết quả nghiên cứu hợp lệ.
+36|Heading 2|1.4. Tính thực tiễn
+37|normal|ECONITH hỗ trợ nghiên cứu viên, kỹ sư dữ liệu và người học kiểm tra các giả thuyết về kinh tế và thị trường tài chính trong môi trường an toàn. Hệ thống cho phép phân tích tác động của các kịch bản kinh tế khác nhau, quan sát phản ứng của thị trường và phục vụ các nghiên cứu về quản lý rủi ro mà không cần sử dụng vốn đầu tư thực tế.
+39|Heading 2|1.5. Phạm vi của đề tài
+40|normal|Đề tài không hướng đến việc xây dựng hệ thống giao dịch tự động kiếm lợi nhuận, không thay thế chuyên gia tài chính hoặc nhà hoạch định chính sách, không mô phỏng đầy đủ nền kinh tế thế giới và cũng không tuyên bố có khả năng dự đoán chính xác diễn biến của thị trường tài chính.
+41|normal|02  ·  TỔNG QUAN VỀ ĐỀ TÀI
+42|normal|2.1. ECONITH là gì?
+43|normal|ECONITH (Economic Intelligence Through Simulation & Quant Research) là nền tảng nghiên cứu mô phỏng tài chính và kinh tế, được xây dựng để nghiên cứu ảnh hưởng của các biến động kinh tế vĩ mô như lãi suất, lạm phát và thuế quan đến thị trường tài chính.
+44|normal|Hệ thống kết hợp mô hình mô phỏng đa tác nhân với AI Quant nhằm tạo ra môi trường thí nghiệm có kiểm soát, cho phép xây dựng các kịch bản giả định, quan sát phản ứng của thị trường và đánh giá kết quả bằng các chỉ số định lượng.
+45|normal|Đối tượng sử dụng chính của ECONITH là các nghiên cứu viên, kỹ sư dữ liệu và người học muốn kiểm tra các giả thuyết nghiên cứu trong môi trường có thể tái lập, thay vì phục vụ giao dịch tự động.
+46|normal|2.2. Vì sao dự án được tạo ra?
+47|normal|Trong thực tế, các kỹ thuật giao dịch định lượng, mô phỏng kinh tế và phân tích rủi ro thường được phát triển và sử dụng chủ yếu trong các quỹ đầu tư, tổ chức tài chính lớn và phòng thí nghiệm nghiên cứu chuyên sâu. Mặc dù nhiều phương pháp đã được công bố trong các nghiên cứu khoa học, nhưng việc tiếp cận và xây dựng một hệ thống hoàn chỉnh vẫn yêu cầu kiến thức chuyên môn, dữ liệu và hạ tầng tính toán lớn. 
+48|normal|Bên cạnh đó, các công cụ hiện nay thường tập trung vào từng khía cạnh riêng biệt:
+49|normal|Công cụ phân tích kinh tế vĩ mô hỗ trợ đánh giá các chỉ số kinh tế và tác động chính sách.
+50|normal|Mô hình mô phỏng kinh tế giúp nghiên cứu sự tương tác giữa các tác nhân.
+51|normal|Hệ thống AI Quant và backtest tập trung phân tích dữ liệu thị trường trong quá khứ.
+52|normal|Các hệ thống quản lý rủi ro thường hoạt động tách biệt với quá trình xây dựng và kiểm chứng giả thuyết.
+53|normal|Sự phân tách này gây khó khăn trong việc nghiên cứu những câu hỏi phức tạp như: khi một biến động kinh tế xảy ra, nó có thể lan truyền như thế nào qua hệ thống kinh tế và ảnh hưởng đến thị trường tài chính ra sao.
+54|normal|ECONITH được xây dựng nhằm kết nối các thành phần trên trong một môi trường nghiên cứu thống nhất, giúp các nhà nghiên cứu, kỹ sư, tổ chức phân tích và người học có thể tiếp cận, thử nghiệm và đánh giá các giả thuyết tài chính – kinh tế thông qua mô phỏng có kiểm soát và khả năng tái lập.
+55|normal|03  ·  VẤN ĐỀ NGHIÊN CỨU
+56|normal|3.1. Phát biểu vấn đề
+57|normal|Trong nghiên cứu tài chính – kinh tế hiện nay, vẫn còn thiếu một môi trường thử nghiệm có khả năng mô phỏng sự lan truyền của các biến động kinh tế vĩ mô đến thị trường tài chính một cách có kiểm soát, có thể đo lường và tái lập.
+58|normal|Các phương pháp phân tích truyền thống thường chỉ tập trung vào từng khía cạnh riêng lẻ, khiến cho việc nghiên cứu phản ứng của thị trường trước các kịch bản kinh tế giả định trở nên khó khăn.
+59|normal|3.2. Hạn chế của phương pháp truyền thống
+61|normal|3.3. Khoảng trống ECONITH hướng tới
+62|normal|ECONITH hướng tới việc xây dựng một môi trường nghiên cứu thống nhất, kết hợp mô phỏng kinh tế vĩ mô với phân tích định lượng thị trường nhằm:
+63|normal|Mô phỏng các kịch bản biến động kinh tế và quan sát quá trình lan truyền trong hệ thống.
+64|normal|Đánh giá sự thay đổi của tín hiệu thị trường dưới các điều kiện khác nhau.
+65|normal|So sánh kết quả giữa mô hình có và không có tác động từ mô phỏng kinh tế.
+66|normal|Đảm bảo dữ liệu mô phỏng và dữ liệu thực tế được phân tách rõ ràng để tăng tính tin cậy của thí nghiệm.
+67|normal|3.4. Câu hỏi nghiên cứu định hướng
+68|normal|RQ1. Việc bổ sung bối cảnh kinh tế vĩ mô từ mô phỏng có tạo ra sự khác biệt có thể đo lường được trong quá trình đánh giá biến động thị trường so với mô hình chỉ sử dụng dữ liệu lịch sử hay không? 
+69|normal|RQ2. Việc hiệu chỉnh các tham số mô phỏng dựa trên dữ liệu kinh tế thực có giúp kết quả mô phỏng phản ánh tốt hơn các đặc điểm thống kê của dữ liệu quan sát hay không?
+70|normal|RQ3. Khi thay đổi trạng thái kết nối giữa mô phỏng kinh tế và phân tích thị trường, mức độ thay đổi của các chỉ số rủi ro trong cùng một kịch bản biến động có thể được đo lường như thế nào?
+71|normal|RQ4. Quy trình thực nghiệm của ECONITH có bảo đảm tính tái lập, nghĩa là tạo ra các kết quả nhất quán khi được thực hiện nhiều lần trong cùng điều kiện dữ liệu, cấu hình và tham số hay không? 
+72|normal|3.5. Giả thuyết khoa học
+73|normal|H1. Việc bổ sung bối cảnh kinh tế vĩ mô từ mô phỏng đa tác nhân sẽ tạo ra sự khác biệt có thể đo lường được trong quá trình đánh giá biến động thị trường so với mô hình chỉ sử dụng dữ liệu thị trường lịch sử. Sự khác biệt này được đánh giá thông qua các chỉ số như sai số dự báo biến động, khả năng nhận diện xu hướng biến động hoặc các chỉ số định lượng khác. 
+74|normal|H2. Việc hiệu chỉnh các tham số của mô hình mô phỏng dựa trên dữ liệu kinh tế thực sẽ giúp giảm sai khác giữa dữ liệu mô phỏng và dữ liệu quan sát, thể hiện qua sự cải thiện các đặc điểm thống kê như mức biến động, phân phối dữ liệu và hành vi của chuỗi thời gian.
+75|normal|H3. Cơ chế kết nối giữa mô phỏng kinh tế và phân tích thị trường sẽ tạo ra sự thay đổi có thể đo lường được trong các chỉ số rủi ro khi hệ thống được đặt trong cùng một kịch bản biến động, so với trường hợp không sử dụng thông tin từ mô phỏng.
+76|normal|H4. Quy trình thực nghiệm của ECONITH sẽ tạo ra các kết quả có tính nhất quán và có thể tái lập khi được thực hiện nhiều lần với cùng dữ liệu, cùng cấu hình hệ thống và cùng tham số thực nghiệm. 
+77|normal|04  ·  MỤC TIÊU DỰ ÁN
+78|normal|4.1. Mục tiêu tổng quát
+79|normal|Xây dựng một nền tảng nghiên cứu mô phỏng tài chính–kinh tế cho phép thiết lập các kịch bản biến động kinh tế vĩ mô, mô phỏng quá trình lan truyền thông qua hệ thống đa tác nhân, và đánh giá sự thay đổi của thị trường tài chính trong môi trường có kiểm soát, có thể đo lường và tái lập. 
+80|normal|4.2. Mục tiêu kỹ thuật
+82|normal|4.3. Phạm vi không thuộc mục tiêu dự án 
+83|normal|ECONITH không hướng tới:
+84|normal|Xây dựng hệ thống giao dịch tự động nhằm tối ưu lợi nhuận trên thị trường thực.
+85|normal|Dự đoán chính xác biến động tương lai của thị trường tài chính.
+86|normal|Mô phỏng hoàn toàn nền kinh tế toàn cầu với độ chính xác tuyệt đối.
+87|normal|Thay thế các mô hình kinh tế lượng chuyên sâu trong hoạch định chính sách.
+
+88|normal|05  ·  KIẾN TRÚC HỆ THỐNG
+89|normal|
+5.1. Kiến trúc tổng thể
+90|normal|ECONITH được thiết kế theo mô hình phân lớp, trong đó mỗi lớp đảm nhiệm một vai trò riêng trong quá trình thu thập dữ liệu, mô phỏng kinh tế, phân tích thị trường và đánh giá kết quả.
+92|normal|5.2. Cơ chế vận hành cốt lõi
+93|normal|Hệ thống ECONITH sử dụng kiến trúc hướng sự kiện (event-driven architecture), trong đó các thành phần giao tiếp thông qua các sự kiện chung thay vì phụ thuộc trực tiếp vào nhau.
+94|normal|Các thành phần vận hành chính gồm:
+95|normal|EventBus: Cơ chế truyền nhận dữ liệu giữa các thành phần trong hệ thống.
+96|normal|TimeEngine và TickPipeline: Quản lý chu kỳ cập nhật của mô phỏng và quá trình phân tích.
+97|normal|REALITY / SIMULATION Mode: Cơ chế phân tách dữ liệu thực tế và dữ liệu mô phỏng nhằm tránh ảnh hưởng chéo giữa hai môi trường.
+98|normal|Backend và Dashboard: Backend xử lý logic hệ thống, trong khi giao diện cung cấp khả năng quan sát và theo dõi kết quả.
+99|normal|5.3. Luồng vận hành khái quát
+100|normal|Quá trình hoạt động tổng quát của ECONITH gồm các bước:
+101|normal|Thu thập dữ liệu thị trường và dữ liệu kinh tế vĩ mô.
+102|normal|Xây dựng trạng thái mô phỏng và tạo các kịch bản biến động.
+103|normal|Mô phỏng quá trình lan truyền của biến động kinh tế qua các tác nhân.
+104|normal|Quan sát phản ứng của thị trường thông qua mô hình Quant.
+105|normal|Đánh giá kết quả dựa trên các chỉ số về biến động, rủi ro và khả năng tái lập.
+106|normal|Lưu trữ kết quả thí nghiệm để phục vụ phân tích và so sánh.
+107|normal|5.4. Vai trò của các thành phần trong nghiên cứu
+108|normal|Trong phạm vi đề tài, các thành phần của ECONITH được ưu tiên theo vai trò nghiên cứu:
+109|normal|1. Mô phỏng kinh tế (World Simulation)
+ Là môi trường tạo ra các kịch bản biến động để kiểm tra giả thuyết.
+110|normal|2. Cơ chế kết nối Kinh tế – Thị trường (Cross Impact)
+ Là thành phần cốt lõi giúp nghiên cứu sự truyền dẫn giữa biến động vĩ mô và phản ứng thị trường.
+111|normal|3. Phân tích định lượng (Quant Intelligence)
+ Đóng vai trò quan sát và đo lường sự thay đổi của thị trường dưới các điều kiện khác nhau.
+112|normal|4. Hệ thống đánh giá rủi ro (Risk System)
+ Đảm bảo quá trình thử nghiệm được kiểm soát và cung cấp các chỉ số đánh giá.
+113|normal|5. Huấn luyện AI (AI Training)
+ Là thành phần hỗ trợ nâng cao khả năng phân tích, không phải mục tiêu duy nhất của đề tài.
+114|normal|06  ·  ECONITH WORLD
+115|normal|6.1. Bản chất
+116|normal|ECONITH World là môi trường mô phỏng kinh tế vĩ mô dựa trên mô hình đa tác nhân (Agent-Based Simulation), được xây dựng nhằm nghiên cứu cách các biến động kinh tế có thể lan truyền trong hệ thống kinh tế và tạo ra các phản ứng khác nhau giữa các tác nhân.
+117|normal|Hệ thống không nhằm tái tạo chính xác toàn bộ nền kinh tế thế giới, mà tập trung xây dựng một môi trường thử nghiệm có kiểm soát để tạo kịch bản, quan sát thay đổi và đánh giá tác động của các yếu tố kinh tế.
+119|normal|6.2. Sovereign Graph và agents
+120|normal|Mỗi quốc gia/hub trong đồ thị có bốn vai trò agent tự lợi:
+121|normal|GovernmentAgent — chính sách tài khóa, thuế, thuế quan.
+122|normal|CentralBankAgent — chính sách tiền tệ (ví dụ quy tắc kiểu Taylor), lãi suất, FX.
+123|normal|EnterpriseAgent — hành vi doanh nghiệp / chuỗi cung ứng.
+124|normal|PublicAgent — niềm tin tiêu dùng, bất ổn xã hội.
+125|normal|Các hub được nối bằng ma trận thương mại và lớp thuế quan. Đột biến cấu trúc (ví dụ tăng thuế quan giữa hai nước) lan truyền theo chuỗi nhân quả qua các tick mô phỏng; chronology fork lưu lịch sử kịch bản để tái quan sát.
+126|normal|6.3. Macro variables
+127|normal|Mỗi quốc gia mang vector biến số nhóm Monetary / Fiscal–Trade / Labor / Industrial / Geopolitical (lãi suất, CPI, tăng trưởng, thất nghiệp, thuế, dự trữ, chỉ số bất ổn…). Biến được clamp trong biên hợp lý để giữ ổn định số học của mô phỏng.
+128|normal|6.4. Phạm vi live hiện tại
+129|normal|Giao diện có thể hiển thị topology nhiều quốc gia; phần backend mutate live tập trung vào tập hub đã khai báo (ví dụ USA, CHN, VNM, JPN, IND, DEU và một số hub bổ sung). Đây là lựa chọn trung thực về phạm vi — ưu tiên độ sâu thí nghiệm hơn độ bao phủ toàn cầu.
+130|normal|6.5. Hypothesis Engine
+131|normal|Sinh giả thuyết shock (combinatorial mặc định; LLM tùy chọn, không bắt buộc cho thí nghiệm khoa học).
+132|normal|Debate / thinker hỗ trợ cấu trúc câu hỏi thí nghiệm.
+133|normal|Chạy scenario trên WorldKernel, đo pre/post macro deltas.
+134|normal|Ghi sealed JSONL rollout phục vụ phân tích và (sau này) dataset.
+135|normal|07  ·  ECONITH QUANT
+136|normal|7.1. Vai trò
+137|normal|ECONITH Quant không phải trading bot. Đây là hệ thống AI nghiên cứu phản ứng của thị trường tài chính dưới các điều kiện khác nhau — bao gồm điều kiện stress được World tạo ra trong SIMULATION.
+138|normal|7.2. Pipeline
+140|normal|7.3. Quan hệ với mục tiêu nghiên cứu
+141|normal|Trong khung đề tài, Quant là công cụ đo lường và quan sát. Việc có desk heuristic hay đã train ảnh hưởng chất lượng tín hiệu, nhưng câu hỏi khoa học trung tâm vẫn là hiệu lực của bối cảnh macro mô phỏng — không phải tối ưu Sharpe trên vốn thật.
+142|normal|08  ·  CƠ CHẾ KẾT NỐI WORLD ↔ QUANT
+143|normal|8.1. Vì sao đây là phần quan trọng nhất?
+144|normal|Nếu chỉ có World hoặc chỉ có Quant, ECONITH gần với các hệ đã có. Điểm khác biệt phương pháp nằm ở lớp dịch shock hai chiều — cho phép thí nghiệm “macro context → market reaction” và quan sát phản hồi ngược trong SIMULATION. Đây cũng là phần dễ bị hiểu nhầm nhất: coupling không chứng minh dự báo chắc chắn, mà tạo điều kiện thí nghiệm có cấu trúc để so sánh với baseline.
+145|normal|8.2. Macro → Micro
+146|normal|Luồng khái niệm:
+147|normal|Interest rate / tariff / inflation shock trên World
+148|normal|→ aggregate geo state
+149|normal|→ MicrostructuralVolatilityVector (vol multiplier, order-flow shock, liquidity drain, regime pressure)
+150|normal|→ Predictor điều chỉnh perception feature / regime (khi coupling được phép)
+151|normal|→ thay đổi tín hiệu AI Quant và metric quan sát
+152|normal|Ví dụ minh họa (stylized): thay đổi lãi suất → thanh khoản / kỳ vọng rủi ro thay đổi → biến động thị trường tăng → AI Quant điều chỉnh tín hiệu và Sentinel ghi nhận metric rủi ro. Chuỗi này được dùng để thiết kế thí nghiệm, không phải để khẳng định nhân quả tuyệt đối ngoài đời thực.
+153|normal|8.3. Micro → Macro
+154|normal|Luồng khái niệm:
+155|normal|Market snapshot (conviction, vol, liquidation pressure…)
+156|normal|→ MacroFeedback theo mức mong manh cấu trúc từng quốc gia
+157|normal|→ cập nhật trạng thái World (ví dụ áp lực FX / unrest / yield)
+158|normal|→ trạng thái mô phỏng mới cho tick tiếp theo
+159|normal|8.4. Ràng buộc an toàn nghiên cứu
+160|normal|Trong REALITY: EventBus có thể chặn world.* tới DOMAIN_QUANT; producer air-gap bổ sung.
+161|normal|Trong SIMULATION: cho phép World tác động Quant để phục vụ thí nghiệm.
+162|normal|Mục tiêu: tránh look-ahead / nhiễm mô phỏng vào kết luận “thực tế” khi không cố ý.
+163|normal|Bốn tầng cô lập (consumer gate, producer air-gap, execution air-gap, anomaly gate) là điều kiện kỹ thuật để báo cáo nghiên cứu phân biệt rõ “kết quả thí nghiệm mô phỏng” và “quan sát trên dữ liệu thật”.
+164|normal|09  ·  PHƯƠNG PHÁP NGHIÊN CỨU & THỰC NGHIỆM
+165|normal|9.1. Khung phương pháp
+166|normal|Áp dụng quy trình Research & Development (R&D) kết hợp thiết kế thí nghiệm so sánh có đối chứng. Biến độc lập tiêu biểu: có/không World coupling, loại shock (rate/tariff/inflation), mức severity, có/không calibration. Biến phụ thuộc tiêu biểu: sai số dự báo biến động, độ chính xác hướng, metric rủi ro, moment error, tỷ lệ tái lập.
+167|normal|9.2. Thiết kế thí nghiệm
+169|normal|Điều kiện kết luận tích cực tối thiểu: E1 cải thiện so với B0 trên metric đã công bố và đồng thời vượt C1 (random control). Nếu E1 ≤ C1, không được kết luận rằng mô phỏng “đúng”; chỉ kết luận rằng cấu trúc shock chưa mang lại tín hiệu vượt nhiễu trong thiết lập đó.
+170|normal|9.3. Quy trình thực nghiệm đề xuất
+171|normal|Bước 1 — Thu thập: market crypto + macro (FRED/…) + gắn nhãn sự kiện lịch sử.
+172|normal|Bước 2 — Calibration: moment-matching (OU + jump) → stochastic coefficients.
+173|normal|Bước 3 — Historical replay: inject shock khớp loại sự kiện; đo metric.
+174|normal|Bước 4 — Scenario testing: rate / inflation / tariff shocks với severity khác nhau.
+175|normal|Bước 5 — Ablation: World ON vs OFF; báo cáo bảng so sánh.
+176|normal|Bước 6 — Reproducibility: lặp fingerprint/seed; ghi tỷ lệ tái lập hướng delta.
+177|normal|9.4. Metric
+179|normal|9.5. Lưu ý phương pháp
+180|normal|Đánh giá khoa học cần đo trên tín hiệu/policy thực của hệ thống. Các cổng kỹ thuật nội bộ (ví dụ gate deploy dùng tín hiệu giáo viên đơn giản) phục vụ vận hành kỹ thuật và không thay thế protocol thí nghiệm nêu trên. Thí nghiệm khoa học nên đặt HYPOTHESIS_USE_LLM=false để tăng tái lập.
+181|normal|10  ·  DỮ LIỆU & THÀNH PHẦN KỸ THUẬT
+182|normal|10.1. Nguồn dữ liệu
+183|normal|Market: order-flow / ticker crypto (collectors.market_coin).
+184|normal|Macro: chuỗi vĩ mô theo lịch (collectors.macro_global; FRED là nguồn chính khi có khóa).
+185|normal|TradFi tham chiếu: tài sản phiên giao dịch (collectors.tradfi_assets).
+186|normal|Event library (đề xuất nghiên cứu): COVID crash, chu kỳ tăng lãi suất, stress ngân hàng, tin thuế quan…
+187|normal|10.2. Nguyên tắc dữ liệu
+188|normal|Raw lake append-only; feature store tách khỏi collectors.
+189|normal|Đồng bộ đa tần số không look-ahead (asof backward).
+190|normal|Label theo từng symbol để tránh nhiễm chéo timeline.
+191|normal|10.3. Thành phần kỹ thuật chính
+193|normal|11  ·  TÍNH SÁNG TẠO
+194|normal|11.1. Đóng góp thực chất
+195|normal|Kiến trúc tích hợp macro simulation và financial AI trong một event-driven runtime.
+196|normal|Mô hình tương tác hai chiều macro ↔ micro với vector shock có cấu trúc.
+197|normal|Hypothesis-driven simulation kèm sealed log phục vụ tái lập.
+198|normal|Môi trường thử nghiệm có ablation và isolation mode — hỗ trợ đánh giá AI dưới stress có chủ đích.
+199|normal|11.2. Những gì không tính là sáng tạo khoa học
+200|normal|Việc “có AI”, “có dashboard”, hay “có nhiều module” đơn thuần.
+201|normal|Tích hợp thư viện bên thứ ba nếu không phục vụ câu hỏi nghiên cứu.
+202|normal|Claim marketing về tính “đầu tiên” khi thiếu bằng chứng so sánh có kiểm chứng.
+203|normal|12  ·  ỨNG DỤNG THỰC TIỄN
+204|normal|Nghiên cứu tài chính–kinh tế: kiểm tra giả thuyết lan truyền shock.
+205|normal|Giáo dục: minh họa agent-based simulation và pipeline Quant trong một hệ thống.
+206|normal|Phân tích rủi ro / stress testing có chủ đích trên kịch bản.
+207|normal|Hỗ trợ ra quyết định nghiên cứu (decision support) — cung cấp bằng chứng thí nghiệm, không thay chuyên gia.
+208|normal|12.1. Ranh giới sử dụng
+209|normal|ECONITH không được định vị là công cụ kiếm tiền tự động hay hệ thống thay thế phán đoán chuyên môn. Mọi suy luận từ mô phỏng cần đi kèm calibration, đối chứng baseline, và thừa nhận giới hạn stylized model. Trong bối cảnh báo cáo khoa học kỹ thuật, ứng dụng được hiểu là khả năng hỗ trợ quy trình nghiên cứu và học tập có kiểm chứng — không phải triển khai thương mại quy mô lớn.
+210|normal|13  ·  TRẠNG THÁI HIỆN TẠI & GIỚI HẠN
+211|normal|13.1. Đã có trong codebase
+212|normal|Runtime event-driven đầy đủ; dashboard Quant/World.
+213|normal|WorldKernel, Sovereign Graph, Cross Impact, Hypothesis Runner.
+214|normal|Collectors + feature/label pipeline + khung train/deploy.
+215|normal|Sentinel đồng bộ equity từ fills; cô lập REALITY/SIMULATION nhiều tầng.
+216|normal|Calibrator moment-matching (khung); paper soak checklist vận hành.
+217|normal|13.2. Giới hạn cần nêu rõ
+218|normal|Desk AI mặc định có thể heuristic nếu chưa có checkpoint hợp lệ; không phải “AI đã train sẵn trong hộp”.
+219|normal|World mặc định có thể tắt trên máy yếu; coupling chỉ có hiệu lực nghiên cứu trong SIMULATION.
+220|normal|Calibration và historical validation là hướng phương pháp — cần chạy đủ thí nghiệm để thành bằng chứng.
+221|normal|Vòng tự động retrain→deploy (FULLY_AUTONOMOUS) là hướng vận hành tương lai, chưa phải năng lực hoàn tất.
+222|normal|Phạm vi hub live hữu hạn; không tương đương mô hình toàn cầu đầy đủ.
+223|normal|13.3. Ý nghĩa của giới hạn đối với báo cáo
+224|normal|Việc nêu giới hạn không làm giảm giá trị đề tài; ngược lại, đây là điều kiện để hội đồng đánh giá đúng phần đã chứng minh bằng kiến trúc/code và phần còn cần số liệu thực nghiệm. Báo cáo này ưu tiên trung thực kỹ thuật hơn mở rộng tuyên bố.
+225|normal|14  ·  HƯỚNG PHÁT TRIỂN
+226|normal|14.1. Ngắn hạn (ưu tiên khoa học)
+227|normal|Hoàn thiện calibration trên panel macro thật; báo cáo moment error.
+228|normal|Xây event library và chạy historical replay + random control.
+229|normal|Ablation có/không World với bảng metric công bố.
+230|normal|Mở rộng dataset market/macro dài ngày qua collectors.
+231|normal|14.2. Trung hạn
+232|normal|Cải thiện fidelity agent và độ nhạy tham số (sensitivity analysis).
+233|normal|Đánh giá policy Quant thật trên holdout (không dùng tín hiệu oracle).
+234|normal|Chuẩn hóa báo cáo thí nghiệm / reproducibility kit.
+235|normal|14.3. Dài hạn
+236|normal|Mở rộng quy mô mô phỏng và số thị trường được quan sát.
+237|normal|Nâng cấp agent kinh tế và cơ chế truyền dẫn phức tạp hơn — khi đã có validation nền.
+238|normal|Chỉ khi bằng chứng nghiên cứu vững mới cân nhắc vận hành DEMO kéo dài / tự động hóa vòng đời model.
+239|normal|15  ·  KẾT LUẬN
+240|normal|ECONITH đóng góp một nền tảng kỹ thuật để nghiên cứu lan truyền shock vĩ mô tới phản ứng thị trường trong môi trường mô phỏng đa tác nhân có kết nối AI Quant. Giá trị cốt lõi nằm ở protocol thí nghiệm có kiểm soát — calibration, baseline, ablation, reproducibility — chứ không ở lời hứa dự đoán hay tự động hóa lợi nhuận.
+241|normal|Với định vị này, dự án phù hợp làm hồ sơ nghiên cứu/kỹ thuật: trung thực về phạm vi, rõ về phương pháp, và mở đường cho các thực nghiệm kiểm chứng tiếp theo trên dữ liệu thật. Các bước tiếp theo ưu tiên bằng chứng số liệu (event library, bảng B0/E1/C1, moment error) hơn việc mở rộng tính năng giao diện.
+===TABLES===
+--- table 0 rows=5 ---
+Phiên bản tài liệu | 1.1
+Ngày phát hành | 28/07/2026
+Phạm vi | Kiến trúc · Phương pháp · Trạng thái kỹ thuật theo codebase
+Chế độ vận hành chính | SIM / DEMO (nghiên cứu & thử nghiệm)
+Phân loại | Research Platform — không phải hệ giao dịch tự động
+--- table 1 rows=5 ---
+Phương pháp | Điểm mạnh | Hạn chế liên quan đến đề tài
+Phân tích dữ liệu lịch sử (Backtesting) | Sử dụng dữ liệu thị trường thực tế | Khó chủ động tạo ra các kịch bản biến động kinh tế có cấu trúc
+Mô hình kinh tế vĩ mô | Phân tích các yếu tố kinh tế và chính sách | Thường chưa kết nối trực tiếp với phản ứng của thị trường tài chính
+Mô phỏng đa tác nhân | Mô tả sự tương tác giữa nhiều tác nhân trong hệ thống | Cần thêm cơ chế đánh giá tác động lên dữ liệu thị trường
+Hệ thống giao dịch định lượng | Tối ưu hóa tín hiệu và chiến lược giao dịch | Tập trung vào hiệu quả giao dịch hơn là nghiên cứu cơ chế lan truyền rủi ro
+--- table 2 rows=8 ---
+# | Mục tiêu | Thành phần liên quan
+T1 | Xây dựng môi trường mô phỏng kinh tế đa tác nhân để biểu diễn tương tác giữa các tác nhân kinh tế | WorldKernel, Sovereign Graph
+T2 | Mô hình hóa các yếu tố kinh tế vĩ mô như lãi suất, lạm phát, thương mại và chính sách kinh tế | Macro vectors, Trade matrix
+T3 | Xây dựng cơ chế kết nối giữa biến động kinh tế vĩ mô và phản ứng tị trường tài chính | Cross Impact
+T4 | Phát triển pipeline AI Quant để thu thập, xử lý dữ liệu và đánh giá phản ứng của thị trường dưới các điều kiện khác nhau | Feature pipeline, Predictor, AIBridge
+T5 | Xây dựng quy trình thử nghiệm giả thuyết có khả năng ghi nhận, tái lập và so sánh kết quả | Hypothesis Runner, Sealed rollouts
+T6 | Xây dựng quy trình thử nghiệm giả thuyết có khả năng ghi nhận, tái lập và so sánh kết quả | Sentinel, EventBus mode gates
+T7 | Xây dựng hệ thống thu thập vả quản lý dữ liệu | Collectors, raw lake
+--- table 3 rows=7 ---
+Lớp | Vai trò | Module tiêu biểu
+Lớp dữ liệu (Data Layer) | Thu thập, lưu trữ và chuẩn hóa dữ liệu thị trường, kinh tế vĩ mô và tài sản tham chiếu | Market Data, Macro Data, TradFi Data Collectors
+Lớp mô phỏng kinh tế (World Simulation Layer) | Xây dựng môi trường kinh tế đa tác nhân và mô phỏng các kịch bản biến động | WorldKernel, SovereignWorldGraph
+Lớp tương tác Kinh tế – Thị trường (Macro–Micro Interaction Layer) | Mô phỏng quá trình truyền dẫn từ biến động kinh tế vĩ mô đến phản ứng thị trường và chiều ngược lại | Cross Impact
+Lớp phân tích định lượng (Quant Intelligence Layer) | Xử lý dữ liệu, xây dựng đặc trưng và đánh giá phản ứng của thị trường | Feature Pipeline, Predictor, AI Bridge
+Lớp đánh giá và kiểm soát rủi ro (Risk & Evaluation Layer) | Đánh giá kết quả thí nghiệm, kiểm soát rủi ro và đảm bảo tính độc lập của hệ thống | Sentinel, Evaluation, Backtest
+Lớp giao diện quan sát (Dashboard Layer) | Hiển thị trạng thái mô phỏng, dữ liệu phân tích và kết quả thí nghiệm | ECONITH World, ECONITH Quant Dashboard
+--- table 4 rows=9 ---
+Bước | Mô tả | Ghi chú kỹ thuật
+Collect | Thu thập market / macro / tradfi | collectors/ — zero-ML, deploy độc lập
+Feature | Đồng bộ đa tần số, chống look-ahead | join_asof backward trong feature_pipeline
+Label | Nhãn theo symbol, split thời gian | label_symbol tránh cross-symbol contamination
+Train | Huấn luyện desk (ví dụ PPO) khi có dữ liệu/GPU | train_ppo; artifact không mặc định sẵn
+Infer | Ensemble desk + regime → ai.signal | Predictor; fallback heuristic nếu thiếu checkpoint
+Bridge | Định cỡ / chuyển thành order.intent | AIBridge + portfolio VaR haircut
+Risk | Veto độc lập | Sentinel (equity từ quant.fills)
+Evaluate | Backtest offline, deploy gate | evaluation/backtest, deploy_gate
+--- table 5 rows=4 ---
+Nhánh | Cấu hình | Mục đích
+B0 — Baseline | Market data only; World coupling OFF | Đối chứng tiêu chuẩn
+E1 — ECONITH | Market data + simulated macro context (coupling ON) | Điều kiện thí nghiệm
+C1 — Control | Cùng magnitude nhưng shock ngẫu nhiên | Loại trừ “đoán bừa”
+--- table 6 rows=5 ---
+Nhóm | Metric ví dụ
+World / Calibration | Moment error (μ, σ, skew, kurtosis); direction accuracy trên case study
+Quant / Reaction | MAE/RMSE biến động; directional accuracy của Δvol
+Risk | Max drawdown; số lần Sentinel freeze / VaR breach (trong SIM)
+System | Reproducibility rate; invariant isolation REALITY
+--- table 7 rows=9 ---
+Thành phần | Chức năng ngắn
+WorldKernel | Máy trạng thái macro/micro theo tick
+SovereignWorldGraph | Đồ thị quốc gia + 4 agent/hub
+Cross Impact | Dịch shock hai chiều
+HypothesisRunner | Vòng thí nghiệm giả thuyết
+Predictor | Suy luận ensemble + regime
+AIBridge | Tín hiệu → intent dưới ràng buộc rủi ro
+Sentinel | Circuit breaker / VaR / equity truth
+Dashboard | Quan sát /quant và /world

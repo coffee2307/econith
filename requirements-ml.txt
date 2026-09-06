@@ -1,0 +1,6 @@
+# Optional ML stack for trained PPO desks (Docker: INSTALL_ML=true).
+# Keep version aligned with requirements-train.txt.
+stable-baselines3==2.3.2
+torch==2.4.1
+PyYAML==6.0.2
+joblib==1.4.2

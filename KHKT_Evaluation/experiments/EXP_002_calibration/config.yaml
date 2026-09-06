@@ -1,0 +1,13 @@
+# EXP_002 — Calibration evaluation (RQ2)
+id: EXP_002
+rq: RQ2
+seed: 7
+n_steps: 2520
+n_paths: 24
+features:
+  - interest_rate
+  - inflation_cpi
+  - yield_10y
+  - gdp_growth
+empirical_source: btc_features_macro
+calibrated_coeffs: models/world/stochastic_coeffs.json

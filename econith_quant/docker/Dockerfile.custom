@@ -1,0 +1,8 @@
+FROM econith/econith-quant:develop
+
+# Install custom dependencies
+COPY requirements-custom.txt /econith/
+
+RUN pip install -r requirements-custom.txt --user --no-cache-dir
+
+# USER econithuser

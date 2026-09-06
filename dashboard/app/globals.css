@@ -1,0 +1,615 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* NOTE: FontAwesome core CSS is imported in app/layout.tsx (a CSS `@import`
+   here would violate the rule that @import must precede all other rules). */
+
+:root {
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Sovereign Trading OS — directional + zone accents (theme-agnostic base) */
+  --wr-long: #2dd4a7;
+  --wr-short: #f6465d;
+  --wr-flat: #8b8b96;
+  --wr-zone-alpha: #7c93ff;
+  --wr-zone-exec: #34d399;
+  --wr-zone-risk: #f5a623;
+}
+
+/* Dark theme (default) — War Room: midnight / charcoal */
+.dark {
+  --color-base: #07070a;
+  --color-surface: #0d0e12;
+  --color-elevated: #14151b;
+  --color-line: #23252e;
+  --color-ink: #f2f3f7;
+  --color-muted: #949aa9;
+  --color-faint: #565c6b;
+  --wr-long: #2dd4a7;
+  --wr-short: #f6465d;
+  --wr-flat: #7a8091;
+  --wr-grid-line: rgba(124, 147, 255, 0.045);
+  --wr-glow: rgba(124, 147, 255, 0.10);
+  color-scheme: dark;
+}
+
+/* Light theme */
+.light {
+  --color-base: #f6f8fb;
+  --color-surface: #ffffff;
+  --color-elevated: #eef2f7;
+  --color-line: #dde3ec;
+  --color-ink: #0d1424;
+  --color-muted: #5a6474;
+  --color-faint: #97a1b2;
+  --wr-long: #0f9d75;
+  --wr-short: #d5253c;
+  --wr-flat: #7a8091;
+  --wr-grid-line: rgba(59, 90, 200, 0.05);
+  --wr-glow: rgba(59, 90, 200, 0.08);
+  color-scheme: light;
+}
+
+@layer base {
+  body {
+    @apply bg-base text-ink antialiased;
+  }
+  html:not(.app-viewport) body {
+    overflow-x: hidden;
+  }
+  .econith-grid {
+    background-color: var(--color-base);
+  }
+  /* Rigid viewport for ECONITH World / Quant — no document scroll */
+  html.world-viewport,
+  html.world-viewport body,
+  html.app-viewport,
+  html.app-viewport body {
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply border border-line bg-surface rounded-xl;
+  }
+  .panel-elevated {
+    @apply border border-line bg-elevated rounded-xl;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border px-5 py-2.5
+           text-sm font-medium transition-colors duration-150;
+  }
+  .btn-accent {
+    @apply btn border-accent bg-accent text-white hover:bg-blue-600 border-transparent;
+  }
+  .btn-world {
+    @apply btn border-world bg-world text-black hover:bg-emerald-400 border-transparent;
+  }
+  .btn-ghost {
+    @apply btn border-line bg-transparent text-ink hover:bg-elevated;
+  }
+
+  /* ECONITH Quant — NASA mission-control console */
+  .quant-console {
+    @apply relative min-h-0 font-mono;
+    background-image:
+      linear-gradient(rgba(59, 130, 246, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(59, 130, 246, 0.03) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+  .quant-frame {
+    @apply relative border border-line bg-surface backdrop-blur-sm;
+    box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.06);
+  }
+  .quant-frame::before,
+  .quant-frame::after {
+    content: "";
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border-color: rgba(59, 130, 246, 0.45);
+    pointer-events: none;
+  }
+  .quant-frame::before {
+    top: -1px;
+    left: -1px;
+    border-top: 2px solid;
+    border-left: 2px solid;
+  }
+  .quant-frame::after {
+    bottom: -1px;
+    right: -1px;
+    border-bottom: 2px solid;
+    border-right: 2px solid;
+  }
+  .quant-readout {
+    @apply rounded-lg border border-line bg-base px-3 py-2;
+    opacity: 0.98;
+  }
+  .quant-readout-label {
+    @apply text-[10px] uppercase tracking-[0.14em] text-faint leading-tight;
+  }
+  .quant-readout-value {
+    @apply mt-0.5 text-lg font-semibold tabular-nums tracking-tight text-ink;
+  }
+  .quant-ctrl-btn {
+    @apply inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border px-3 py-2 text-[11px] font-semibold uppercase tracking-wide transition-colors disabled:opacity-40;
+  }
+  html[data-locale="vi"] .quant-ctrl-btn {
+    @apply px-2.5 text-[10px] tracking-normal;
+  }
+  html[data-locale="vi"] .quant-readout-label {
+    @apply text-[9px] tracking-[0.08em];
+  }
+  html[data-locale="vi"] .quant-step-label {
+    @apply text-[10px] leading-snug;
+  }
+  .quant-pipeline-node {
+    @apply flex min-w-0 flex-1 flex-col items-center gap-1 rounded-lg border border-line bg-elevated px-2 py-2 text-center;
+  }
+  .quant-test-banner {
+    border-bottom: 1px solid rgba(245, 158, 11, 0.3);
+    background-color: rgba(245, 158, 11, 0.1);
+  }
+  .world-resize-handle {
+    @apply relative z-10 shrink-0 cursor-col-resize touch-none select-none;
+    background-color: var(--color-line);
+    opacity: 0.55;
+  }
+  .world-resize-handle:hover,
+  .world-resize-handle:active {
+    background-color: #10b981;
+    opacity: 0.85;
+  }
+  .world-resize-handle-h {
+    @apply relative z-10 shrink-0 cursor-row-resize touch-none select-none;
+    background-color: var(--color-line);
+    opacity: 0.55;
+  }
+  .world-resize-handle-h:hover,
+  .world-resize-handle-h:active {
+    background-color: #10b981;
+    opacity: 0.85;
+  }
+
+  /* ECONITH Quant — full-width desk: status + market pinned, body absorbs viewport */
+  .quant-page-shell {
+    display: grid;
+    grid-template-rows: auto auto minmax(0, 1fr);
+    gap: 0.75rem;
+  }
+  .quant-cockpit-deck {
+    min-height: 0;
+  }
+  @media (min-width: 1024px) {
+    .quant-page-shell {
+      gap: 1rem;
+    }
+  }
+  /* On desktop the whole body row is one non-scrolling frame; each flank scrolls itself. */
+  @media (min-width: 1024px) {
+    .quant-body-grid {
+      overflow: hidden;
+    }
+    .quant-analytics-flank {
+      max-height: 100%;
+    }
+    .quant-log-flank {
+      max-height: 100%;
+    }
+  }
+  .quant-upper-deck {
+    align-items: stretch;
+  }
+  .quant-terminal-dock {
+    min-height: 15rem;
+    height: 100%;
+    max-height: 100%;
+  }
+  .quant-terminal-scroll {
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+
+  /* ══ SOVEREIGN TRADING OS — War Room design system ═════════════════════ */
+
+  /* Root surface with faint tactical grid + top glow */
+  .wr-room {
+    @apply relative min-h-0;
+    background-color: var(--color-base);
+    background-image:
+      radial-gradient(120% 80% at 50% -10%, var(--wr-glow), transparent 55%),
+      linear-gradient(var(--wr-grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--wr-grid-line) 1px, transparent 1px);
+    background-size: 100% 100%, 30px 30px, 30px 30px;
+  }
+
+  /* Panel — crisp, flat, institutional. Optional zone accent rail on top. */
+  .wr-panel {
+    @apply relative flex min-h-0 flex-col rounded-lg border border-line;
+    background-color: color-mix(in srgb, var(--color-surface) 88%, transparent);
+    box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.02);
+  }
+  .wr-panel-rail::before {
+    content: "";
+    @apply pointer-events-none absolute inset-x-0 top-0 h-px rounded-t-lg;
+    background: linear-gradient(90deg, transparent, var(--wr-rail, transparent), transparent);
+    opacity: 0.9;
+  }
+  .wr-rail-alpha { --wr-rail: var(--wr-zone-alpha); }
+  .wr-rail-exec { --wr-rail: var(--wr-zone-exec); }
+  .wr-rail-risk { --wr-rail: var(--wr-zone-risk); }
+
+  .wr-panel-head {
+    @apply flex flex-none items-center justify-between gap-2 border-b border-line px-3 py-2;
+  }
+  .wr-panel-title {
+    @apply flex items-center gap-2 font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-ink;
+  }
+  .wr-panel-eyebrow {
+    @apply font-mono text-[9px] font-semibold uppercase tracking-[0.18em] text-faint;
+  }
+  .wr-panel-body {
+    @apply min-h-0 p-3;
+  }
+  .wr-panel-body-fill {
+    @apply min-h-0 flex-1;
+  }
+
+  /* Micro label + tabular readout */
+  .wr-label {
+    @apply text-[9px] font-semibold uppercase tracking-[0.16em] text-faint;
+  }
+  .wr-value {
+    @apply font-mono font-semibold tabular-nums tracking-tight text-ink;
+  }
+
+  /* Status chip */
+  .wr-chip {
+    @apply inline-flex items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-wide;
+    border-color: color-mix(in srgb, var(--wr-chip-color, var(--color-faint)) 40%, transparent);
+    background-color: color-mix(in srgb, var(--wr-chip-color, var(--color-faint)) 12%, transparent);
+    color: var(--wr-chip-color, var(--color-muted));
+  }
+  .wr-chip-dot {
+    @apply h-1.5 w-1.5 rounded-full;
+    background-color: currentColor;
+    box-shadow: 0 0 6px 1px currentColor;
+  }
+
+  /* Live status dot pulse */
+  .wr-pulse { animation: wr-pulse 1.8s ease-in-out infinite; }
+
+  /* Bipolar sentiment / bias bar (centered at 0) */
+  .wr-bias-track {
+    @apply relative h-1.5 w-full overflow-hidden rounded-full;
+    background-color: color-mix(in srgb, var(--color-faint) 22%, transparent);
+  }
+  .wr-bias-mid {
+    @apply absolute top-0 h-full w-px;
+    left: 50%;
+    background-color: color-mix(in srgb, var(--color-ink) 35%, transparent);
+  }
+  .wr-bias-fill {
+    @apply absolute top-0 h-full rounded-full;
+  }
+
+  /* Value flash on update */
+  .wr-flash-on { animation: wr-flash 700ms ease-out; }
+
+  /* Scanline sweep highlight for "streaming" panels */
+  .wr-stream::after {
+    content: "";
+    @apply pointer-events-none absolute inset-y-0 left-0 w-1/4;
+    background: linear-gradient(90deg, transparent, rgba(124, 147, 255, 0.06), transparent);
+    animation: wr-sweep 2.4s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .wr-pulse,
+    .wr-flash-on,
+    .wr-stream::after { animation: none !important; }
+  }
+
+  /* ── Landing page ─────────────────────────────────────────────────────── */
+  .landing-page {
+    @apply relative overflow-x-hidden;
+  }
+
+  .landing-hero-bg {
+    @apply pointer-events-none absolute inset-0 -z-10 overflow-hidden;
+  }
+
+  .landing-grid {
+    position: absolute;
+    inset: -20%;
+    background-image:
+      linear-gradient(rgba(59, 130, 246, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(59, 130, 246, 0.06) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, black 20%, transparent 75%);
+    animation: landing-grid-drift 28s linear infinite;
+  }
+
+  .light .landing-grid {
+    background-image:
+      linear-gradient(rgba(59, 130, 246, 0.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(59, 130, 246, 0.08) 1px, transparent 1px);
+  }
+
+  .landing-orb {
+    @apply absolute rounded-full blur-3xl;
+    animation: landing-float 9s ease-in-out infinite;
+  }
+
+  .landing-orb-accent {
+    background: radial-gradient(circle, rgba(59, 130, 246, 0.35) 0%, transparent 70%);
+  }
+
+  .landing-orb-world {
+    background: radial-gradient(circle, rgba(16, 185, 129, 0.28) 0%, transparent 70%);
+    animation-delay: -3s;
+    animation-duration: 11s;
+  }
+
+  .landing-orb-violet {
+    background: radial-gradient(circle, rgba(139, 92, 246, 0.2) 0%, transparent 70%);
+    animation-delay: -5s;
+    animation-duration: 13s;
+  }
+
+  .landing-badge {
+    @apply relative overflow-hidden;
+    animation: landing-badge-pulse 3s ease-in-out infinite;
+  }
+
+  .landing-badge::after {
+    content: "";
+    @apply absolute inset-0 -translate-x-full;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(59, 130, 246, 0.15),
+      transparent
+    );
+    animation: landing-shimmer 4s ease-in-out infinite;
+  }
+
+  .landing-title-gradient {
+    background: linear-gradient(
+      135deg,
+      var(--color-ink) 0%,
+      var(--color-ink) 40%,
+      #60a5fa 70%,
+      #34d399 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .landing-btn-primary {
+    @apply relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-xl
+           border border-transparent bg-accent px-6 py-3 text-sm font-semibold text-white
+           transition-all duration-300;
+    box-shadow: 0 10px 15px -3px rgba(59, 130, 246, 0.2);
+  }
+
+  .landing-btn-primary:hover {
+    @apply -translate-y-0.5 bg-blue-500;
+    box-shadow: 0 20px 25px -5px rgba(59, 130, 246, 0.3);
+  }
+
+  .landing-btn-primary::before {
+    content: "";
+    @apply absolute inset-0 -translate-x-full skew-x-12;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.22),
+      transparent
+    );
+    transition: transform 0.6s ease;
+  }
+
+  .landing-btn-primary:hover::before {
+    transform: translateX(200%) skewX(-12deg);
+  }
+
+  .landing-btn-secondary {
+    @apply relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-xl
+           border border-line bg-surface px-6 py-3 text-sm font-semibold text-ink
+           backdrop-blur transition-all duration-300;
+  }
+
+  .landing-btn-secondary:hover {
+    @apply -translate-y-0.5 bg-elevated;
+    border-color: rgba(16, 185, 129, 0.5);
+    box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.1);
+  }
+
+  .landing-stat {
+    @apply relative rounded-2xl border p-4 backdrop-blur transition-all duration-300;
+    border-color: color-mix(in srgb, var(--color-line) 80%, transparent);
+    background-color: color-mix(in srgb, var(--color-surface) 60%, transparent);
+  }
+
+  .landing-stat:hover {
+    @apply -translate-y-1 bg-elevated;
+    border-color: color-mix(in srgb, #3b82f6 30%, var(--color-line));
+    box-shadow: 0 10px 15px -3px rgba(59, 130, 246, 0.05);
+  }
+
+  .landing-card {
+    @apply relative overflow-hidden rounded-2xl border border-line p-6 backdrop-blur
+           transition-all duration-500;
+    background-color: color-mix(in srgb, var(--color-surface) 80%, transparent);
+  }
+
+  .landing-card::before {
+    content: "";
+    @apply absolute inset-0 opacity-0 transition-opacity duration-500;
+    background: radial-gradient(
+      600px circle at var(--mouse-x, 50%) var(--mouse-y, 50%),
+      rgba(59, 130, 246, 0.08),
+      transparent 40%
+    );
+  }
+
+  .landing-card:hover::before {
+    @apply opacity-100;
+  }
+
+  .landing-card:hover {
+    @apply -translate-y-1.5;
+    border-color: color-mix(in srgb, #3b82f6 35%, var(--color-line));
+    box-shadow: 0 20px 25px -5px rgba(59, 130, 246, 0.05);
+  }
+
+  .landing-card-icon {
+    @apply flex h-11 w-11 items-center justify-center rounded-xl border border-line
+           bg-elevated transition-all duration-300;
+  }
+
+  .landing-card:hover .landing-card-icon {
+    @apply scale-110;
+    border-color: color-mix(in srgb, #3b82f6 40%, var(--color-line));
+    background-color: color-mix(in srgb, #3b82f6 10%, transparent);
+  }
+
+  .landing-card:hover .landing-card-icon svg {
+    @apply text-accent;
+  }
+
+  .landing-pipeline-step {
+    @apply relative flex flex-col items-center gap-2 rounded-xl border border-line
+           px-3 py-4 text-center backdrop-blur transition-all duration-500;
+    background-color: color-mix(in srgb, var(--color-surface) 70%, transparent);
+  }
+
+  .landing-pipeline-step:hover {
+    @apply -translate-y-1 bg-elevated;
+    border-color: color-mix(in srgb, #3b82f6 40%, var(--color-line));
+    box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.1);
+  }
+
+  .landing-pipeline-connector {
+    @apply hidden h-px flex-1 bg-gradient-to-r from-transparent via-line to-transparent
+           md:block;
+  }
+
+  .landing-cta {
+    @apply relative overflow-hidden rounded-3xl border border-line p-10 text-center
+           backdrop-blur sm:p-14;
+    background-color: color-mix(in srgb, var(--color-surface) 80%, transparent);
+  }
+
+  .landing-cta-glow {
+    @apply pointer-events-none absolute inset-0;
+    background: radial-gradient(
+      ellipse 80% 60% at 50% 100%,
+      rgba(59, 130, 246, 0.12),
+      transparent 60%
+    );
+  }
+
+  /* Scroll reveal */
+  .scroll-reveal {
+    @apply transition-all duration-700 ease-out;
+    transition-property: opacity, transform, filter;
+  }
+
+  .scroll-reveal-from-up {
+    @apply translate-y-10 opacity-0;
+  }
+
+  .scroll-reveal-from-down {
+    @apply -translate-y-10 opacity-0;
+  }
+
+  .scroll-reveal-from-left {
+    @apply translate-x-10 opacity-0;
+  }
+
+  .scroll-reveal-from-right {
+    @apply -translate-x-10 opacity-0;
+  }
+
+  .scroll-reveal-from-none {
+    @apply opacity-0;
+  }
+
+  .scroll-reveal-visible {
+    @apply translate-x-0 translate-y-0 opacity-100;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .landing-grid,
+    .landing-orb,
+    .landing-badge,
+    .landing-badge::after,
+    .scroll-reveal {
+      animation: none !important;
+      transition: none !important;
+    }
+    .scroll-reveal-from-up,
+    .scroll-reveal-from-down,
+    .scroll-reveal-from-left,
+    .scroll-reveal-from-right,
+    .scroll-reveal-from-none {
+      @apply translate-x-0 translate-y-0 opacity-100;
+    }
+  }
+}
+
+@keyframes wr-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.82); }
+}
+
+@keyframes landing-float {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(12px, -18px) scale(1.04);
+  }
+  66% {
+    transform: translate(-8px, 10px) scale(0.98);
+  }
+}
+
+@keyframes landing-grid-drift {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 48px 48px;
+  }
+}
+
+@keyframes landing-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  50%,
+  100% {
+    transform: translateX(200%);
+  }
+}
+
+@keyframes landing-badge-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+  }
+  50% {
+    box-shadow: 0 0 24px 2px rgba(59, 130, 246, 0.12);
+  }
+}

@@ -1,0 +1,44 @@
+ECONITH
+BÁO CÁO ĐỀ TÀI KHOA HỌC KỸ THUẬT
+1. TÓM TẮT ĐỀ TÀI
+1.1. Mục tiêu
+1.2. Đóng góp
+1.3. Phạm vi
+2. TỔNG QUAN
+2.1. Bối cảnh
+2.2. Vấn đề và khoảng trống
+2.3. Lý do xây dựng ECONITH
+3. VẤN ĐỀ NGHIÊN CỨU
+3.1. Phát biểu vấn đề
+3.2. Hạn chế phương pháp hiện có
+3.3. Khoảng trống nghiên cứu
+3.4. Câu hỏi nghiên cứu (RQ1–RQ4)
+3.5. Giả thuyết khoa học (H1–H4)
+3.6. Mục tiêu nghiên cứu
+4. KIẾN TRÚC HỆ THỐNG
+4.1. Kiến trúc tổng thể
+4.2. ECONITH World
+4.3. ECONITH Quant
+4.4. Cơ chế World ↔ Quant
+4.5. Luồng hoạt động
+5. PHƯƠNG PHÁP NGHIÊN CỨU
+5.1. Thiết kế thí nghiệm
+5.2. Quy trình thực nghiệm
+5.3. Metrics
+5.4. Dataset
+5.5. Calibration & Reproducibility
+6. KẾT QUẢ THỰC NGHIỆM VÀ ĐÁNH GIÁ
+6.1. Kết quả RQ1
+6.2. Kết quả RQ2
+6.3. Kết quả RQ3
+3/3 scenario tạo khác biệt đo được trên portfolio volatility.
+6.4. Kết quả RQ4
+6.5. Phân tích kết quả
+6.6. Thảo luận
+7. TÍNH MỚI VÀ ĐÓNG GÓP
+8. ỨNG DỤNG VÀ GIỚI HẠN
+8.1. Ứng dụng
+8.2. Giới hạn
+9. HƯỚNG PHÁT TRIỂN
+10. KẾT LUẬN
+CHARS=14263 TABLES=9 PARAS=131 ~pages~7.1

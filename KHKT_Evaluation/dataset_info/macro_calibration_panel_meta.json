@@ -1,0 +1,26 @@
+{
+  "source_features": "F:\\econith\\datasets\\features\\BTCUSDT_features.parquet",
+  "max_rows": 50000,
+  "stride": 3,
+  "source": "F:\\econith\\datasets\\features\\BTCUSDT_features.parquet",
+  "rows": 1012,
+  "columns": [
+    "fed_funds_effective_rate",
+    "treasury_10y_yield",
+    "gdp_growth",
+    "consumer_price_index_yoy"
+  ],
+  "means": {
+    "fed_funds_effective_rate": 0.037642857142857145,
+    "treasury_10y_yield": 0.04034160079051383,
+    "gdp_growth": 0.02475,
+    "consumer_price_index_yoy": 0.031318758635259424
+  },
+  "stds": {
+    "fed_funds_effective_rate": 0.013531561745242346,
+    "treasury_10y_yield": 0.004753527773267415,
+    "gdp_growth": 0.014540890619215867,
+    "consumer_price_index_yoy": 0.005530925241445867
+  },
+  "fabricated": false
+}

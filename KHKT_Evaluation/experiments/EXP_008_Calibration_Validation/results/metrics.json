@@ -1,0 +1,61 @@
+{
+  "experiment": "EXP_008",
+  "status": "completed",
+  "rq": "RQ2",
+  "fabricated": false,
+  "upstream_EXP_002_summary": {
+    "features_compared": 4,
+    "calibrated_wins_moment_l1": 4,
+    "default_wins_moment_l1": 0
+  },
+  "distribution_comparisons": [
+    {
+      "feature": "interest_rate",
+      "default_moment_l1": 0.7312015153128252,
+      "calibrated_moment_l1": 0.4978073061579889,
+      "default_abs_mean_error": 0.007848542827520476,
+      "calibrated_abs_mean_error": 0.0019822223610808584,
+      "default_abs_variance_error": 0.00011211398830478244,
+      "calibrated_abs_variance_error": 0.00012320912922659518,
+      "calibrated_better": true
+    },
+    {
+      "feature": "yield_10y",
+      "default_moment_l1": 0.570522668371435,
+      "calibrated_moment_l1": 0.3543577192899029,
+      "default_abs_mean_error": 0.0004990516717550686,
+      "calibrated_abs_mean_error": 0.0006343792518592392,
+      "default_abs_variance_error": 0.00013972802159926102,
+      "calibrated_abs_variance_error": 1.3311634864809453e-05,
+      "calibrated_better": true
+    },
+    {
+      "feature": "gdp_growth",
+      "default_moment_l1": 0.04807526897271116,
+      "calibrated_moment_l1": 0.10796674163203533,
+      "default_abs_mean_error": 0.0017397355172698477,
+      "calibrated_abs_mean_error": 0.0022279161348262057,
+      "default_abs_variance_error": 4.610323459048766e-05,
+      "calibrated_abs_variance_error": 8.082205286886066e-05,
+      "calibrated_better": false
+    },
+    {
+      "feature": "inflation_cpi",
+      "default_moment_l1": 1.431538305306392,
+      "calibrated_moment_l1": 0.6536041014178354,
+      "default_abs_mean_error": 0.010969066538079802,
+      "calibrated_abs_mean_error": 0.0005745473115994978,
+      "default_abs_variance_error": 0.00012506761769961374,
+      "calibrated_abs_variance_error": 1.60504278146365e-05,
+      "calibrated_better": true
+    }
+  ],
+  "summary": {
+    "features_plotted": 4,
+    "calibrated_wins": 3
+  },
+  "limitations": [
+    "Single-feature OU+jump paths — not full multi-agent World dynamics.",
+    "Distribution distance reported via moment L1 (mean/std/skew), not full KS/Wasserstein (optional TODO)."
+  ]
+}

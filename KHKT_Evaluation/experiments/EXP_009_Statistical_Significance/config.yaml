@@ -1,0 +1,14 @@
+# EXP_009 — DM / bootstrap / 5-repeat fingerprints (cùng protocol RQ1 chính)
+id: EXP_009
+rq: RQ4
+seed: 42
+protocol: oos_beta
+train_frac: 0.70
+bootstrap_n: 200
+block_size: 500
+repeats: 5
+max_rows: 25000
+stride: 5
+hist_vol_window: 60
+fwd_vol_horizon: 60
+macro_sample_every: 10

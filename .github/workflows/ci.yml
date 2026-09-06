@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+      - name: First-party tests
+        run: python -m pytest tests/ -q --tb=short
+      - name: Deploy gate unit smoke
+        run: python -c "from training.deploy_gate import evaluate_gate; ok, _ = evaluate_gate({'rows': 100, 'annualized_sharpe': 0.1, 'max_drawdown': 0.1}); assert ok"
+      - name: Paper soak checklist (env defaults)
+        run: python -m scripts.paper_soak_check
+      - name: Calibrate world smoke (synthetic fallback)
+        run: python scripts/calibrate_world.py --output /tmp/stochastic_coeffs.json

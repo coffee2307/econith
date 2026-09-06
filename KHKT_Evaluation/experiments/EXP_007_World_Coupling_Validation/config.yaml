@@ -1,0 +1,12 @@
+# EXP_007 — World coupling validation across scenarios (RQ3)
+id: EXP_007
+rq: RQ3
+seed: 42
+max_rows: 25000
+stride: 5
+severity: 0.7
+dd_freeze_threshold: 0.03
+scenarios:
+  - interest_rate
+  - inflation
+  - trade

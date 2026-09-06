@@ -1,0 +1,182 @@
+{
+  "runs": 62,
+  "items": [
+    {
+      "question": "Nếu tôi tăng lãi suất ở Brazil, điều gì sẽ xảy ra với tăng trưởng GDP và lạm phát ở Đức và Anh?",
+      "mutations": [
+        {
+          "country": "BRA",
+          "field": "interest_rate",
+          "value": 0.0583,
+          "direction": "up"
+        }
+      ],
+      "top_deltas": {
+        "DEU.interest_rate": 0.0033,
+        "CHN.interest_rate": -0.0022,
+        "CHN.gdp_growth": -0.0019,
+        "SAU.interest_rate": -0.0019
+      },
+      "assessment": "Kết quả thực nghiệm cho thấy việc tăng lãi suất ở Brazil đã gây ra sự thay đổi nhỏ trong lãi suất của Đức và ảnh hưởng đến tăng trưởng GDP của Trung Quốc, trong khi lạm phát ở Đức và Anh không thay đổi đáng kể so với dự kiến.",
+      "next_question": "Nếu tôi áp dụng chính sách tiền tệ nới lỏng ở Nhật Bản, điều gì sẽ xảy ra với xuất khẩu và nhập khẩu của Ấn Độ và ảnh hưởng đến cán cân thương mại của họ?",
+      "fingerprint": "BRA.interest_rate/up",
+      "signal_score": 0.3231,
+      "novelty": 1.0,
+      "chapter": "spillover"
+    },
+    {
+      "question": "Nếu tôi tăng lãi suất ở Ả Rập Xê Út, điều gì sẽ xảy ra với tăng trưởng GDP và lạm phát ở Đức và Ấn Độ?",
+      "mutations": [
+        {
+          "country": "SAU",
+          "field": "interest_rate",
+          "value": 0.065,
+          "direction": "up"
+        }
+      ],
+      "top_deltas": {
+        "USA.interest_rate": 0.0071,
+        "CHN.gdp_growth": -0.0024,
+        "JPN.interest_rate": -0.0017,
+        "GBR.interest_rate": -0.0017
+      },
+      "assessment": "Kết quả cho thấy việc tăng lãi suất ở Ả Rập Xê Út đã gây ra hiệu ứng lan tỏa đến các nước khác, với lãi suất ở Mỹ tăng và tăng trưởng GDP ở Trung Quốc giảm, trong khi lãi suất ở Đức và Ấn Độ giảm nhẹ, điều này không hoàn toàn符合 kỳ vọng về mức độ ảnh hưởng.",
+      "next_question": "Nếu tôi giảm thuế nhập khẩu ở Nhật Bản, điều gì sẽ xảy ra với xuất khẩu của Trung Quốc và tăng trưởng kinh tế của Ấn Độ?",
+      "fingerprint": "SAU.interest_rate/up",
+      "signal_score": 0.3497,
+      "novelty": 1.0,
+      "chapter": "reversal"
+    },
+    {
+      "question": "Nếu tôi giảm lãi suất ở Đức về mức 0.055, điều gì sẽ xảy ra với tăng trưởng GDP và lạm phát ở Pháp và Anh?",
+      "mutations": [
+        {
+          "country": "DEU",
+          "field": "interest_rate",
+          "value": 0.055,
+          "direction": "down"
+        }
+      ],
+      "top_deltas": {
+        "USA.gdp_growth": -0.0018,
+        "CHN.gdp_growth": -0.0018,
+        "VNM.gdp_growth": -0.0017,
+        "JPN.gdp_growth": -0.0017
+      },
+      "assessment": "Kết quả giảm lãi suất ở Đức đã dẫn đến giảm tăng trưởng GDP ở nhiều nước, bao gồm cả Mỹ, Trung Quốc và Nhật Bản, nhưng không có tác động đáng kể đến lạm phát ở Pháp và Anh như dự kiến. Điều này cho thấy chính sách tiền tệ của Đức có thể có tác động lan tỏa đến các nền kinh tế khác.",
+      "next_question": "Nếu tôi tăng thuế nhập khẩu ở Ấn Độ lên mức 15%, điều gì sẽ xảy ra với tăng trưởng GDP và lạm phát ở Nhật Bản và Hàn Quốc?",
+      "fingerprint": "DEU.interest_rate/down",
+      "signal_score": 0.3126,
+      "novelty": 0.5,
+      "chapter": "monetary"
+    },
+    {
+      "question": "Nếu tôi tăng thuế nhập khẩu ở Trung Quốc lên mức 0.05, điều gì sẽ xảy ra với tăng trưởng GDP và lạm phát ở Ấn Độ và Nhật Bản?",
+      "mutations": [
+        {
+          "country": "CHN",
+          "field": "tax",
+          "value": 0.05,
+          "direction": "up"
+        }
+      ],
+      "top_deltas": {
+        "CHN.tax": 0.0379,
+        "USA.gdp_growth": -0.0064,
+        "JPN.gdp_growth": -0.0046,
+        "IND.gdp_growth": -0.0046
+      },
+      "assessment": "Kết quả cho thấy việc tăng thuế nhập khẩu ở Trung Quốc lên mức 0.03790 đã dẫn đến giảm tăng trưởng GDP ở các nước như Mỹ, Nhật Bản, Ấn Độ và Pháp, trong khi lạm phát không có thay đổi đáng kể, điều này không hoàn toàn phù hợp với kỳ vọng rằng tăng thuế nhập khẩu sẽ chỉ ảnh hưởng đến Trung Quốc.",
+      "next_question": "Nếu tôi giảm lãi suất ở Đức xuống mức 0.02, điều gì sẽ xảy ra với tăng trưởng GDP và lạm phát ở Ấn Độ và Nhật Bản, và liệu sự thay đổi này có tác động gì đến thương mại giữa châu Âu và châu Á?",
+      "fingerprint": "CHN.tax/up",
+      "signal_score": 0.5653,
+      "novelty": 1.0,
+      "chapter": "fiscal_trade"
+    },
+    {
+      "question": "Nếu tôi tăng lãi suất ở Anh, điều gì sẽ xảy ra với tăng trưởng GDP và lạm phát ở Pháp và Ấn Độ?",
+      "mutations": [
+        {
+          "country": "GBR",
+          "field": "interest_rate",
+          "value": 0.0436,
+          "direction": "up"
+        }
+      ],
+      "top_deltas": {
+        "IND.interest_rate": 0.003,
+        "CHN.interest_rate": -0.0019,
+        "CHN.gdp_growth": -0.0018,
+        "GBR.interest_rate": -0.0016
+      },
+      "assessment": "Kết quả cho thấy khi tăng lãi suất ở Anh, lãi suất ở Ấn Độ tăng 0,00300, trong khi lãi suất ở Trung Quốc giảm 0,00190, và tăng trưởng GDP ở Trung Quốc cũng giảm 0,00180, điều này không hoàn toàn phù hợp với kỳ vọng về ảnh hưởng trực tiếp đến tăng trưởng GDP và lạm phát ở Pháp và Ấn Độ.",
+      "next_question": "Nếu tôi giảm thuế nhập khẩu ở Nhật Bản, điều gì sẽ xảy ra với xuất khẩu và nhập khẩu của Đức và ảnh hưởng đến cán cân thương mại của họ?",
+      "fingerprint": "GBR.interest_rate/up",
+      "signal_score": 0.321,
+      "novelty": 1.0,
+      "chapter": "spillover"
+    },
+    {
+      "question": "Nếu tôi giảm thuế nhập khẩu ở Ấn Độ, điều gì sẽ xảy ra với tăng trưởng GDP và lạm phát ở Mỹ và Pháp?",
+      "mutations": [
+        {
+          "country": "IND",
+          "field": "tax",
+          "value": 0.0,
+          "direction": "flat"
+        }
+      ],
+      "top_deltas": {
+        "BRA.interest_rate": 0.0055,
+        "SAU.interest_rate": -0.0045,
+        "USA.gdp_growth": -0.0002,
+        "DEU.gdp_growth": -0.0002
+      },
+      "assessment": "Khi giảm thuế nhập khẩu ở Ấn Độ, tăng trưởng GDP của Mỹ và Pháp đã giảm nhẹ, trong khi lãi suất của Brazil tăng và lãi suất của Ả Rập Xê Út giảm, cho thấy có sự tác động lan truyền trên toàn cầu.",
+      "next_question": "Nếu tôi áp dụng một chính sách tiền tệ nới lỏng ở Nhật Bản, điều gì sẽ xảy ra với lạm phát và tăng trưởng kinh tế ở Đức và Ấn Độ?",
+      "fingerprint": "IND.tax/flat",
+      "signal_score": 0.3385,
+      "novelty": 0.5,
+      "chapter": "reversal"
+    },
+    {
+      "question": "Nếu tôi tăng lãi suất ở Pháp, điều gì sẽ xảy ra với lạm phát và tăng trưởng GDP của Đức và Ấn Độ?",
+      "mutations": [
+        {
+          "country": "FRA",
+          "field": "interest_rate",
+          "value": 0.05045,
+          "direction": "up"
+        }
+      ],
+      "top_deltas": {
+        "CHN.interest_rate": -0.0033,
+        "CHN.gdp_growth": -0.0032,
+        "USA.interest_rate": 0.0029,
+        "VNM.gdp_growth": -0.0022
+      },
+      "assessment": "Tăng lãi suất ở Pháp không có tác động đáng kể đến lạm phát và tăng trưởng GDP của Đức và Ấn Độ, tuy nhiên có thể gây ra một số hiệu ứng gián tiếp.",
+      "next_question": "Nếu tôi giảm thuế xuất khẩu cho Nhật Bản, điều gì sẽ xảy ra với giá trị xuất khẩu của Hoa Kỳ và tỷ lệ thất nghiệp của Mexico?",
+      "fingerprint": "FRA.interest_rate/up",
+      "signal_score": 0.3231,
+      "novelty": 1.0,
+      "chapter": "monetary"
+    },
+    {
+      "question": "If I apply «A sudden and unexpected 50-basis-point interest rate hike in JPN(Japan) will trigger a global risk-off event, causing a sharp decline in GBR(United Kingdom)'s GDP growth to -1.5% YoY within the next quarter due to tightening fin",
+      "mutations": [],
+      "top_deltas": {
+        "CHN.interest_rate": -0.078,
+        "VNM.interest_rate": -0.0695,
+        "USA.gdp_growth": 0.0312,
+        "IND.gdp_growth": 0.028
+      },
+      "assessment": "Sau sự kiện tăng lãi suất 50 điểm cơ sở bất ngờ và đột ngột tại JPN, sẽ xảy ra một sự kiện rủi ro toàn cầu, dẫn đến suy giảm GDP của GBR xuống -1,5% so với cùng kỳ trong quý tới do điều kiện tài chính được chặt chẽ. Di chuyển mạnh nhất là CHN.interest_rate -0,0780. Hệ thống đã phản ứng; tín hiệu có thể sử dụng cho bước",
+      "next_question": "Nếu tôi đảo ngược một phần lãi suất trong CHN, thì điều gì xảy ra với tăng trưởng và thất nghiệp?",
+      "fingerprint": "(none)",
+      "signal_score": 0.846,
+      "novelty": 1.0,
+      "chapter": "fiscal_trade"
+    }
+  ]
+}

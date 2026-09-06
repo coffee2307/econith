@@ -1,0 +1,9 @@
+include LICENSE
+include README.md
+recursive-include econith *.py
+recursive-include econith/templates/ *.j2 *.ipynb
+include econith/exchange/binance_leverage_tiers.json
+include econith/rpc/api_server/ui/fallback_file.html
+include econith/rpc/api_server/ui/favicon.ico
+
+prune tests

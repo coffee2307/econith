@@ -1,0 +1,223 @@
+{
+  "experiment": "EXP_004",
+  "status": "completed",
+  "rq": "RQ1_control",
+  "fabricated": false,
+  "dataset": {
+    "path": "F:\\econith\\datasets\\features\\BTCUSDT_features.parquet",
+    "rows": 30000,
+    "columns": [
+      "symbol",
+      "ts_ms",
+      "price",
+      "bid_sz",
+      "ask_sz",
+      "trade_qty",
+      "indicator_obi",
+      "indicator_volume_delta",
+      "macro_avg_hourly_earnings",
+      "macro_avg_weekly_hours",
+      "macro_breakeven_inflation_10y",
+      "macro_breakeven_inflation_5y",
+      "macro_building_permits",
+      "macro_capacity_utilization_total",
+      "macro_case_shiller_home",
+      "macro_cny_usd",
+      "macro_consumer_price_index",
+      "macro_consumer_sentiment",
+      "macro_core_cpi",
+      "macro_core_pce",
+      "macro_durable_goods_orders",
+      "macro_fed_balance_sheet",
+      "macro_fed_funds_daily",
+      "macro_fed_funds_effective_rate",
+      "macro_housing_starts",
+      "macro_hy_oas_spread",
+      "macro_ig_oas_spread",
+      "macro_industrial_production",
+      "macro_initial_jobless_claims",
+      "macro_jpy_usd",
+      "macro_m2_money_supply",
+      "macro_monetary_base",
+      "macro_nominal_gdp",
+      "macro_nonfarm_payrolls",
+      "macro_overnight_rrp",
+      "macro_pce_price_index",
+      "macro_ppi_all_commodities",
+      "macro_real_gdp",
+      "macro_real_gdp_growth",
+      "macro_retail_sales",
+      "macro_sofr",
+      "macro_ted_spread",
+      "macro_treasury_10y_yield",
+      "macro_treasury_2y_yield",
+      "macro_treasury_30y_yield",
+      "macro_treasury_3m_yield",
+      "macro_treasury_general_account",
+      "macro_unemployment_rate",
+      "macro_unemployment_u6",
+      "macro_usd_broad_index",
+      "macro_usd_eur",
+      "macro_vix",
+      "macro_wb_broad_money_pct_gdp",
+      "macro_wb_current_account_pct_gdp",
+      "macro_wb_debt_to_gdp",
+      "macro_wb_fdi_pct_gdp",
+      "macro_wb_foreign_reserves_usd",
+      "macro_wb_gdp_growth_pct",
+      "macro_wb_gdp_per_capita_growth",
+      "macro_wb_inflation_cpi_pct",
+      "macro_wb_trade_balance_pct_gdp",
+      "macro_wb_unemployment_ilo",
+      "macro_yield_spread_10y_2y",
+      "tradfi_COPPER",
+      "tradfi_DXY",
+      "tradfi_EURUSD",
+      "tradfi_GBPUSD",
+      "tradfi_GOLD",
+      "tradfi_NASDAQ",
+      "tradfi_NATGAS",
+      "tradfi_OIL",
+      "tradfi_SILVER",
+      "tradfi_SPX500",
+      "tradfi_US10Y",
+      "tradfi_USDCNH",
+      "tradfi_USDJPY",
+      "tradfi_VIX"
+    ],
+    "ts_min": 1650020400000,
+    "ts_max": 1785020400000,
+    "fabricated": false
+  },
+  "protocol": "oos_beta",
+  "beta": 0.0013260131001123223,
+  "lag": 0,
+  "fingerprint": "1cb065b9d2b26c5c",
+  "metrics": {
+    "B0": {
+      "label": "B0_market_only",
+      "n": 8940,
+      "mae": 0.001578296621397314,
+      "rmse": 0.0021302289087254856,
+      "mape": 0.32474252535472803,
+      "directional_accuracy": 0.34500503412014766
+    },
+    "E1": {
+      "label": "E1_world_coupled",
+      "n": 8940,
+      "mae": 0.001579293877644381,
+      "rmse": 0.0021312679248237086,
+      "mape": 0.32476765115030876,
+      "directional_accuracy": 0.345452511466607
+    },
+    "C1": {
+      "label": "C1_random_control",
+      "n": 8940,
+      "mae": 0.0015781778989963358,
+      "rmse": 0.0021303952932312555,
+      "mape": 0.3246790647694333,
+      "directional_accuracy": 0.3711824588880188
+    }
+  },
+  "comparison": {
+    "e1_better_mae_than_b0": false,
+    "e1_better_mae_than_c1": false,
+    "e1_better_rmse_than_c1": false,
+    "passes_random_control": false
+  },
+  "aux": {
+    "delta_vol_mae": {
+      "B0": 0.00013396513509720428,
+      "E1": 0.00013397656481337582,
+      "C1": 0.0001372353825686427
+    },
+    "regime_directional_accuracy": {
+      "B0": 0.34500503412014766,
+      "E1": 0.345452511466607,
+      "C1": 0.3711824588880188
+    }
+  },
+  "protocol_legacy": {
+    "formula": "E1 = B0 * (vol_mult / mean); C1 = B0 * shuffle(scale)",
+    "metrics_full_panel": {
+      "B0": {
+        "label": "B0_market_only",
+        "n": 29881,
+        "mae": 0.002214617952386802,
+        "rmse": 0.0030832288463932063,
+        "mape": 0.39993230822881826,
+        "directional_accuracy": 0.34421017402945114
+      },
+      "E1": {
+        "label": "E1_world_coupled",
+        "n": 29881,
+        "mae": 0.0022184285394762212,
+        "rmse": 0.003091210900893012,
+        "mape": 0.40028612734971597,
+        "directional_accuracy": 0.34471218206157966
+      },
+      "C1": {
+        "label": "C1_random_control",
+        "n": 29881,
+        "mae": 0.002215403579029281,
+        "rmse": 0.0030852548482516603,
+        "mape": 0.40003864151887497,
+        "directional_accuracy": 0.41639892904953146
+      }
+    },
+    "comparison_full_panel": {
+      "mae_improvement_pct_e1_vs_b0": -0.17206521266172561,
+      "rmse_improvement_pct_e1_vs_b0": -0.2588862162840533,
+      "e1_better_mae_than_b0": false,
+      "e1_better_mae_than_c1": false,
+      "passes_random_control": false,
+      "directional_accuracy_delta_e1_b0": 0.0005020080321285203
+    },
+    "metrics_test_mask": {
+      "B0": {
+        "label": "B0_market_only",
+        "n": 8940,
+        "mae": 0.001578296621397314,
+        "rmse": 0.0021302289087254856,
+        "mape": 0.32474252535472803,
+        "directional_accuracy": 0.34500503412014766
+      },
+      "E1": {
+        "label": "E1_world_coupled",
+        "n": 8940,
+        "mae": 0.001582126043438483,
+        "rmse": 0.0021344448222519355,
+        "mape": 0.32492697929954245,
+        "directional_accuracy": 0.3452287727933773
+      },
+      "C1": {
+        "label": "C1_random_control",
+        "n": 8940,
+        "mae": 0.0015787535343507928,
+        "rmse": 0.0021321883567894393,
+        "mape": 0.32480764675574925,
+        "directional_accuracy": 0.414140284148115
+      }
+    },
+    "comparison_test_mask": {
+      "mae_improvement_pct_e1_vs_b0": -0.24263006010738028,
+      "rmse_improvement_pct_e1_vs_b0": -0.19790894345586071,
+      "e1_better_mae_than_b0": false,
+      "e1_better_mae_than_c1": false,
+      "passes_random_control": false,
+      "directional_accuracy_delta_e1_b0": 0.00022373867322966756
+    }
+  },
+  "vol_multiplier_stats": {
+    "mean": 1.8716279999999998,
+    "std": 0.01968146664589134,
+    "min": 1.8463,
+    "max": 1.9969,
+    "unique_approx": 510
+  },
+  "notes": [
+    "C1 shuffles lagged (vol_mult-1) after beta is fit on train (fair control).",
+    "If E1 is not better than C1, structured World timing is not helping beyond noise.",
+    "protocol_legacy retains multiplicative baseline for historical contrast."
+  ]
+}

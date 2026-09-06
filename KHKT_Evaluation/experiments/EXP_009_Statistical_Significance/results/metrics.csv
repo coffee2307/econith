@@ -1,0 +1,2 @@
+observed_mae_diff,ci95_low,ci95_high,p_share_diff_ge_0,dm_stat,dm_p_two_sided,reproducible_rate,mae_e1_variance,beta,lag
+-3.0297277546498247e-07,-6.125563194428647e-07,-5.842653760469078e-08,0.01,-1.534402189388721,0.12493073932935106,1.0,0.0,-0.0005291059078326821,0

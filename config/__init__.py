@@ -1,0 +1,1 @@
+"""ECONITH configuration package."""

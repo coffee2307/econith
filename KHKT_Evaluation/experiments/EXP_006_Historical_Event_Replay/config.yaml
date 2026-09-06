@@ -1,0 +1,9 @@
+# EXP_006 — Historical event replay (RQ1 event windows)
+id: EXP_006
+rq: RQ1
+seed: 42
+stride: 2
+hist_vol_window: 48
+fwd_vol_horizon: 48
+macro_sample_every: 5
+min_rows_per_event: 200

@@ -1,0 +1,2 @@
+case,vol_multiplier_Mt,order_flow_shock_Ot,Mt_delta_vs_off,Ot_delta_vs_off,off_portfolio_vol,on_portfolio_vol,vol_delta_vs_off,measurable_vs_off,shock_headline
+World_ON_no_shock,1.8859,-0.1376,0.8858999999999999,-0.1376,0.006163971646802055,0.010025084472594325,0.0038611128257922695,True,"Macro coupling: tension 3%, unrest 0.20 -> vol x1.89, OBI bias -0.14, liquidity drain 15%"

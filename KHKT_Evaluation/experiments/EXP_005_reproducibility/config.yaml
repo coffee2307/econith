@@ -1,0 +1,7 @@
+# EXP_005 — Reproducibility: lặp EXP_001 đúng cấu hình RQ1 chính (2 lần)
+id: EXP_005
+rq: reproducibility
+repeats: 2
+delegate_experiment: EXP_001
+# Đồng bộ bắt buộc với EXP_001 (RQ1 chính) — không override riêng
+use_exp001_config: true

@@ -1,0 +1,14 @@
+Experiment,Research_Question,Configuration,Metric,Result,Conclusion
+EXP_001,RQ1,B0,MAE,0.001578296621397314,False
+EXP_001,RQ1,E1,MAE,0.001579293877644381,False
+EXP_001,RQ1,C1,MAE,0.0015784398707533803,False
+EXP_001,RQ1,E1_vs_B0,MAE_improvement_pct,-0.0631856036151342,E1_better_than_B0=False
+EXP_006,RQ1,historical_events,e1_beats_b0_count,2,events_ok=4
+EXP_006,RQ1,historical_events,e1_beats_c1_count,3,random_control_windows
+EXP_002,RQ2,calibrated_vs_default,calibrated_wins_moment_l1,4,lower_moment_L1_is_better
+EXP_008,RQ2,calibrated_vs_default,calibrated_wins_moment_l1,3,lower_moment_L1_is_better
+EXP_003,RQ3,rate_hike_proxy,portfolio_vol_delta,0.004185397598703289,measurable=True
+EXP_007,RQ3,multi_scenario,scenarios_with_measurable_diff,3,total=3
+EXP_005,RQ4,repeat_EXP_001,reproducible,True,fingerprint_match
+EXP_009,RQ4,bootstrap+repeats,reproducible_rate,1.0,identical
+EXP_009,RQ1/RQ4,bootstrap,mae_e1_minus_b0,-3.0297277546498247e-07,"ci95=[-6.125563194428647e-07, -5.842653760469078e-08]"

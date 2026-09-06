@@ -1,0 +1,22 @@
+# ============================================================================
+#  ECONITH :: collectors  --  standalone VPS deployment dependencies
+# ----------------------------------------------------------------------------
+#  This is the ONLY requirements set needed to run the data collectors on a
+#  low-spec remote VPS. It contains ZERO machine-learning packages (no torch,
+#  no stable-baselines3, no transformers) so the footprint stays tiny.
+#
+#  Deploy:  copy the `collectors/` folder to the VPS, then:
+#     python -m venv .venv && . .venv/bin/activate
+#     pip install -r collectors/requirements.txt
+# ============================================================================
+
+# --- fast columnar IO (primary) ---------------------------------------------
+polars==1.9.0
+pyarrow==18.1.0
+
+# --- pandas fallback (SnapshotWriter degrades to this if polars is absent) ---
+pandas==2.2.3
+
+# --- networking -------------------------------------------------------------
+websockets==14.1          # crypto order-flow websocket streams
+httpx==0.28.1             # macro / tradfi REST polling

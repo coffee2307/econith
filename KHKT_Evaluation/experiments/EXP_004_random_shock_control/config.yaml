@@ -1,0 +1,9 @@
+# EXP_004 — Random shock control
+id: EXP_004
+rq: RQ1_control
+seed: 123
+max_rows: 30000
+stride: 5
+hist_vol_window: 60
+fwd_vol_horizon: 60
+macro_sample_every: 10

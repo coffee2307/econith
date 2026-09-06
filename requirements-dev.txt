@@ -1,0 +1,11 @@
+# ============================================================================
+#  ECONITH :: development / test dependencies
+#  pip install -r requirements-dev.txt
+# ============================================================================
+pytest==8.3.4
+pytest-asyncio==0.24.0
+
+# data libs used by the labeling / evaluation tests
+pandas==2.2.3
+pyarrow==18.1.0
+numpy==1.26.4

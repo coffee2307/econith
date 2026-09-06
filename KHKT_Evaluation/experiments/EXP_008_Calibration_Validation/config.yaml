@@ -1,0 +1,6 @@
+# EXP_008 — Calibration validation with distribution plots (RQ2)
+id: EXP_008
+rq: RQ2
+seed: 7
+n_steps: 2520
+n_paths: 12
