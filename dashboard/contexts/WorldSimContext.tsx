@@ -28,15 +28,12 @@ import {
 } from "@/lib/api";
 import type { MacroFeature } from "@/constants/macroFeatures";
 import { isSimNation } from "@/constants/simNations";
-import { LIVE_BACKEND_CODES } from "@/constants/liveWorld";
-import { tierOf as graphTierOf } from "@/constants/worldGraph";
+import { titanTierOf } from "@/constants/titanWorld";
 import type { SimEvent } from "@/lib/worldModel";
 import type { PolicyAgentLine } from "@/lib/worldAgentReactions";
 
 const MAX_VISIBLE = 60;
 const BACKEND_DEDUP_MS = 12_000;
-/** Live backend macros today — only these accept mutate/tariff. */
-const BACKEND_CODES = new Set<string>(LIVE_BACKEND_CODES);
 
 export interface WorldSim {
   countries: Record<string, CountryMacro>;
@@ -156,12 +153,13 @@ export function WorldSimProvider({ children }: { children: React.ReactNode }) {
         ...prev,
         [code]: { ...(prev[code] ?? {}), [feature.key]: uiValue },
       }));
-      if (!BACKEND_CODES.has(code)) {
-        // Topology-only nation: keep local draft, do not fake a cascade.
+      if (!(code in countries)) {
+        // Keep a local draft only while the backend state is unavailable.
         return;
       }
       const group = addrGroup(feature);
-      void mutateCountry(code, group, feature.field, native).then(() => {
+      void mutateCountry(code, group, feature.field, native).then((result) => {
+        if (!result?.legacy?.ok) return;
         setDraftOverrides((prev) => {
           const next = { ...prev };
           if (next[code]) {
@@ -194,12 +192,12 @@ export function WorldSimProvider({ children }: { children: React.ReactNode }) {
         ].slice(0, 12),
       );
     },
-    [locale, snapshot?.time?.sim_day],
+    [countries, locale, snapshot?.time?.sim_day],
   );
 
   const imposeTariff = useCallback(
     (src: string, dst: string, rate: number) => {
-      if (!BACKEND_CODES.has(src) || !BACKEND_CODES.has(dst)) return;
+      if (!(src in countries) || !(dst in countries)) return;
       void apiSetTariff(src, dst, rate);
       const now = Date.now();
       const pct = `${(rate * 100).toFixed(0)}%`;
@@ -223,7 +221,7 @@ export function WorldSimProvider({ children }: { children: React.ReactNode }) {
         ].slice(0, 12),
       );
     },
-    [locale, snapshot?.time?.sim_day],
+    [countries, locale, snapshot?.time?.sim_day],
   );
 
   const resetOverrides = useCallback((code: string) => {
@@ -242,14 +240,14 @@ export function WorldSimProvider({ children }: { children: React.ReactNode }) {
 
   const tierOf = useCallback((code: string): "hub" | "proxy" | null => {
     if (!isSimNation(code)) return null;
-    return graphTierOf(code);
+    return titanTierOf(code);
   }, []);
 
   const ensure = useCallback((_code: string) => {
     // No client-side node spawning — backend owns the live nation set.
   }, []);
 
-  const backendLive = useCallback((code: string) => BACKEND_CODES.has(code), []);
+  const backendLive = useCallback((code: string) => code in countries, [countries]);
 
   const value = useMemo<WorldSim>(
     () => ({

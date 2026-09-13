@@ -3,7 +3,7 @@ import {
   MACRO_FEATURES,
   MACRO_TABS,
 } from "@/constants/macroFeatures";
-import { ALL_NATION_CODES } from "@/constants/worldGraph";
+import { TITAN_HUB_CODES, TITAN_PROXY_CODES } from "@/constants/titanWorld";
 import type { Dictionary } from "@/lib/i18n/types";
 
 const featureLabels = Object.fromEntries(
@@ -13,7 +13,7 @@ const tabLabels = Object.fromEntries(
   MACRO_TABS.map((t) => [t.id, t.label]),
 );
 const countryNames = Object.fromEntries(
-  ALL_NATION_CODES.map((c) => [c, ISO3_TO_NAME[c] ?? c]),
+  [...TITAN_HUB_CODES, ...TITAN_PROXY_CODES].map((c) => [c, ISO3_TO_NAME[c] ?? c]),
 );
 
 export const en: Dictionary = {

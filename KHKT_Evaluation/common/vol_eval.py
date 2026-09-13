@@ -88,6 +88,14 @@ def _compare(m_b0: dict, m_e1: dict, m_c1: dict) -> dict[str, Any]:
 
     return {
         "mae_improvement_pct_e1_vs_b0": improv(m_b0["mae"], m_e1["mae"]),
+        "e1_better_rmse_than_b0": bool(m_e1["rmse"] < m_b0["rmse"]) if _ok(m_e1["rmse"], m_b0["rmse"]) else None,
+        "e1_better_rmse_than_c1": bool(m_e1["rmse"] < m_c1["rmse"]) if _ok(m_e1["rmse"], m_c1["rmse"]) else None,
+        # H1 requires BOTH metrics to beat BOTH controls; MAE alone is not H1.
+        "h1_point_estimate_supported": (
+            all(m_e1[key] < control[key] for key in ("mae", "rmse") for control in (m_b0, m_c1))
+            if _ok(*(m[key] for m in (m_b0, m_e1, m_c1) for key in ("mae", "rmse")))
+            else None
+        ),
         "rmse_improvement_pct_e1_vs_b0": improv(m_b0["rmse"], m_e1["rmse"]),
         "e1_better_mae_than_b0": bool(m_e1["mae"] < m_b0["mae"]) if _ok(m_b0["mae"], m_e1["mae"]) else None,
         "e1_better_mae_than_c1": bool(m_e1["mae"] < m_c1["mae"]) if _ok(m_e1["mae"], m_c1["mae"]) else None,

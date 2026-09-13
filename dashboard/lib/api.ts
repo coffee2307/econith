@@ -122,7 +122,7 @@ export const mutateCountry = (
   field: string,
   value: number,
 ) =>
-  post(`/world/country/${code}/mutate`, { group, field, value });
+  post<{ legacy: { ok: boolean } }>(`/world/country/${code}/mutate`, { group, field, value });
 
 export const setTariff = (source: string, target: string, value: number) =>
   post("/world/tariff", { source, target, value });
@@ -154,6 +154,8 @@ async function get<T = unknown>(path: string): Promise<T | null> {
 
 export const getWorldState = () => get("/world/state");
 export const getCountry = (code: string) => get(`/world/country/${code}`);
+export const getCountryPopulation = (code: string) =>
+  get(`/world/country/${code}/population`);
 export const getJournalistNews = (limit = 20) =>
   get<{ news: Array<{ ts: string; category: string; level: string; message: string }> }>(
     `/journalist/news?limit=${limit}`,

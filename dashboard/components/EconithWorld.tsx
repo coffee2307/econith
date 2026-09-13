@@ -222,7 +222,7 @@ export default function EconithWorld() {
   const multiplier = time?.multiplier ?? 1;
   const simDay = time?.sim_day ?? 0;
 
-  // 50-node client world (Hub & Proxy engine) — every nation is editable.
+  // 150-node backend world (50 hubs + 100 proxies) — every nation is editable.
   const countries = sim.countries;
   const simCodes = Object.keys(countries);
   const activeCode = selected;
@@ -386,6 +386,9 @@ export default function EconithWorld() {
         </div>
 
         <div className="flex items-center gap-4">
+          <span className="hidden rounded-lg border border-world/40 bg-world/10 px-2 py-1 font-mono text-[11px] text-world md:inline-flex">
+            {simCodes.length} nodes · {snapshot?.world?.scale?.population_clusters ?? "—"} clusters
+          </span>
           <div className="flex items-center gap-1.5 rounded-xl border border-line bg-elevated px-2 py-1">
             <button
               onClick={() => void (running ? pauseTime() : resumeTime())}

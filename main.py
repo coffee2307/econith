@@ -32,7 +32,7 @@ import os
 from contextlib import asynccontextmanager
 from typing import Literal
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -610,6 +610,15 @@ async def world_state() -> dict:
 async def world_country(code: str) -> dict:
     data = _world_kernel().country_dict(code.upper())
     return data or {"error": f"unknown country {code}"}
+
+
+@app.get(f"{settings.api_prefix}/world/country/{{code}}/population")
+async def world_country_population(code: str) -> dict:
+    """On-demand 40-stratum view; avoids streaming all 6,000 rows each tick."""
+    data = _world_kernel().country_population_dict(code.upper())
+    if data is None:
+        raise HTTPException(status_code=404, detail=f"unknown country {code}")
+    return data
 
 
 @app.post(f"{settings.api_prefix}/world/country/{{code}}/mutate")

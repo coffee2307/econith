@@ -705,3 +705,6 @@ class HierarchyBroker:
             "llm_source": self._llm_source,
             "micro": self._micro.snapshot(),
         }
+
+    def country_population_snapshot(self, code: str) -> dict[str, object]:
+        return self._micro.country_snapshot(code)

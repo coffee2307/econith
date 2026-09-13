@@ -299,7 +299,7 @@ class WorldState(BaseModel):
 
 
 # ===========================================================================
-#  Default world factory (10 majors — live hubs for demo / weak-PC friendly)
+#  Versioned world profiles: research10 baseline and synthetic global150 demo
 # ===========================================================================
 
 def _country(
@@ -331,8 +331,39 @@ def _country(
     )
 
 
-def default_world() -> WorldState:
-    """Construct a plausible multi-hub starting world (10 majors)."""
+def _country_from_vector(code: str, vector: list[float], continent: str) -> CountryState:
+    """Build an API-facing country state from the deterministic TITAN tensor.
+
+    The tensor and Pydantic models deliberately share the same field order.
+    Keeping the conversion here makes the 150-node tensor visible to the
+    classic WorldKernel/API without duplicating another set of seed values.
+    """
+    values = iter(float(v) for v in vector)
+    top = [next(values) for _ in range(3)]
+
+    def group(model_type):
+        names = model_type().model_dump().keys()
+        return model_type(**{name: next(values) for name in names})
+
+    return CountryState(
+        code=code,
+        name=code,
+        continent=continent,
+        gdp=top[0],
+        gdp_growth=top[1],
+        gdp_per_capita=top[2],
+        monetary=group(MonetaryPolicy),
+        fiscal=group(FiscalTrade),
+        labor=group(LaborDemographics),
+        industrial=group(IndustrialResource),
+        geopolitical=group(GeopoliticalSentiment),
+    )
+
+
+def default_world(profile: str = "research10") -> WorldState:
+    """Preserve research inputs; explicitly opt into synthetic global150 seeds."""
+    if profile not in {"research10", "global150"}:
+        raise ValueError(f"Unknown world profile: {profile}")
     countries = {
         "USA": _country(
             "USA", "United States", "North America",
@@ -429,11 +460,33 @@ def default_world() -> WorldState:
         ),
     }
 
+    if profile == "global150":
+        # Additional nodes are synthetic TITAN seeds, not calibrated observations.
+        from econith.world.sovereign.correlation import CorrelationEngine
+        from econith.world.sovereign.tensor import WorldTensorState
+        from econith.world.sovereign.topology import (
+            ALL_CODES, HUB_CODES, PROXY_CODES, REGIONAL_CLUSTERS,
+        )
+
+        tensor = WorldTensorState.blank()
+        CorrelationEngine().propagate(tensor.hubs, out=tensor.proxies)
+        continent_by_code = {
+            code: region for region, members in REGIONAL_CLUSTERS.items() for code in members
+        }
+        for idx, code in enumerate(HUB_CODES):
+            if code not in countries:
+                countries[code] = _country_from_vector(
+                    code, tensor.hubs[idx].tolist(), continent_by_code.get(code, "Global")
+                )
+        for idx, code in enumerate(PROXY_CODES):
+            countries[code] = _country_from_vector(
+                code, tensor.proxies[idx].tolist(), continent_by_code.get(code, "Global")
+            )
+        countries = {code: countries[code] for code in ALL_CODES}
+
     codes = list(countries.keys())
-    # Base tariff matrix (~3% baseline, 0 self).
-    tariffs = {
-        a: {b: (0.0 if a == b else 0.03) for b in codes} for a in codes
-    }
+    # Preserve the research baseline and all consumers that iterate the matrix.
+    tariffs = {a: {b: (0.0 if a == b else 0.03) for b in codes} for a in codes}
     # Alliance / trust matrix (1.0 self). Hand-tuned blocs.
     base_trust = {
         ("USA", "JPN"): 0.9, ("USA", "DEU"): 0.85, ("USA", "IND"): 0.7,
