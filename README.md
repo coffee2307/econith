@@ -1,6 +1,6 @@
 ﻿# ECONITH — Quant + World Production Runtime
 
-> **Cập nhật báo cáo:** 03/08/2026 (UTC+7)  
+> **Cập nhật đồng bộ mã nguồn / báo cáo:** 13/09/2026; các kết quả thí nghiệm đã lưu giữ nguyên ngày chạy của chúng.
 > **Phase hiện tại:** `SIM / DEMO + heuristic desks` — runtime đầy đủ; **lớp đánh giá khoa học KHKT** (RQ1–RQ4) đã có trong repo; pipeline train→deploy→gate đã có trong code; **chưa** có desk SB3 đã train trên máy local / `active.yaml` production.  
 > **FULLY_AUTONOMOUS:** đúng là **flag-only** (`AUTONOMOUS_LOOP_IMPLEMENTED=False`) — không bật cho đến khi deploy gate + paper soak xanh.  
 > Train nặng: **H200/cloud**. Máy yếu: World OFF + `LOCAL_LLM_ENABLED=false` + hyp combinatorial (xem preset trong `.env.example`).
@@ -24,6 +24,50 @@ market/macro/tradfi -> event bus -> signal -> risk gate -> execution/fill -> tel
 
 ---
 
+## Đồng bộ KHKT và mở rộng World — 13/09/2026
+
+### Phạm vi và hai cấu hình World
+
+- `default_world()` hoặc `default_world("research10")`: giữ nguyên 10 node và ma trận thuế nền 3% giữa các node (0% với chính nó). Suite `KHKT_Evaluation` tiếp tục dùng cấu hình này; không âm thầm đổi mẫu nghiên cứu thành 150 node.
+- `default_world("global150")`: giữ 10 seed cũ, bổ sung các node từ tensor TITAN và trọng số proxy. `WorldKernel` dùng cấu hình này khi không được truyền `world` riêng.
+- Dữ liệu khởi tạo mở rộng là **dữ liệu tổng hợp cho mô phỏng**, không phải dữ liệu quan sát hoặc kết quả hiệu chỉnh cho 150 nền kinh tế. Tổng hợp GDP/dân số của các proxy không được diễn giải như thống kê thế giới thực.
+- Tầng MicroPopulation đã có 150 × 40 = 6.000 cụm. Thay đổi này đưa thông tin quy mô và chi tiết cụm ra API, không tạo thêm 6.000 agent LLM. TITAN, WorldKernel và sovereign graph là các thành phần cùng tồn tại, không phải một engine duy nhất có hành vi giống nhau.
+
+### Đối chiếu với báo cáo
+
+| Nội dung báo cáo | Cách kiểm tra / giới hạn |
+|---|---|
+| H1: MAE và RMSE thấp hơn cả B0 và C1 | Bổ sung `e1_better_rmse_than_b0`, `e1_better_rmse_than_c1`, `h1_point_estimate_supported` trong `KHKT_Evaluation/common/vol_eval.py`. Cờ cuối yêu cầu cả bốn so sánh nghiêm ngặt; dữ liệu thiếu/không hữu hạn trả `null`. Đây là so sánh điểm, không phải bằng chứng ý nghĩa thống kê. |
+| Đối chứng ngẫu nhiên | C1 xáo trộn đầu vào theo thời gian; cờ cũ `passes_random_control` vẫn chỉ xét MAE để tương thích. Không dùng riêng cờ này để kết luận H1. |
+| H2: hiệu chỉnh, giảm Moment L1 | Mở rộng số node không phải hiệu chỉnh. Cần chạy lại thí nghiệm hiệu chỉnh nếu đổi mẫu/cấu hình nghiên cứu. |
+| H3: kiểm tra kết nối | API/kernel và bridge kiểm tra đường truyền kỹ thuật. Thí nghiệm RQ3 offline dùng proxy trên returns, không thay thế kiểm thử end-to-end của demo live. |
+| H4: cùng dữ liệu/cấu hình/seed | Test bổ sung kiểm tra khởi tạo dân cư có seed lặp lại. Không suy rộng thành tính tất định toàn bộ live runtime hoặc tái lập trên môi trường độc lập. |
+
+Không sửa số liệu đã lưu trong `KHKT_Evaluation/experiments/*/results`. Kết quả cũ chưa chứa các cờ H1 mới; cần chạy lại suite với dữ liệu và cấu hình được ghi nhận để tạo artifact mới. Giữ cả kết quả không ủng hộ giả thuyết.
+
+### API, giao diện và kiểm soát đầu vào
+
+- `world.macro` → telemetry → dashboard mang `scale`: số node, tổng cụm và số tầng dân cư lấy từ trạng thái thực, không mặc định hiển thị 150/6.000 khi chưa có dữ liệu.
+- `GET <api_prefix>/world/country/{code}/population`: lấy chi tiết một node theo yêu cầu; nhận mã không phân biệt hoa/thường, trả HTTP 404 nếu không tồn tại. Không phát toàn bộ 6.000 dòng trong mỗi tick. API wrapper đã có; bảng chi tiết cụm trên UI chưa được triển khai trong phiên này.
+- Globe dùng tập node từ backend để xác định khả năng chỉnh sửa. Bản nháp chỉ bị xóa khi backend xác nhận `legacy.ok`.
+- Kernel từ chối giá trị NaN/Infinity, trường/nhóm không hợp lệ và thuế ngoài [0, 1]. Bridge chỉ chuyển tiếp chỉnh sửa đã được kernel chấp nhận; tariff chỉ được đưa vào graph nếu cả hai node thuộc graph đó.
+- Sửa truy cập dữ liệu có thể thiếu trong `QuantMissionControl` để TypeScript production build thành công.
+
+### Kiểm thử và vận hành
+
+```bash
+python -m pytest tests -q -rs
+cd dashboard
+npm ci
+npm run build
+```
+
+Test hồi quy mới: `tests/test_global_world_scale.py` (profile, 150 node, 6.000 cụm, seed, mutation) và `tests/test_report_h1.py` (đủ hai chỉ số/hai đối chứng). Môi trường Python cần các dependency kiểm thử, bao gồm pytest, pytest-asyncio, pydantic-settings, polars, openai và pyarrow; không commit môi trường ảo.
+
+Kết quả xác minh phiên này: **93 passed, 2 failed, 3 skipped**, trong đó cả 13 test mới đều đạt. Dashboard production build và TypeScript đạt; cấu hình `research10` được so sánh toàn bộ `to_dict()` với factory tại commit nền `31d786f` và giống hệt. Hai lỗi và hai lượt bỏ qua do thiếu `pyarrow` (tải dependency bị timeout); một test checkpoint bỏ qua vì thiếu `torch`. Không diễn giải thành không có hồi quy trên các đường chưa chạy được.
+
+Production build không đồng nghĩa đã kiểm thử trình duyệt end-to-end hoặc triển khai VPS. Phiên này chưa cấu hình tên miền/HTTPS, chưa benchmark tải nhiều người dùng, chưa thêm mô phỏng phát triển AI. Demo chỉ dùng SIMULATION; không đưa khóa giao dịch tiền thật vào bản public. Quy mô 150 node cần benchmark riêng vì ma trận thuế/tín nhiệm vẫn là ma trận đầy đủ để bảo toàn ngữ nghĩa.
+
 ## 0. Báo cáo trạng thái dự án (Progress Report)
 
 Phần này là **file báo cáo vận hành / kỹ thuật**: đã làm gì, đang đứng ở đâu, còn thiếu gì. Đọc section này trước nếu bạn muốn biết “xong bao nhiêu % product claim”.
@@ -37,7 +81,7 @@ Phần này là **file báo cáo vận hành / kỹ thuật**: đã làm gì, đ
 | Desk AI Quant | **Heuristic** (trừ khi có `models/registry/active.yaml` hợp lệ) | Main Control sẽ hiện `agent_brain=heuristic` cho đến khi train/deploy |
 | Deploy customs + backtest gate | **Đã có trong code** | `--activate` fail nếu backtest không đạt (trừ `--skip-backtest`) |
 | Neural World `react()` | **Đã wire** (chỉ live khi có `.pt`) | Không checkpoint = stack heuristic CB/Trade/Sentiment |
-| World UI 50 nước | **Honesty** — chỉ 6 hub mutate live | Globe không còn overclaim “50 nước = backend” |
+| World UI mở rộng | 150 node có trạng thái và nhận chỉnh sửa trong WorldKernel | Số node lấy từ backend; không đồng nghĩa 150 quốc gia đã hiệu chỉnh bằng dữ liệu thực |
 | Meta directives | **Có consumer thật** trên hot path | Quant sizing + Predictor lean + World micro shock |
 | Paper / DEMO soak | **Checklist ops** (`scripts/paper_soak_check`) | Chưa thay bằng campaign N ngày có nhật ký PnL thật |
 | **KHKT evaluation (RQ1–RQ4)** | **Đã có suite + số liệu** (`KHKT_Evaluation/`) | Protocol B0/E1/C1, calibration, ablation, reproducibility — độc lập demo UI |
@@ -110,7 +154,7 @@ Các hạng mục dưới đây đã ship trong codebase (runtime / UI / ops), c
 
 #### E. Operator truth & hot-path intelligence (P1)
 
-- World UI ↔ backend live set: `dashboard/constants/liveWorld.ts` — **6 hub** `USA/CHN/VNM/JPN/IND/DEU`; mutate chỉ khi `backendLive`; còn lại “topology only”.
+- World UI ↔ backend live set: **150 node quốc gia/vùng lãnh thổ**; tất cả có trạng thái và nhận mutate trong WorldKernel. Phân loại 50 hub + 100 proxy thuộc topology TITAN; không phải 150 tác nhân tự chủ đã được kiểm định.
 - Portfolio sizing trên hot path: `PortfolioRiskModel` trong `econith_quant/bridge/ai_bridge.py` (VaR haircut × meta appetite trước `order.intent`).
 - Meta consumers thật:
   - `meta.quant.directive` → AIBridge derisk + Predictor lean direction/action
@@ -475,7 +519,7 @@ Frontend nằm ở `dashboard/` (`Next.js` / `React`).
 ### World page (`/world`)
 
 - Hiển thị sovereign snapshot, chronology fork, scenario / hypothesis mutations và world state read-model.
-- Globe có **50 node topology** để quan sát; **chỉ 6 hub backend** (`USA/CHN/VNM/JPN/IND/DEU`) được mutate live — UI ghi rõ “LIVE mutate” vs “topology only”.
+- Globe có **150 node backend** để quan sát và mutate; tầng dân cư gồm **6.000 cụm** (40 tầng mức sống cho mỗi quốc gia), tải chi tiết theo quốc gia qua API khi cần.
 - World mặc định tắt; khi bật ở `REALITY` vẫn quan sát được nhưng không contaminate execution (isolation 4 tầng).
 
 ### Journalist / news

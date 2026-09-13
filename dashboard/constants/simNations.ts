@@ -1,8 +1,8 @@
-import { ALL_NATION_CODES } from "@/constants/worldGraph";
+import { TITAN_HUB_CODES, TITAN_PROXY_CODES } from "@/constants/titanWorld";
 
-const SIM_SET = new Set<string>(ALL_NATION_CODES);
+const SIM_SET = new Set<string>([...TITAN_HUB_CODES, ...TITAN_PROXY_CODES]);
 
-/** True for the 50 Hub/Proxy nations that run the world simulation. */
+/** True for the 150 Hub/Proxy nations that run the world simulation. */
 export function isSimNation(code: string): boolean {
   return SIM_SET.has(code);
 }

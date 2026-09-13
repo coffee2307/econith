@@ -216,6 +216,7 @@ class MetricsHub:
     async def _on_world_macro(self, event: Event) -> None:
         self._world = {
             "sim_day": event.payload.get("sim_day"),
+            "scale": event.payload.get("scale"),
             "global": event.payload.get("global"),
             "countries": event.payload.get("countries"),
             "tariffs": event.payload.get("tariffs"),

@@ -147,6 +147,11 @@ export interface WorldGlobalMacro {
 
 export interface WorldState {
   sim_day?: number;
+  scale?: {
+    countries: number;
+    population_clusters: number;
+    strata_per_country: number;
+  };
   global?: WorldGlobalMacro;
   countries?: Record<string, CountryMacro>;
   tariffs?: Record<string, Record<string, number>>;

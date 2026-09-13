@@ -512,7 +512,7 @@ class WorldKernel:
         governor_llm_cadence_ticks: int = 20,
     ) -> None:
         self._bus = bus
-        self._world = world or default_world()
+        self._world = world or default_world(profile="global150")
         self._models = models or default_models()               # classic macro agents
         self._agents = agents or []  # legacy seam; hierarchy broker owns cognition
         self._market = market or MarketContext()
@@ -618,6 +618,11 @@ class WorldKernel:
 
     def state_dict(self) -> dict:
         base = self._world.to_dict()
+        base["scale"] = {
+            "countries": len(self._world.countries),
+            "population_clusters": self._broker.micro.n_clusters,
+            "strata_per_country": self._broker.micro.n_strata,
+        }
         base["entities"] = {code: ent.to_dict() for code, ent in self._entities.items()}
         base["agent_population"] = self._broker.snapshot()
         return base
@@ -628,6 +633,11 @@ class WorldKernel:
     def country_dict(self, code: str) -> dict | None:
         c = self._world.countries.get(code)
         return c.to_dict() if c else None
+
+    def country_population_dict(self, code: str) -> dict | None:
+        if code.upper() not in self._world.countries:
+            return None
+        return self._broker.country_population_snapshot(code.upper())
 
     def market_snapshot(self) -> dict:
         return asdict(self._market.snapshot())
@@ -1633,6 +1643,11 @@ class WorldKernel:
             "world.macro",
             sim_day=self._sim_day,
             **{"global": aggregate},
+            scale={
+                "countries": len(self._world.countries),
+                "population_clusters": self._broker.micro.n_clusters,
+                "strata_per_country": self._broker.micro.n_strata,
+            },
             countries={c: s.to_dict() for c, s in self._world.countries.items()},
             tariffs=self._world.tariffs,
             alliances=self._world.alliances,
@@ -1685,6 +1700,12 @@ class WorldKernel:
 
     # -- external mutators (FastAPI / scenario) -------------------------------
     async def mutate_country(self, code: str, group: str, field: str, value: float) -> dict:
+        if not math.isfinite(value):
+            return {"ok": False, "error": "value must be finite"}
+        if group == "" and field not in {"gdp", "gdp_growth", "gdp_per_capita"}:
+            return {"ok": False, "error": f"unknown numeric field {field}"}
+        if group and group not in {"monetary", "fiscal", "labor", "industrial", "geopolitical"}:
+            return {"ok": False, "error": f"unknown group {group}"}
         c = self._world.countries.get(code)
         if c is None:
             return {"ok": False, "error": f"unknown country {code}"}
@@ -1692,7 +1713,8 @@ class WorldKernel:
             setattr(c, field, _clamp_field(field, float(value)))
             ok = True
         else:
-            ok = c.set_field(group, field, _clamp_field(field, float(value)))
+            model = getattr(c, group)
+            ok = field in type(model).model_fields and c.set_field(group, field, _clamp_field(field, float(value)))
         if not ok:
             return {"ok": False, "error": f"unknown field {group}.{field}"}
         text = f"policy set {group + '.' if group else ''}{field} = {value:.4g}"
@@ -1701,6 +1723,8 @@ class WorldKernel:
         return {"ok": True, "code": code, "group": group, "field": field, "value": value}
 
     async def set_tariff(self, src: str, dst: str, value: float) -> dict:
+        if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+            return {"ok": False, "error": "tariff must be finite and between 0 and 1"}
         if src not in self._world.countries or dst not in self._world.countries:
             return {"ok": False, "error": "unknown country"}
         prev = self._world.tariff(src, dst)

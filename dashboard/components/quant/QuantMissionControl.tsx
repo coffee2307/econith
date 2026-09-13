@@ -268,9 +268,9 @@ function AiEnsemblePanel({
             ? ai.explain.top_features
             : ai?.explain?.attribution
           )?.length
-            ? (ai.explain.top_features?.length
+            ? (ai?.explain?.top_features?.length
                 ? ai.explain.top_features
-                : ai.explain.attribution!
+                : ai?.explain?.attribution!
               )
                 .slice(0, 5)
                 .map((a) => {

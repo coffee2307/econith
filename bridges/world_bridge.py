@@ -45,10 +45,12 @@ class WorldBridge:
         backward compatibility with the current dashboard read-model.
         """
         src, tgt = source.upper(), target.upper()
-        # Advanced graph: queue for the deterministic 5-phase loop (chronology fork).
-        self._graph.queue_tariff(src, tgt, value)
-        # Legacy kernel: immediate mutation for the existing UI.
+        # Only fan out an accepted mutation; the graph owns a smaller node set.
         legacy = await self._kernel.set_tariff(src, tgt, value)
+        sovereign_queued = bool(legacy.get("ok")) and src in self._graph.nodes and tgt in self._graph.nodes
+        if sovereign_queued:
+            self._graph.queue_tariff(src, tgt, value)
+        # Legacy kernel: immediate mutation for the existing UI.
         active = self._graph.chronology.active_id
         logger.info("tariff bridged %s->%s @ %.2f (chronology active=%s)", src, tgt, value, active)
         return {
@@ -57,9 +59,13 @@ class WorldBridge:
             "value": value,
             "legacy": legacy,
             "sovereign": {
-                "queued": True,
+                "queued": sovereign_queued,
                 "chronology_active": active,
-                "note": "applied on next 5-phase tick; forks the scenario chronology",
+                "note": (
+                    "applied on next 5-phase tick; forks the scenario chronology"
+                    if sovereign_queued
+                    else "not queued in sovereign graph; see legacy result"
+                ),
             },
         }
 
@@ -67,7 +73,7 @@ class WorldBridge:
         """Dispatch a country field mutation to both engines."""
         c = code.upper()
         legacy = await self._kernel.mutate_country(c, group, field, value)
-        queued = self._graph.queue_mutation(c, field, value)
+        queued = bool(legacy.get("ok")) and self._graph.queue_mutation(c, field, value)
         logger.info("mutation bridged %s.%s=%s (sovereign_mapped=%s)", c, field, value, queued)
         return {
             "code": c,

@@ -199,6 +199,10 @@ class MicroPopulation:
     def n_clusters(self) -> int:
         return self._n_nodes * self._n_strata
 
+    @property
+    def n_strata(self) -> int:
+        return self._n_strata
+
     def node_index(self, code: str) -> int:
         return self._codes.index(code.upper())
 
@@ -211,6 +215,45 @@ class MicroPopulation:
             "safe_haven_pull": float(b[Belief.SAFE_HAVEN_PULL]),
             "job_security": float(b[Belief.JOB_SECURITY]),
             "institutional_trust": float(b[Belief.INSTITUTIONAL_TRUST]),
+        }
+
+    def country_snapshot(self, code: str) -> dict[str, object]:
+        """Return the 40 strata for one nation for on-demand UI inspection."""
+        idx = self.node_index(code)
+        st = self._state[idx]
+        beliefs = self._belief[idx]
+        memory = self._memory[idx]
+        rows: list[dict[str, object]] = []
+        belief_names = (
+            "growth_optimism", "inflation_fear", "safe_haven_pull",
+            "job_security", "institutional_trust",
+        )
+        for stratum in range(self._n_strata):
+            rows.append({
+                "stratum": stratum + 1,
+                "population": float(st[stratum, ClusterColumn.POPULATION]),
+                "wealth": float(st[stratum, ClusterColumn.WEALTH]),
+                "income": float(st[stratum, ClusterColumn.INCOME]),
+                "debt": float(st[stratum, ClusterColumn.DEBT]),
+                "liquidity": float(st[stratum, ClusterColumn.LIQUIDITY]),
+                "consumption_ratio": float(st[stratum, ClusterColumn.CONSUMPTION]),
+                "risk_allocation": float(st[stratum, ClusterColumn.RISK_ALLOC]),
+                "dissatisfaction": float(st[stratum, ClusterColumn.DISSATISFACTION]),
+                "beliefs": {
+                    name: float(beliefs[stratum, belief_idx])
+                    for belief_idx, name in enumerate(belief_names)
+                },
+                "memory": {
+                    name: float(memory[stratum, belief_idx])
+                    for belief_idx, name in enumerate(belief_names)
+                },
+            })
+        return {
+            "code": code.upper(),
+            "tick": self._tick,
+            "n_strata": self._n_strata,
+            "belief_summary": self.belief_snapshot(code),
+            "strata": rows,
         }
 
     # -- the tick -------------------------------------------------------------
