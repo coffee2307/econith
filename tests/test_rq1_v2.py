@@ -125,13 +125,23 @@ class TestRQ1V2(unittest.TestCase):
         self.assertEqual(revised.loc["2020-01-20"].interest_rate, r.iloc[0].value)
 
     def test_fred_initial_release_normalization(self):
-        rows = normalize("inflation", "CPIAUCSL", "pc1", [{
-            "date": "2020-01-01", "realtime_start": "2020-02-13", "value": "2.5"
-        }])
+        rows = normalize("inflation", "CPIAUCSL", "year_over_year", [
+            {"date": "2019-01-01", "realtime_start": "2019-02-13", "value": "100"},
+            {"date": "2020-01-01", "realtime_start": "2020-02-13", "value": "102.5"},
+        ], "2020-01-01")
         self.assertEqual(rows[0]["available_at"], "2020-02-14T00:00:00+00:00")
         self.assertEqual(rows[0]["observation_at"], "2020-01-01T00:00:00+00:00")
-        self.assertEqual(rows[0]["value"], .025)
+        self.assertAlmostEqual(rows[0]["value"], .025)
         self.assertEqual(rows[0]["unit"], "fraction")
+
+    def test_fred_gdp_growth_is_computed_from_known_initial_releases(self):
+        rows = normalize("gdp_growth", "GDPC1", "annualized_quarter", [
+            {"date": "2019-10-01", "realtime_start": "2020-01-30", "value": "100"},
+            {"date": "2020-01-01", "realtime_start": "2020-04-29", "value": "101"},
+        ], "2020-01-01")
+        self.assertEqual(len(rows), 1)
+        self.assertAlmostEqual(rows[0]["value"], 1.01 ** 4 - 1)
+        self.assertIn("units=lin", rows[0]["source"])
 
     def test_fred_error_is_read_without_exposing_key(self):
         key = "a" * 32
@@ -139,9 +149,20 @@ class TestRQ1V2(unittest.TestCase):
                           BytesIO(b'{"error_message":"The value for api_key is not registered"}'))
         with patch("urllib.request.urlopen", side_effect=error):
             with self.assertRaises(FredRequestError) as caught:
-                request_series("FEDFUNDS", "lin", key, "2019-01-01", "2020-01-01")
+                request_series("FEDFUNDS", key, "2019-01-01", "2020-01-01")
         self.assertIn("api_key is not registered", str(caught.exception))
         self.assertNotIn(key, str(caught.exception))
+
+    def test_fred_initial_release_request_uses_linear_units(self):
+        response = BytesIO(b'{"observations": []}')
+        response.__enter__ = lambda value: value
+        response.__exit__ = lambda *args: None
+        with patch("urllib.request.urlopen", return_value=response) as opened:
+            request_series("CPIAUCSL", "a" * 32, "2018-01-01", "2020-01-01")
+        url = opened.call_args.args[0].full_url
+        self.assertIn("output_type=4", url)
+        self.assertIn("units=lin", url)
+        self.assertNotIn("units=pc1", url)
 
     def test_missing_provenance_blocks_before_output(self):
         m, r, c = fixture()

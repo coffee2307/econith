@@ -28,7 +28,10 @@ Không gửi khóa API trong kết quả. Công cụ dùng `output_type=4`, tứ
 công bố đầu tiên; ngày khả dụng được đặt sang 00:00 UTC ngày kế tiếp vì API chỉ
 cung cấp ngày, không cung cấp giờ. Bốn chuỗi là FEDFUNDS, CPIAUCSL (tăng CPI so
 với cùng kỳ), UNRATE và GDPC1 (tốc độ tăng theo năm của quý). Giá trị được đổi từ
-phần trăm sang tỷ lệ. Tệp metadata đi kèm ghi lại quy tắc và nguồn.
+phần trăm sang tỷ lệ. Do FRED không cho dùng phép biến đổi phía máy chủ cùng
+`output_type=4`, công cụ tải giá trị gốc với `units=lin`, lấy thêm 12 tháng CPI và
+3 tháng GDP làm kỳ gốc, rồi tự tính mức tăng từ các lần công bố ban đầu. Tệp
+metadata đi kèm ghi lại quy tắc và nguồn.
 
 Nếu FRED trả lỗi, công cụ chỉ in mã HTTP và thông báo của máy chủ; URL chứa khóa
 không được đưa vào lỗi. Lỗi `api_key is not registered` yêu cầu tạo hoặc kích hoạt
