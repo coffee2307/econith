@@ -1,5 +1,36 @@
 # RQ1 v2 — bản thử nghiệm độc lập
 
+## Nhánh nâng cấp tín hiệu công bố
+
+Giữ nguyên `local_001`. Chạy cấu hình nâng cấp bằng cờ tùy chọn:
+
+```powershell
+python -m unittest tests.test_rq1_v2 tests.test_rq1_innovations -v
+python -m KHKT_Evaluation.rq1_v2.run --market datasets/features/BTCUSDT_features.parquet --releases datasets/macro_releases.csv --config KHKT_Evaluation/rq1_v2/config.local.json --innovation-preset --output KHKT_Evaluation/results_rq1_v2/innovations_3d
+```
+
+Bỏ cờ `--innovation-preset` để giữ cách tính cũ. Nhánh mới bổ sung thay đổi tại
+ngày công bố, chuẩn hóa bằng lịch sử trước đó và bộ nhớ suy giảm 3/7/14 ngày.
+Đây là độ bất thường so với quá khứ, KHÔNG phải bất ngờ so với khảo sát thị trường.
+B1 được bổ sung cùng các tín hiệu công bố để kiểm tra giá trị riêng của World.
+World chạy chậm bằng 1/30 nhịp gốc mỗi ngày; đây là giả định thăm dò, chưa phải
+hệ số đã hiệu chỉnh. Nhánh phản thực tế giữ các quan sát đầu tiên suốt một fold,
+không phải mô phỏng phản thực tế riêng cho từng sự kiện và không chứng minh nhân quả.
+
+Có thể chạy thêm `--horizon-days 7` hoặc `--horizon-days 14`, mỗi lần dùng thư mục
+output mới. Phải lưu và báo cáo tất cả chân trời, không chỉ giữ lần thắng. Không
+đổi H1 sau khi thấy kết quả. Các giai đoạn đã xem vẫn là thăm dò. `provenance.config`
+lưu cấu hình thực tế sau áp dụng cờ; `config_sha256` chỉ là dấu vân tay tệp đầu vào.
+
+Chưa triển khai mô hình học chính sách, LLM tự kiểm định giả thuyết, mở rộng nhiều
+quốc gia, đường cơ sở HAR hoặc hiệu chỉnh động học tự động. Không gọi bản nâng cấp
+này là hệ thống dự báo thiên nga đen. Không thay đổi demo, cờ LLM hoặc báo cáo cũ.
+Sai số kiểm định của mọi alpha được lưu trong `selected.*.candidates`, kể cả khi
+quay về B0. Tập test không tham gia chọn alpha.
+
+Nguồn phương pháp phân chia thời gian:
+https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.TimeSeriesSplit.html
+
 Trạng thái: đã triển khai đường chạy thử nghiệm và kiểm thử phần mềm; chưa
 nghiệm thu toàn bộ kế hoạch nâng cấp và chưa có kết quả trên dữ liệu thực.
 Không thay thế kết quả V1, báo cáo KHKT, giao diện hoặc cấu hình LLM.

@@ -51,7 +51,7 @@ def replay(panel, cfg, *, stateful=True):
                 deltas = {}
                 for a in proposals:
                     key = (a.group, a.field)
-                    deltas[key] = deltas.get(key, 0.) + a.delta * step
+                    deltas[key] = deltas.get(key, 0.) + a.delta * step * cfg.get("reaction_daily_scale", 1.)
                 for (group, field), delta in deltas.items():
                     obj = getattr(country, group)
                     lo, hi = BOUNDS[field]

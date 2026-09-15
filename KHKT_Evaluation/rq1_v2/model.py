@@ -21,18 +21,23 @@ def correction(model, x):
 def select_predict(x, y, b0, train, valid, test, alphas):
     residual = y - b0
     best = (float(np.mean(np.abs(residual[valid]))), None)
+    baseline_loss = best[0]
+    candidates = []
     for alpha in alphas:
         model = fit(x[train], residual[train], alpha)
         pred = np.maximum(0., b0[valid] + correction(model, x[valid]))
         loss = float(np.mean(np.abs(y[valid] - pred)))
+        candidates.append({"alpha": alpha, "validation_mae": loss})
         if loss < best[0]:
             best = (loss, alpha)
     alpha = best[1]
     if alpha is None:
-        return b0[test].copy(), {"alpha": None, "active": False}
+        return b0[test].copy(), {"alpha": None, "active": False,
+                                "baseline_validation_mae": baseline_loss, "candidates": candidates}
     model = fit(x[train | valid], residual[train | valid], alpha)
     pred = np.maximum(0., b0[test] + correction(model, x[test]))
-    return pred, {"alpha": alpha, "active": True, "coefficients": model[2].tolist()}
+    return pred, {"alpha": alpha, "active": True, "coefficients": model[2].tolist(),
+                  "baseline_validation_mae": baseline_loss, "candidates": candidates}
 
 
 def permute_blocks(x, masks, block, rng):

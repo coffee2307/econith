@@ -14,6 +14,7 @@ from KHKT_Evaluation.common.metrics import diebold_mariano
 from KHKT_Evaluation.rq1_v2.data import prepare
 from KHKT_Evaluation.rq1_v2.model import permute_blocks, select_predict
 from KHKT_Evaluation.rq1_v2.world import replay
+from KHKT_Evaluation.rq1_v2.innovations import release_features, enrich
 
 
 def digest(path):
@@ -30,6 +31,9 @@ def score(y, pred):
 
 
 def validate_config(cfg):
+    scale = cfg.get("reaction_daily_scale", 1.)
+    if not np.isfinite(scale) or not 0 < scale <= 1:
+        raise ValueError("reaction_daily_scale phải thuộc (0, 1].")
     if cfg["mode"] not in ("exploratory", "confirmatory"):
         raise ValueError("mode phải là exploratory hoặc confirmatory.")
     if cfg["mode"] == "confirmatory" and not cfg.get("unseen_data_declaration"):
@@ -100,8 +104,18 @@ def evaluate(market, releases, cfg):
         sub = panel.loc[(panel.index >= pd.Timestamp(fold["train_start"])) & (panel.index < end)].copy()
         dynamic = replay(sub, cfg)
         static = replay(sub, cfg, stateful=False)
+        if cfg.get("release_innovations", False):
+            dynamic = enrich(sub, dynamic, cfg)
         x = dynamic.to_numpy(dtype=float)
+        feature_names = list(dynamic.columns)
         raw = sub[macro].to_numpy(dtype=float)
+        if cfg.get("release_innovations", False):
+            event_frame = release_features(sub, macro)
+            events = event_frame.to_numpy(dtype=float)
+            feature_names.extend(event_frame.columns)
+            raw = np.column_stack([raw, events])
+            # B1 cũng nhận thông tin công bố; không gán lợi ích của biến mới cho World.
+            x = np.column_stack([x, events])
         xs = static.to_numpy(dtype=float)
         y, b0 = sub.target.to_numpy(), sub.b0.to_numpy()
         usable = np.isfinite(np.column_stack([x, raw, xs, y, b0])).all(axis=1)
@@ -127,8 +141,8 @@ def evaluate(market, releases, cfg):
         controls.append(np.asarray(fold_controls))
         diagnostics.append({"fold": number, "config": fold, "n_train": int(train.sum()),
                             "n_validation": int(val.sum()), "n_test": int(test.sum()),
-                            "selected": selected, "world_features": list(dynamic.columns),
-                            "constant_train_features": list(dynamic.columns[x[train].std(axis=0) <= 1e-12]),
+                            "selected": selected, "world_features": feature_names,
+                            "constant_train_features": list(np.array(feature_names)[x[train].std(axis=0) <= 1e-12]),
                             "metrics": {name: score(frame.target, frame[name]) for name in ("B0", *variants)}})
     frame = pd.concat(predictions, ignore_index=True)
     shuffled_predictions = np.concatenate(controls, axis=1)
@@ -178,11 +192,20 @@ def main():
     parser.add_argument("--releases", required=True, type=Path)
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--innovation-preset", action="store_true",
+                        help="Thăm dò tín hiệu công bố và World phản thực tế; giữ giao thức cũ nếu bỏ cờ.")
+    parser.add_argument("--horizon-days", type=int, choices=(3, 7, 14))
     args = parser.parse_args()
     if args.output.exists():
         parser.error("Output đã tồn tại; dùng thư mục mới để giữ nguyên kết quả cũ.")
     try:
         cfg = json.loads(args.config.read_text(encoding="utf-8"))
+        if args.innovation_preset:
+            cfg.update(mode="exploratory", release_innovations=True,
+                       reaction_daily_scale=1 / 30)
+        if args.horizon_days:
+            cfg.update(mode="exploratory", horizon=f"{args.horizon_days}d")
+            cfg["control_block"] = f"{max(14, args.horizon_days)}d"
         market = pd.read_parquet(args.market) if args.market.suffix == ".parquet" else pd.read_csv(args.market)
         releases = pd.read_csv(args.releases)
         result, frame, controls = evaluate(market, releases, cfg)
