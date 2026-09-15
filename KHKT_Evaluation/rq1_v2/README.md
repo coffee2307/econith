@@ -30,6 +30,10 @@ cung cấp ngày, không cung cấp giờ. Bốn chuỗi là FEDFUNDS, CPIAUCSL 
 với cùng kỳ), UNRATE và GDPC1 (tốc độ tăng theo năm của quý). Giá trị được đổi từ
 phần trăm sang tỷ lệ. Tệp metadata đi kèm ghi lại quy tắc và nguồn.
 
+Nếu FRED trả lỗi, công cụ chỉ in mã HTTP và thông báo của máy chủ; URL chứa khóa
+không được đưa vào lỗi. Lỗi `api_key is not registered` yêu cầu tạo hoặc kích hoạt
+khóa mới trong tài khoản FRED. Không dán khóa vào báo cáo, issue hoặc cuộc trò chuyện.
+
 Tạo bản sao `config.example.json` trên máy, điền `release_provenance` bằng nguồn
 ngày công bố, cách xử lý phiên bản sửa đổi, đơn vị và hạn chế dữ liệu. Các ngày
 trong cấu hình chỉ là ví dụ thăm dò; điều chỉnh theo phạm vi có dữ liệu trước khi

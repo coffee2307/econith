@@ -7,6 +7,7 @@ import os
 import time
 import urllib.parse
 import urllib.request
+from urllib.error import HTTPError, URLError
 from pathlib import Path
 
 import pandas as pd
@@ -19,6 +20,10 @@ SERIES = {
     "unemployment": ("UNRATE", "lin"),
     "gdp_growth": ("GDPC1", "pca"),
 }
+
+
+class FredRequestError(RuntimeError):
+    """Lỗi FRED đã loại bỏ URL chứa khóa API."""
 
 
 def request_series(series_id, units, api_key, start, end):
@@ -36,8 +41,19 @@ def request_series(series_id, units, api_key, start, end):
     }
     url = API + "?" + urllib.parse.urlencode(params)
     request = urllib.request.Request(url, headers={"User-Agent": "ECONITH-RQ1/2"})
-    with urllib.request.urlopen(request, timeout=60) as response:
-        return json.load(response).get("observations", [])
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return json.load(response).get("observations", [])
+    except HTTPError as exc:
+        try:
+            payload = json.loads(exc.read().decode("utf-8", errors="replace"))
+            detail = payload.get("error_message") or payload.get("message")
+        except (ValueError, AttributeError):
+            detail = None
+        message = str(detail or exc.reason or "yêu cầu bị từ chối").strip()
+        raise FredRequestError(f"FRED HTTP {exc.code}: {message}") from None
+    except URLError as exc:
+        raise FredRequestError(f"Không kết nối được FRED: {exc.reason}") from None
 
 
 def normalize(feature, series_id, units, observations):
@@ -80,8 +96,11 @@ def main():
     for index, (feature, (series_id, units)) in enumerate(SERIES.items()):
         if index:
             time.sleep(.55)  # thấp hơn giới hạn 120 yêu cầu/phút của FRED v1
-        rows.extend(normalize(feature, series_id, units,
-                              request_series(series_id, units, key, args.start, args.end)))
+        try:
+            observations = request_series(series_id, units, key, args.start, args.end)
+        except FredRequestError as exc:
+            parser.exit(2, f"Không tải được {series_id}: {exc}\n")
+        rows.extend(normalize(feature, series_id, units, observations))
     frame = pd.DataFrame(rows).sort_values(["available_at", "feature", "observation_at"])
     args.output.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(args.output, index=False)

@@ -6,12 +6,15 @@ import unittest
 import subprocess
 import sys
 import tempfile
+from io import BytesIO
+from unittest.mock import patch
+from urllib.error import HTTPError
 
 import numpy as np
 import pandas as pd
 
 from KHKT_Evaluation.rq1_v2.data import prepare
-from KHKT_Evaluation.rq1_v2.fetch_fred_releases import normalize
+from KHKT_Evaluation.rq1_v2.fetch_fred_releases import FredRequestError, normalize, request_series
 from KHKT_Evaluation.rq1_v2.model import permute_blocks, select_predict
 from KHKT_Evaluation.rq1_v2.run import evaluate, fold_masks
 from KHKT_Evaluation.rq1_v2.world import replay
@@ -129,6 +132,16 @@ class TestRQ1V2(unittest.TestCase):
         self.assertEqual(rows[0]["observation_at"], "2020-01-01T00:00:00+00:00")
         self.assertEqual(rows[0]["value"], .025)
         self.assertEqual(rows[0]["unit"], "fraction")
+
+    def test_fred_error_is_read_without_exposing_key(self):
+        key = "a" * 32
+        error = HTTPError("https://example.invalid?api_key=" + key, 400, "Bad Request", {},
+                          BytesIO(b'{"error_message":"The value for api_key is not registered"}'))
+        with patch("urllib.request.urlopen", side_effect=error):
+            with self.assertRaises(FredRequestError) as caught:
+                request_series("FEDFUNDS", "lin", key, "2019-01-01", "2020-01-01")
+        self.assertIn("api_key is not registered", str(caught.exception))
+        self.assertNotIn(key, str(caught.exception))
 
     def test_missing_provenance_blocks_before_output(self):
         m, r, c = fixture()
