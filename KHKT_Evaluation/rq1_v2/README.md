@@ -17,6 +17,19 @@ python -m KHKT_Evaluation.rq1_v2.audit datasets/features/BTCUSDT_features.parque
 Trước hết gửi kết quả audit nếu chưa có lịch công bố. Không thể lấy cột macro đã
 điền lặp trong parquet rồi tự coi ngày đổi giá trị là ngày công bố thật.
 
+Tạo lịch công bố ban đầu trực tiếp từ FRED/ALFRED bằng khóa FRED cá nhân:
+
+```bash
+$env:FRED_API_KEY="khóa-của-Coffee"
+python -m KHKT_Evaluation.rq1_v2.fetch_fred_releases --start 2019-01-01 --end 2026-07-26
+```
+
+Không gửi khóa API trong kết quả. Công cụ dùng `output_type=4`, tức giá trị ở lần
+công bố đầu tiên; ngày khả dụng được đặt sang 00:00 UTC ngày kế tiếp vì API chỉ
+cung cấp ngày, không cung cấp giờ. Bốn chuỗi là FEDFUNDS, CPIAUCSL (tăng CPI so
+với cùng kỳ), UNRATE và GDPC1 (tốc độ tăng theo năm của quý). Giá trị được đổi từ
+phần trăm sang tỷ lệ. Tệp metadata đi kèm ghi lại quy tắc và nguồn.
+
 Tạo bản sao `config.example.json` trên máy, điền `release_provenance` bằng nguồn
 ngày công bố, cách xử lý phiên bản sửa đổi, đơn vị và hạn chế dữ liệu. Các ngày
 trong cấu hình chỉ là ví dụ thăm dò; điều chỉnh theo phạm vi có dữ liệu trước khi

@@ -17,7 +17,7 @@ FIELDS = {
 }
 BOUNDS = {
     "interest_rate": (0, .25), "inflation_cpi": (-.03, .15),
-    "unemployment": (0, .45), "gdp_growth": (-.2, .2),
+    "unemployment": (0, .45), "gdp_growth": (-.5, .5),
     "fx_spot": (.01, 1e6), "consumer_confidence": (0, 1),
     "business_confidence": (0, 1), "political_stability": (0, 1),
     "social_unrest_index": (0, 1),

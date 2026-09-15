@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from KHKT_Evaluation.rq1_v2.data import prepare
+from KHKT_Evaluation.rq1_v2.fetch_fred_releases import normalize
 from KHKT_Evaluation.rq1_v2.model import permute_blocks, select_predict
 from KHKT_Evaluation.rq1_v2.run import evaluate, fold_masks
 from KHKT_Evaluation.rq1_v2.world import replay
@@ -111,6 +112,23 @@ class TestRQ1V2(unittest.TestCase):
         revised, _ = prepare(m, pd.concat([r, old], ignore_index=True), c)
         normal, _ = prepare(m, r, c)
         self.assertEqual(revised.loc["2020-02-16"].interest_rate, normal.loc["2020-02-16"].interest_rate)
+
+    def test_revision_of_same_observation_keeps_initial_value(self):
+        m, r, c = fixture()
+        revision = r.iloc[[0]].copy()
+        revision["available_at"] = "2020-01-15T00:00:00Z"
+        revision["value"] = .1
+        revised, _ = prepare(m, pd.concat([r, revision], ignore_index=True), c)
+        self.assertEqual(revised.loc["2020-01-20"].interest_rate, r.iloc[0].value)
+
+    def test_fred_initial_release_normalization(self):
+        rows = normalize("inflation", "CPIAUCSL", "pc1", [{
+            "date": "2020-01-01", "realtime_start": "2020-02-13", "value": "2.5"
+        }])
+        self.assertEqual(rows[0]["available_at"], "2020-02-14T00:00:00+00:00")
+        self.assertEqual(rows[0]["observation_at"], "2020-01-01T00:00:00+00:00")
+        self.assertEqual(rows[0]["value"], .025)
+        self.assertEqual(rows[0]["unit"], "fraction")
 
     def test_missing_provenance_blocks_before_output(self):
         m, r, c = fixture()
