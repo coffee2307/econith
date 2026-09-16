@@ -29,10 +29,13 @@ def releases(frame, countries):
         raise ValueError('Quốc gia hoặc biến chưa khai báo.')
     if (r.observation_at > r.available_at).any() or not np.isfinite(r.value).all():
         raise ValueError('Ngày công bố hoặc giá trị không hợp lệ.')
-    if r.duplicated(['country', 'feature', 'available_at']).any():
-        raise ValueError('Công bố trùng thời điểm; hợp nhất tại nguồn trước khi chạy.')
+    identity = ['country', 'feature', 'observation_at', 'available_at']
+    if r.duplicated(identity).any():
+        raise ValueError('Bản ghi công bố bị trùng hoàn toàn; hợp nhất tại nguồn trước khi chạy.')
     # Lưu lần đầu mỗi kỳ; bản sửa đổi không được quay ngược vào lịch sử.
-    r = r.sort_values('available_at').drop_duplicates(['country', 'feature', 'observation_at'])
+    r = r.sort_values(['available_at', 'observation_at']).drop_duplicates(
+        ['country', 'feature', 'observation_at'], keep='first'
+    )
     return r.reset_index(drop=True)
 
 

@@ -11,7 +11,11 @@ def panel_at(times, releases, countries):
             rows = releases[(releases.country == country) & (releases.feature == feature)].copy()
             if rows.empty:
                 raise ValueError(f'Thiếu {country}/{feature}; không thay bằng node tổng hợp.')
+            rows = rows.sort_values(['available_at', 'observation_at'])
             rows = rows.loc[rows.observation_at >= rows.observation_at.cummax()]
+            # Một ngày có thể công bố nhiều kỳ. Tại cùng thời điểm, trạng thái mới
+            # nhất là kỳ quan sát gần nhất; merge_asof không cần tự xử lý khóa trùng.
+            rows = rows.groupby('available_at', as_index=False, sort=True).tail(1)
             # Kỳ vọng ngây thơ có thể tái lập; không gọi đây là đồng thuận thị trường.
             rows['innovation'] = rows.value.diff().fillna(0.)
             rows['cumulative'] = rows.innovation.cumsum()

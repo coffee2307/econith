@@ -87,6 +87,22 @@ class TestRQ1V3(unittest.TestCase):
         _,r,cfg=fixture(); r['quality']='synthetic'
         with self.assertRaises(ValueError): data.releases(r,cfg['countries'])
 
+    def test_same_release_time_allows_multiple_observation_periods(self):
+        market,r,cfg=fixture()
+        mask=(r.country=='US') & (r.feature=='interest_rate')
+        ids=r.index[mask][:3]
+        shared=r.loc[ids[2],'available_at']
+        r.loc[ids[1:],'available_at']=shared
+        checked=data.releases(r,cfg['countries'])
+        self.assertEqual((checked.loc[(checked.country=='US') &
+                                     (checked.feature=='interest_rate'),
+                                     'available_at']==shared).sum(),2)
+        levels,_=world.panel_at(market.time,checked,cfg['countries'])
+        position=np.flatnonzero(market.time >= shared)[0]
+        self.assertAlmostEqual(levels[position,0],r.loc[ids[2],'value'])
+        duplicate=pd.concat([r,r.loc[[ids[2]]]],ignore_index=True)
+        with self.assertRaises(ValueError): data.releases(duplicate,cfg['countries'])
+
     def test_purge_and_forward_target(self):
         m,_,cfg=fixture(); p=data.market(m,'TEST',5)
         expected=np.sqrt(np.mean(np.diff(np.log(m.adjusted_close.iloc[30:36]))**2))
