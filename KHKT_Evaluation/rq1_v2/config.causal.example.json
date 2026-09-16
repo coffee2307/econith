@@ -1,0 +1,41 @@
+{
+  "mode": "exploratory",
+  "release_provenance": "",
+  "unseen_data_declaration": "",
+  "frequency": "1d",
+  "history": "14d",
+  "horizon": "14d",
+  "control_block": "14d",
+  "control_repeats": 200,
+  "bootstrap_repeats": 1000,
+  "seed": 42,
+  "alphas": [0.01, 0.1, 1.0, 10.0, 100.0],
+  "impulse_half_lives_days": [3, 7, 14],
+  "impulse_max_age_days": 42,
+  "validation_blocks": 3,
+  "required_validation_wins": 2,
+  "min_validation_improvement": 0.001,
+  "selection_metrics": ["mae", "rmse"],
+  "shrinkages": [0.25, 0.5, 1.0],
+  "macro_features": {
+    "interest_rate": "fraction",
+    "inflation": "fraction",
+    "unemployment": "fraction",
+    "gdp_growth": "fraction"
+  },
+  "folds": [
+    {
+      "train_start": "2020-01-01T00:00:00Z",
+      "validation_start": "2024-01-01T00:00:00Z",
+      "test_start": "2025-01-01T00:00:00Z",
+      "test_end": "2026-01-01T00:00:00Z"
+    },
+    {
+      "train_start": "2020-01-01T00:00:00Z",
+      "validation_start": "2025-01-01T00:00:00Z",
+      "test_start": "2026-01-01T00:00:00Z",
+      "test_end": "2026-07-27T00:00:00Z"
+    }
+  ],
+  "events": []
+}

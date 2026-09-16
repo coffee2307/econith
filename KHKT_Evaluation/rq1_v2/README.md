@@ -1,5 +1,86 @@
 # RQ1 v2 — bản thử nghiệm độc lập
 
+## Bản xung World đa thang thời gian
+
+Kết quả `causal_14d` cho thấy cổng ổn định trả E1 về B0 ở cả hai fold. Mức giảm
+MAE tốt nhất trên validation chỉ đạt khoảng 0,054% và 0,109%, chưa đủ ổn định để
+kích hoạt mô hình. Bản tiếp theo sửa hai điểm trong thiết kế thay vì chọn tham số
+theo tập test:
+
+- Xung World giữ mốc 0 khi không có sự kiện. Trước đây phép trừ trung bình có thể
+  tạo hiệu chỉnh khác 0 ngay cả khi xung đã hết.
+- Mỗi kênh World được tách thành hướng và độ lớn, rồi suy giảm theo 3/7/14 ngày.
+  Xung bị cắt sau 42 ngày để không để lại dư lượng vô hạn.
+- Ứng viên phải cùng cải thiện MAE và RMSE, đồng thời thắng B0 trên ít nhất 2/3
+  đoạn validation. Ngưỡng cải thiện tối thiểu 0,1% chỉ dùng cho thăm dò.
+
+Chạy lại vào thư mục mới; không ghi đè `causal_14d`:
+
+```powershell
+python -m unittest tests.test_rq1_v2 tests.test_rq1_innovations -v
+python -m KHKT_Evaluation.rq1_v2.run --market datasets/features/BTCUSDT_features.parquet --releases datasets/macro_releases.csv --config KHKT_Evaluation/rq1_v2/config.causal.local.json --causal-world-preset --output KHKT_Evaluation/results_rq1_v2/causal_multiscale_14d
+```
+
+Hai fold 2025–2026 đã được xem nên lần chạy này vẫn là exploratory. Kết quả chỉ
+cho biết thiết kế mới có đáng mang sang một giai đoạn hoặc tài sản chưa dùng hay
+không; không được đổi thành confirmatory hoặc tự xác nhận H1.
+
+## World theo tác động riêng của lần công bố
+
+Các lần chạy 3/7/14 ngày cho thấy dữ liệu công bố trực tiếp có tín hiệu nhẹ ở
+chân trời 14 ngày, còn replay World tích lũy làm kết quả kém ổn định. Bản tiếp
+theo chỉ giữ năm tác động World: biến động, dòng lệnh, thanh khoản, lạm phát và
+niềm tin. Mỗi tác động là chênh lệch giữa hai kịch bản có cùng trạng thái hiện
+tại: một nhánh nhận lần công bố mới, nhánh kia giữ giá trị trước đó. Hai nhánh
+được phát 14 ngày bằng cùng tác nhân và không đọc công bố tương lai.
+
+Mô hình chỉ được bật khi giảm ít nhất 0,5% MAE kiểm định và thắng B0 trong cả ba
+đoạn thời gian liên tiếp. Mức hiệu chỉnh được chọn trong 0,25/0,5/1 để hạn chế
+phản ứng quá mạnh. Các quy tắc này được áp dụng giống nhau cho E1 và C1.
+
+Tạo cấu hình local từ `config.causal.example.json`, chép nguyên
+`release_provenance` từ cấu hình local hiện tại, sau đó chạy:
+
+```powershell
+python -m unittest tests.test_rq1_v2 tests.test_rq1_innovations -v
+python -m KHKT_Evaluation.rq1_v2.run --market datasets/features/BTCUSDT_features.parquet --releases datasets/macro_releases.csv --config KHKT_Evaluation/rq1_v2/config.causal.local.json --causal-world-preset --output KHKT_Evaluation/results_rq1_v2/causal_14d
+```
+
+Hai fold mới bắt đầu từ năm 2025 để không tiếp tục chọn thiết kế bằng kết quả
+2023–2024. Chúng vẫn được gọi là thăm dò vì dữ liệu có thể đã xuất hiện trong
+các thử nghiệm V1. Phải giữ cả hai fold và mọi kết quả, kể cả khi E1 thua.
+
+## Nhánh nâng cấp tín hiệu công bố
+
+Giữ nguyên `local_001`. Chạy cấu hình nâng cấp bằng cờ tùy chọn:
+
+```powershell
+python -m unittest tests.test_rq1_v2 tests.test_rq1_innovations -v
+python -m KHKT_Evaluation.rq1_v2.run --market datasets/features/BTCUSDT_features.parquet --releases datasets/macro_releases.csv --config KHKT_Evaluation/rq1_v2/config.local.json --innovation-preset --output KHKT_Evaluation/results_rq1_v2/innovations_3d
+```
+
+Bỏ cờ `--innovation-preset` để giữ cách tính cũ. Nhánh mới bổ sung thay đổi tại
+ngày công bố, chuẩn hóa bằng lịch sử trước đó và bộ nhớ suy giảm 3/7/14 ngày.
+Đây là độ bất thường so với quá khứ, KHÔNG phải bất ngờ so với khảo sát thị trường.
+B1 được bổ sung cùng các tín hiệu công bố để kiểm tra giá trị riêng của World.
+World chạy chậm bằng 1/30 nhịp gốc mỗi ngày; đây là giả định thăm dò, chưa phải
+hệ số đã hiệu chỉnh. Nhánh phản thực tế giữ các quan sát đầu tiên suốt một fold,
+không phải mô phỏng phản thực tế riêng cho từng sự kiện và không chứng minh nhân quả.
+
+Có thể chạy thêm `--horizon-days 7` hoặc `--horizon-days 14`, mỗi lần dùng thư mục
+output mới. Phải lưu và báo cáo tất cả chân trời, không chỉ giữ lần thắng. Không
+đổi H1 sau khi thấy kết quả. Các giai đoạn đã xem vẫn là thăm dò. `provenance.config`
+lưu cấu hình thực tế sau áp dụng cờ; `config_sha256` chỉ là dấu vân tay tệp đầu vào.
+
+Chưa triển khai mô hình học chính sách, LLM tự kiểm định giả thuyết, mở rộng nhiều
+quốc gia, đường cơ sở HAR hoặc hiệu chỉnh động học tự động. Không gọi bản nâng cấp
+này là hệ thống dự báo thiên nga đen. Không thay đổi demo, cờ LLM hoặc báo cáo cũ.
+Sai số kiểm định của mọi alpha được lưu trong `selected.*.candidates`, kể cả khi
+quay về B0. Tập test không tham gia chọn alpha.
+
+Nguồn phương pháp phân chia thời gian:
+https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.TimeSeriesSplit.html
+
 Trạng thái: đã triển khai đường chạy thử nghiệm và kiểm thử phần mềm; chưa
 nghiệm thu toàn bộ kế hoạch nâng cấp và chưa có kết quả trên dữ liệu thực.
 Không thay thế kết quả V1, báo cáo KHKT, giao diện hoặc cấu hình LLM.
@@ -16,6 +97,26 @@ python -m KHKT_Evaluation.rq1_v2.audit datasets/features/BTCUSDT_features.parque
 
 Trước hết gửi kết quả audit nếu chưa có lịch công bố. Không thể lấy cột macro đã
 điền lặp trong parquet rồi tự coi ngày đổi giá trị là ngày công bố thật.
+
+Tạo lịch công bố ban đầu trực tiếp từ FRED/ALFRED bằng khóa FRED cá nhân:
+
+```bash
+$env:FRED_API_KEY="khóa-của-Coffee"
+python -m KHKT_Evaluation.rq1_v2.fetch_fred_releases --start 2019-01-01 --end 2026-07-26
+```
+
+Không gửi khóa API trong kết quả. Công cụ dùng `output_type=4`, tức giá trị ở lần
+công bố đầu tiên; ngày khả dụng được đặt sang 00:00 UTC ngày kế tiếp vì API chỉ
+cung cấp ngày, không cung cấp giờ. Bốn chuỗi là FEDFUNDS, CPIAUCSL (tăng CPI so
+với cùng kỳ), UNRATE và GDPC1 (tốc độ tăng theo năm của quý). Giá trị được đổi từ
+phần trăm sang tỷ lệ. Do FRED không cho dùng phép biến đổi phía máy chủ cùng
+`output_type=4`, công cụ tải giá trị gốc với `units=lin`, lấy thêm 12 tháng CPI và
+3 tháng GDP làm kỳ gốc, rồi tự tính mức tăng từ các lần công bố ban đầu. Tệp
+metadata đi kèm ghi lại quy tắc và nguồn.
+
+Nếu FRED trả lỗi, công cụ chỉ in mã HTTP và thông báo của máy chủ; URL chứa khóa
+không được đưa vào lỗi. Lỗi `api_key is not registered` yêu cầu tạo hoặc kích hoạt
+khóa mới trong tài khoản FRED. Không dán khóa vào báo cáo, issue hoặc cuộc trò chuyện.
 
 Tạo bản sao `config.example.json` trên máy, điền `release_provenance` bằng nguồn
 ngày công bố, cách xử lý phiên bản sửa đổi, đơn vị và hạn chế dữ liệu. Các ngày

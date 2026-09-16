@@ -14,6 +14,7 @@ from KHKT_Evaluation.common.metrics import diebold_mariano
 from KHKT_Evaluation.rq1_v2.data import prepare
 from KHKT_Evaluation.rq1_v2.model import permute_blocks, select_predict
 from KHKT_Evaluation.rq1_v2.world import replay
+from KHKT_Evaluation.rq1_v2.innovations import release_features, enrich, causal_world_features
 
 
 def digest(path):
@@ -30,6 +31,9 @@ def score(y, pred):
 
 
 def validate_config(cfg):
+    scale = cfg.get("reaction_daily_scale", 1.)
+    if not np.isfinite(scale) or not 0 < scale <= 1:
+        raise ValueError("reaction_daily_scale phải thuộc (0, 1].")
     if cfg["mode"] not in ("exploratory", "confirmatory"):
         raise ValueError("mode phải là exploratory hoặc confirmatory.")
     if cfg["mode"] == "confirmatory" and not cfg.get("unseen_data_declaration"):
@@ -45,6 +49,13 @@ def validate_config(cfg):
         raise ValueError("Khối đối chứng phải là bội frequency và không ngắn hơn horizon.")
     if len(cfg["folds"]) < 2:
         raise ValueError("Cần ít nhất hai cửa sổ ngoài mẫu.")
+    blocks = int(cfg.get("validation_blocks", 1))
+    wins = int(cfg.get("required_validation_wins", 1))
+    if blocks < 1 or not 1 <= wins <= blocks:
+        raise ValueError("Số đoạn thắng kiểm định phải thuộc [1, validation_blocks].")
+    selection_metrics = tuple(cfg.get("selection_metrics", ("mae", "rmse")))
+    if not selection_metrics or any(name not in ("mae", "rmse") for name in selection_metrics):
+        raise ValueError("selection_metrics chỉ nhận mae và rmse.")
 
 
 def fold_masks(panel, fold, valid_rows):
@@ -100,8 +111,25 @@ def evaluate(market, releases, cfg):
         sub = panel.loc[(panel.index >= pd.Timestamp(fold["train_start"])) & (panel.index < end)].copy()
         dynamic = replay(sub, cfg)
         static = replay(sub, cfg, stateful=False)
+        causal_mode = cfg.get("causal_world_impulses", False)
+        if causal_mode:
+            dynamic = causal_world_features(sub, cfg)
+        elif cfg.get("release_innovations", False):
+            dynamic = enrich(sub, dynamic, cfg)
         x = dynamic.to_numpy(dtype=float)
+        feature_names = list(dynamic.columns)
         raw = sub[macro].to_numpy(dtype=float)
+        if causal_mode:
+            event_frame = release_features(sub, macro)
+            event_frame = event_frame[[name + "_innovation" for name in macro]]
+            raw = np.column_stack([raw, event_frame.to_numpy(dtype=float)])
+        elif cfg.get("release_innovations", False):
+            event_frame = release_features(sub, macro)
+            events = event_frame.to_numpy(dtype=float)
+            feature_names.extend(event_frame.columns)
+            raw = np.column_stack([raw, events])
+            # B1 cũng nhận thông tin công bố; không gán lợi ích của biến mới cho World.
+            x = np.column_stack([x, events])
         xs = static.to_numpy(dtype=float)
         y, b0 = sub.target.to_numpy(), sub.b0.to_numpy()
         usable = np.isfinite(np.column_stack([x, raw, xs, y, b0])).all(axis=1)
@@ -114,21 +142,44 @@ def evaluate(market, releases, cfg):
             raise ValueError("Tập kiểm tra có khoảng thiếu dữ liệu; tách fold hoặc sửa nguồn.")
         frame = pd.DataFrame({"time": sub.index[test], "fold": number, "target": y[test], "B0": b0[test]})
         selected = {}
-        variants = {"B1": raw, "E1": x, "E1_plus": np.column_stack([raw, x]), "E_static": xs}
-        for name, features in variants.items():
-            frame[name], selected[name] = select_predict(features, y, b0, train, val, test, cfg["alphas"])
+        # Xung World dùng mốc 0 có ý nghĩa: 0 là không còn tác động sự kiện.
+        # Các biến mức vẫn được trừ trung bình như trước.
+        world_center = not causal_mode
+        variants = {
+            "B1": (raw, True),
+            "E1": (x, world_center),
+            "E1_plus": (
+                np.column_stack([raw, x]),
+                np.r_[np.ones(raw.shape[1], dtype=bool),
+                      np.full(x.shape[1], world_center, dtype=bool)],
+            ),
+            "E_static": (xs, True),
+        }
+        selection = {
+            "validation_blocks": int(cfg.get("validation_blocks", 1)),
+            "required_validation_wins": int(cfg.get("required_validation_wins", 1)),
+            "min_relative_gain": float(cfg.get("min_validation_improvement", 0.)),
+            "shrinkages": tuple(cfg.get("shrinkages", [1.])),
+            "selection_metrics": tuple(cfg.get("selection_metrics", ("mae", "rmse"))),
+        }
+        for name, (features, center_features) in variants.items():
+            frame[name], selected[name] = select_predict(
+                features, y, b0, train, val, test, cfg["alphas"],
+                center_features=center_features, **selection)
         fold_controls = []
         for repeat in range(cfg["control_repeats"]):
             rng = np.random.default_rng(np.random.SeedSequence([cfg["seed"], number, repeat]))
             shuffled = permute_blocks(x, (train, val, test), block, rng)
-            pred, _ = select_predict(shuffled, y, b0, train, val, test, cfg["alphas"])
+            pred, _ = select_predict(
+                shuffled, y, b0, train, val, test, cfg["alphas"],
+                center_features=world_center, **selection)
             fold_controls.append(pred)
         predictions.append(frame)
         controls.append(np.asarray(fold_controls))
         diagnostics.append({"fold": number, "config": fold, "n_train": int(train.sum()),
                             "n_validation": int(val.sum()), "n_test": int(test.sum()),
-                            "selected": selected, "world_features": list(dynamic.columns),
-                            "constant_train_features": list(dynamic.columns[x[train].std(axis=0) <= 1e-12]),
+                            "selected": selected, "world_features": feature_names,
+                            "constant_train_features": list(np.array(feature_names)[x[train].std(axis=0) <= 1e-12]),
                             "metrics": {name: score(frame.target, frame[name]) for name in ("B0", *variants)}})
     frame = pd.concat(predictions, ignore_index=True)
     shuffled_predictions = np.concatenate(controls, axis=1)
@@ -178,11 +229,32 @@ def main():
     parser.add_argument("--releases", required=True, type=Path)
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--innovation-preset", action="store_true",
+                        help="Thăm dò tín hiệu công bố và World phản thực tế; giữ giao thức cũ nếu bỏ cờ.")
+    parser.add_argument("--horizon-days", type=int, choices=(3, 7, 14))
+    parser.add_argument("--causal-world-preset", action="store_true",
+                        help="World theo tác động riêng của từng công bố và chọn mô hình ổn định.")
     args = parser.parse_args()
     if args.output.exists():
         parser.error("Output đã tồn tại; dùng thư mục mới để giữ nguyên kết quả cũ.")
     try:
         cfg = json.loads(args.config.read_text(encoding="utf-8"))
+        if args.innovation_preset:
+            cfg.update(mode="exploratory", release_innovations=True,
+                       reaction_daily_scale=1 / 30)
+        if args.causal_world_preset:
+            cfg.update(mode="exploratory", causal_world_impulses=True,
+                       release_innovations=False, reaction_daily_scale=1 / 30,
+                       impulse_simulation_days=14,
+                       impulse_half_lives_days=[3, 7, 14],
+                       impulse_max_age_days=42,
+                       validation_blocks=3, required_validation_wins=2,
+                       min_validation_improvement=.001,
+                       selection_metrics=["mae", "rmse"],
+                       shrinkages=[.25, .5, 1.])
+        if args.horizon_days:
+            cfg.update(mode="exploratory", horizon=f"{args.horizon_days}d")
+            cfg["control_block"] = f"{max(14, args.horizon_days)}d"
         market = pd.read_parquet(args.market) if args.market.suffix == ".parquet" else pd.read_csv(args.market)
         releases = pd.read_csv(args.releases)
         result, frame, controls = evaluate(market, releases, cfg)

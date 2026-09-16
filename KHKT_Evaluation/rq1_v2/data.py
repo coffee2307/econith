@@ -53,7 +53,10 @@ def prepare(market, releases, cfg):
             raise ValueError(f"Thiếu dữ liệu hoặc sai đơn vị của {name}: cần {expected_unit}.")
         if rows.available_at.duplicated().any() or not np.isfinite(rows.value).all():
             raise ValueError(f"Trùng ngày công bố hoặc giá trị lỗi: {name}.")
-        # Sửa lại một kỳ quá khứ không được thay thế quan sát mới nhất đang có.
+        # Giữ lần công bố đầu tiên của mỗi kỳ. Một bản sửa đổi về sau không được
+        # thay thế dữ liệu mà mô hình đã thực sự nhìn thấy tại thời điểm lịch sử.
+        rows = rows.drop_duplicates("observation_at", keep="first")
+        # Bỏ bản sửa muộn của kỳ cũ nếu một kỳ mới hơn đã được công bố trước đó.
         rows = rows.loc[rows.observation_at >= rows.observation_at.cummax()]
         merged = pd.merge_asof(left, rows, left_on="time", right_on="available_at", direction="backward")
         panel[name] = merged.value.to_numpy()

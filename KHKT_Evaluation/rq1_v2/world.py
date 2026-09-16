@@ -17,7 +17,7 @@ FIELDS = {
 }
 BOUNDS = {
     "interest_rate": (0, .25), "inflation_cpi": (-.03, .15),
-    "unemployment": (0, .45), "gdp_growth": (-.2, .2),
+    "unemployment": (0, .45), "gdp_growth": (-.5, .5),
     "fx_spot": (.01, 1e6), "consumer_confidence": (0, 1),
     "business_confidence": (0, 1), "political_stability": (0, 1),
     "social_unrest_index": (0, 1),
@@ -51,7 +51,7 @@ def replay(panel, cfg, *, stateful=True):
                 deltas = {}
                 for a in proposals:
                     key = (a.group, a.field)
-                    deltas[key] = deltas.get(key, 0.) + a.delta * step
+                    deltas[key] = deltas.get(key, 0.) + a.delta * step * cfg.get("reaction_daily_scale", 1.)
                 for (group, field), delta in deltas.items():
                     obj = getattr(country, group)
                     lo, hi = BOUNDS[field]
