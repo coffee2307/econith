@@ -67,6 +67,17 @@ def channels(values, weights):
     return np.concatenate((local, global_mean, gap, dispersion), axis=-1)
 
 
+def dynamic_channels(values, weights):
+    """Mã hóa cả hướng và cường độ vì biến động có thể tăng với cú sốc hai chiều."""
+    values = np.asarray(values, float)
+    weights = np.asarray(weights, float)
+    local = np.einsum('...nf,n->...f', values, weights)
+    global_mean = np.mean(values, axis=-2)
+    local_magnitude = np.einsum('...nf,n->...f', np.abs(values), weights)
+    global_magnitude = np.mean(np.abs(values), axis=-2)
+    return np.concatenate((local, local-global_mean, local_magnitude, global_magnitude), axis=-1)
+
+
 def association_network(shocks, train, cfg):
     """Ước lượng độ mạnh liên hệ trễ chỉ từ train; không diễn giải là nhân quả."""
     n = shocks.shape[1]
@@ -131,6 +142,7 @@ def features(levels, innovations, train, cfg, weights, *, linked=True):
     carried = decayed_impulses(shocks, half_lives)
     static = channels(state, w)
     dynamic = []
+    sensitivity_widths = []
     for impulses in carried:
         scales = []
         for impulse in impulses:
@@ -139,14 +151,18 @@ def features(levels, innovations, train, cfg, weights, *, linked=True):
             for _ in range(cfg['rollout_steps']):
                 paths = .8*rhos*paths + .2*np.einsum('ij,pjf->pif', network, paths)
                 total += paths
-            impact = channels(total, w)
-            scales.append(np.concatenate((np.median(impact, axis=0),
-                           np.quantile(impact,.9,axis=0)-np.quantile(impact,.1,axis=0))))
+            impact = dynamic_channels(total, w)
+            scales.append(np.median(impact, axis=0))
+            sensitivity_widths.append(float(np.mean(
+                np.quantile(impact,.9,axis=0)-np.quantile(impact,.1,axis=0))))
         dynamic.append(np.concatenate(scales))
     return static, np.asarray(dynamic), {'rho': rho.tolist(), 'paths': cfg['paths'],
              'model': 'causal multiscale observed-state network surrogate',
              'impulse_half_lives': [float(x) for x in half_lives],
              'network': network.tolist(), 'network_method': network_method,
              'static_channels': ['asset_local','global_mean','local_minus_global','country_dispersion'],
+             'dynamic_channels': ['signed_asset_local','signed_local_minus_global',
+                                  'magnitude_asset_local','magnitude_global'],
+             'sensitivity_width_mean': float(np.mean(sensitivity_widths)),
              'dynamic_nonzero_share': float(np.mean(np.abs(dynamic) > 1e-12)),
              'uncertainty': 'parameter sensitivity; not calibrated predictive probability'}

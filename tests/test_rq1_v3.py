@@ -9,7 +9,7 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 from KHKT_Evaluation.rq1_v3 import data, fetch_macro, fetch_market, models, world, statistics
-from KHKT_Evaluation.rq1_v3.run import evaluate
+from KHKT_Evaluation.rq1_v3.run import evaluate, h1_evidence
 
 
 def fixture():
@@ -101,9 +101,15 @@ class TestRQ1V3(unittest.TestCase):
         static,linked,_=world.features(levels,innovations,train,cfg,[1.,0.])
         _,isolated,_=world.features(levels,innovations,train,cfg,[1.,0.],linked=False)
         self.assertEqual(static.shape[1],4*len(data.FEATURES))
-        self.assertEqual(linked.shape[1],2*4*len(data.FEATURES)*2)
+        self.assertEqual(linked.shape[1],2*4*len(data.FEATURES))
         self.assertGreater(np.max(np.abs(linked-isolated)),0.)
         self.assertGreater(np.max(np.abs(linked[11:])),0.)
+
+    def test_dynamic_channels_keep_two_sided_shock_magnitude(self):
+        values=np.zeros((2,2,4)); values[0,0,0]=1.; values[1,0,0]=-1.
+        encoded=world.dynamic_channels(values,[1.,0.])
+        self.assertAlmostEqual(np.median(encoded[:,0]),0.)
+        self.assertAlmostEqual(np.median(encoded[:,8]),1.)
 
     def test_train_association_network_ignores_future(self):
         rng=np.random.default_rng(8)
@@ -174,6 +180,31 @@ class TestRQ1V3(unittest.TestCase):
         train=np.arange(120)<60; val=(np.arange(120)>=60)&(np.arange(120)<90)
         _,_,cfg=fixture(); pred,meta=models.augment(x,y,base,train,val,cfg)
         np.testing.assert_array_equal(pred,base); self.assertFalse(meta['active'])
+
+    def test_refit_uses_validation_but_never_test_labels(self):
+        x=np.c_[np.linspace(-1,1,120),np.linspace(1,-1,120)**2]
+        y=.02+.003*x[:,0]; base=np.full(120,.02)
+        development=np.arange(120)<90
+        har_info={'alpha':1.}
+        first_har=models.refit_har(x,y,development,har_info)
+        details={'active':True,'alpha':1.,'weight':.25}
+        first=models.refit_augment(x,y,base,development,details)
+        changed=y.copy(); changed[~development]*=100
+        second_har=models.refit_har(x,changed,development,har_info)
+        second=models.refit_augment(x,changed,base,development,details)
+        np.testing.assert_allclose(first_har,second_har)
+        np.testing.assert_allclose(first,second)
+
+    def test_h1_evidence_requires_b0_ci_and_random_tail(self):
+        metrics={'B0':{'mae':2.,'rmse':3.},'E1':{'mae':1.,'rmse':2.}}
+        controls={'mae':{'median':1.5,'share_not_worse':.04},
+                  'rmse':{'median':2.5,'share_not_worse':.01}}
+        interval={'mae':[-.3,-.1],'rmse':[-.4,-.2]}
+        self.assertTrue(h1_evidence(metrics,controls,interval)['strong_exploratory_support'])
+        controls['mae']['share_not_worse']=.06
+        evidence=h1_evidence(metrics,controls,interval)
+        self.assertTrue(evidence['meets_numeric_criteria'])
+        self.assertFalse(evidence['strong_exploratory_support'])
 
     def test_holm_and_identical_bootstrap(self):
         np.testing.assert_allclose(statistics.holm([.01,.04,.03]),[.03,.06,.06])

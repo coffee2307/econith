@@ -30,6 +30,12 @@ def har(x, y, train, validation, alphas):
     return pred, {'alpha': alpha, 'definition': 'HAR-style daily squared-return proxy; not intraday RV'}
 
 
+def refit_har(x, y, development, details):
+    """Khớp lại alpha đã khóa trên train+validation trước khi dự báo test."""
+    model = fit(x[development], np.log(np.maximum(y[development], 1e-12)), details['alpha'])
+    return np.exp(np.clip(predict(model, x), -30, 5))
+
+
 def augment(x, y, base, train, validation, cfg):
     base_loss = np.array([np.mean(abs(y[validation]-base[validation])),
                           np.sqrt(np.mean((y[validation]-base[validation])**2))])
@@ -72,3 +78,13 @@ def augment(x, y, base, train, validation, cfg):
     pred, alpha, weight = selected
     details.update(alpha=alpha, weight=weight)
     return pred, details
+
+
+def refit_augment(x, y, base, development, details):
+    """Khớp lại tầng đã được validation chọn; tầng bị loại vẫn giữ nguyên base."""
+    if not details.get('active'):
+        return base.copy()
+    cap = float(np.quantile(np.abs(y[development]-base[development]), .9))
+    model = fit(x[development], y[development]-base[development], details['alpha'], intercept=False)
+    delta = np.clip(predict(model, x), -cap, cap)
+    return np.maximum(base + details['weight']*delta, 1e-12)

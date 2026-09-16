@@ -66,6 +66,22 @@ def validate(cfg):
             raise ValueError(f'Cần khai báo {key}.')
 
 
+def h1_evidence(metrics, controls, interval):
+    """Báo cáo tiêu chí H1 theo số liệu; exploratory không được đổi thành xác nhận."""
+    lower_b0 = all(metrics['E1'][key] < metrics['B0'][key] for key in ('mae','rmse'))
+    lower_control_median = all(metrics['E1'][key] < controls[key]['median']
+                               for key in ('mae','rmse'))
+    ci_below_zero = all(interval[key][1] < 0 for key in ('mae','rmse'))
+    random_tail = all(controls[key]['share_not_worse'] <= .05 for key in ('mae','rmse'))
+    return {'lower_than_B0_both': lower_b0,
+            'lower_than_C1_median_both': lower_control_median,
+            'ci95_difference_below_zero_both': ci_below_zero,
+            'C1_share_not_worse_at_most_0_05_both': random_tail,
+            'meets_numeric_criteria': lower_b0 and lower_control_median,
+            'strong_exploratory_support': lower_b0 and lower_control_median
+                                                  and ci_below_zero and random_tail}
+
+
 def evaluate(market, releases, cfg):
     validate(cfg)
     releases = data.releases(releases, cfg['countries'])
@@ -83,11 +99,19 @@ def evaluate(market, releases, cfg):
             train,val,test = data.masks(panel,fold,usable)
             static,dynamic,meta = world.features(levels,events,train,cfg,exposure)
             _,isolated,_ = world.features(levels,events,train,cfg,exposure,linked=False)
-            base,base_info = models.har(market_x,y,train,val,cfg['alphas'])
-            b1,b1info = models.augment(levels,y,base,train,val,cfg)
-            st,stinfo = models.augment(static,y,base,train,val,cfg)
-            e1,dyinfo = models.augment(dynamic,y,st,train,val,cfg)
-            c2,_ = models.augment(isolated,y,st,train,val,cfg)
+            # Chọn cấu hình chỉ bằng train -> validation.
+            base_select,base_info = models.har(market_x,y,train,val,cfg['alphas'])
+            _,b1info = models.augment(levels,y,base_select,train,val,cfg)
+            st_select,stinfo = models.augment(static,y,base_select,train,val,cfg)
+            _,dyinfo = models.augment(dynamic,y,st_select,train,val,cfg)
+            _,c2info = models.augment(isolated,y,st_select,train,val,cfg)
+            # Sau khi khóa lựa chọn, dùng toàn bộ nhãn đã biết trước test để refit.
+            development = train | val
+            base = models.refit_har(market_x,y,development,base_info)
+            b1 = models.refit_augment(levels,y,base,development,b1info)
+            st = models.refit_augment(static,y,base,development,stinfo)
+            e1 = models.refit_augment(dynamic,y,st,development,dyinfo)
+            c2 = models.refit_augment(isolated,y,st,development,c2info)
             f = pd.DataFrame({'time':panel.index[test], 'asset':asset,'fold':number,
                               'target':y[test],'B0':base[test], 'B1':b1[test],
                               'E_static':st[test], 'E1':e1[test], 'C2':c2[test]})
@@ -97,8 +121,14 @@ def evaluate(market, releases, cfg):
             for repeat in range(cfg['control_repeats']):
                 rng = np.random.default_rng(np.random.SeedSequence([cfg['seed'],number,repeat]))
                 shuffled = statistics.shuffle(joined,(train,val,test),h,rng)
-                cst,_ = models.augment(shuffled[:,:static.shape[1]],y,base,train,val,cfg)
-                cp,_ = models.augment(shuffled[:,static.shape[1]:],y,cst,train,val,cfg)
+                cst_select,cstinfo = models.augment(
+                    shuffled[:,:static.shape[1]],y,base_select,train,val,cfg)
+                _,cpinfo = models.augment(
+                    shuffled[:,static.shape[1]:],y,cst_select,train,val,cfg)
+                cst = models.refit_augment(
+                    shuffled[:,:static.shape[1]],y,base,development,cstinfo)
+                cp = models.refit_augment(
+                    shuffled[:,static.shape[1]:],y,cst,development,cpinfo)
                 random_predictions.append(cp[test])
             controls.append(np.asarray(random_predictions))
             dm = diebold_mariano(y[test],e1[test],base[test],h=h,loss='abs')
@@ -122,14 +152,20 @@ def evaluate(market, releases, cfg):
             f = frame.drop(gain.nlargest(k).index) if k else frame
             sensitivity[str(k)] = {name:statistics.score(f.target.to_numpy(),f[name].to_numpy())
                                    for name in ('B0','E1')}
+        evidence = h1_evidence(metrics,summary,ci)
         result[asset] = {'metrics':metrics,'C1':summary,'ci95_E1_minus_B0':ci,
+                         'h1_evidence':evidence,
                          'folds':diagnostics,'remove_best_days':sensitivity,
                          'controls':control.tolist()}
     ps = [row['p_value_two_sided'] for row in dm_rows]
     for row,p in zip(dm_rows,statistics.holm(ps)):
         row['p_holm'] = p
-    return {'protocol':'rq1_v3_1_multiscale_world', 'mode':'exploratory','assets':result,
-            'dm':dm_rows,'h1_confirmed':False,
+    supported = [asset for asset,value in result.items()
+                 if value['h1_evidence']['strong_exploratory_support']]
+    return {'protocol':'rq1_v3_2_refit_multiscale_world', 'mode':'exploratory','assets':result,
+            'dm':dm_rows,'h1_exploratory_supported':bool(supported),
+            'h1_supported_assets':supported,'h1_confirmed':False,
+            'h1_confirmation_blocker':'Dữ liệu/fold đã được xem trong phát triển exploratory; cần giao thức khóa và holdout chưa xem.',
             'limitations':['World là mạng trạng thái quan sát đa thang rút gọn, chưa phải kernel đa tác nhân đầy đủ.',
                            'Chưa có consensus, vintage đa quốc gia đã kiểm chứng hoặc xác suất kịch bản hiệu chỉnh.',
                            'C2 tắt mạng lan truyền nhưng vẫn giữ các trạng thái tĩnh quốc tế.',
@@ -171,7 +207,9 @@ def main():
     args.output.mkdir(parents=True,exist_ok=False)
     pred.to_csv(args.output/'predictions.csv',index=False)
     (args.output/'metrics.json').write_text(encoded,encoding='utf-8')
-    print(f'Hoàn tất thăm dò: {args.output}. H1 chưa được xác nhận.')
+    assets = ', '.join(result['h1_supported_assets']) or 'không có'
+    print(f'Hoàn tất thăm dò: {args.output}. Tài sản có bằng chứng H1 mạnh: {assets}. '
+          'H1 chưa được xác nhận vì chưa có holdout khóa chưa xem.')
 
 
 if __name__=='__main__':
