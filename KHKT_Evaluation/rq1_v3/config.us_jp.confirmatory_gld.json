@@ -1,0 +1,44 @@
+{
+  "mode": "confirmatory",
+  "countries": ["US", "JP"],
+  "assets": {
+    "GLD": [0.5, 0.5]
+  },
+  "horizon_sessions": 5,
+  "paths": 32,
+  "rollout_steps": 5,
+  "impulse_half_lives": [3, 7, 21],
+  "control_repeats": 1000,
+  "bootstrap_repeats": 5000,
+  "alphas": [0.1, 1.0, 10.0],
+  "weights": [0.05, 0.1, 0.25],
+  "validation_blocks": 4,
+  "validation_wins": 3,
+  "min_gain": 0.005,
+  "min_block_gain": -0.01,
+  "seed": 42,
+  "network_mode": "fixed",
+  "network": [[0.0, 0.0], [0.0, 0.0]],
+  "network_source": "Pre-registered null cross-country propagation for GLD confirmation; H1 tests World state and impulses without claiming a causal country network",
+  "network_available_at": "2007-12-31T00:00:00Z",
+  "market_source": "Yahoo Finance adjusted close for GLD; see market.metadata.json",
+  "calendar_audit": "NYSE sessions from pandas_market_calendars; see market.metadata.json",
+  "release_provenance": "FRED/ALFRED initial releases, output_type=4 and units=lin; see releases.metadata.json",
+  "data_use_history": "Data through 2025-12-31 were used for exploratory development. Model output for 2026-01-01 through 2026-09-01 had not been evaluated when this protocol was locked.",
+  "confirmation": {
+    "primary_assets": ["GLD"],
+    "development_cutoff": "2026-01-01T00:00:00Z",
+    "holdout_end": "2026-09-01T00:00:00Z",
+    "minimum_test_rows": 120,
+    "locked_at": "2026-09-16T00:00:00Z",
+    "decision_rule": "strong_support_all_primary_assets"
+  },
+  "folds": [
+    {
+      "train_start": "2018-01-01T00:00:00Z",
+      "validation_start": "2022-01-01T00:00:00Z",
+      "test_start": "2026-01-01T00:00:00Z",
+      "test_end": "2026-09-01T00:00:00Z"
+    }
+  ]
+}

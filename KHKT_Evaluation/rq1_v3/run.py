@@ -1,4 +1,4 @@
-"""Chạy v3 thăm dò; chặn xác nhận khi dữ liệu/World chưa được nghiệm thu."""
+"""Chạy RQ1 v3 ở chế độ thăm dò hoặc theo giao thức xác nhận đã khóa."""
 import argparse
 import hashlib
 import json
@@ -13,8 +13,9 @@ from KHKT_Evaluation.common.metrics import diebold_mariano
 
 
 def validate(cfg):
-    if cfg.get('mode') != 'exploratory':
-        raise ValueError('V3 hiện chỉ được nghiệm thu thăm dò; chưa cho phép confirmatory.')
+    mode = cfg.get('mode')
+    if mode not in ('exploratory', 'confirmatory'):
+        raise ValueError('mode phải là exploratory hoặc confirmatory.')
     if len(cfg['countries']) < 2 or len(set(cfg['countries'])) != len(cfg['countries']):
         raise ValueError('Cần ít nhất hai quốc gia khác nhau.')
     if cfg['horizon_sessions'] < 2 or cfg['paths'] < 2 or cfg['rollout_steps'] < 1:
@@ -35,8 +36,34 @@ def validate(cfg):
     if (not half_lives or any(not np.isfinite(x) or x <= 0 for x in half_lives) or
             len(set(float(x) for x in half_lives)) != len(half_lives)):
         raise ValueError('Chu kỳ bán rã của xung World không hợp lệ.')
-    if len(cfg['folds']) < 2:
-        raise ValueError('Cần ít nhất hai fold.')
+    if mode == 'exploratory' and len(cfg['folds']) < 2:
+        raise ValueError('Thăm dò cần ít nhất hai fold.')
+    if mode == 'confirmatory':
+        confirmation = cfg.get('confirmation', {})
+        required = {'primary_assets', 'development_cutoff', 'holdout_end',
+                    'minimum_test_rows', 'locked_at', 'decision_rule'}
+        if required - set(confirmation):
+            raise ValueError(f'Giao thức xác nhận thiếu {sorted(required-set(confirmation))}.')
+        primary = confirmation['primary_assets']
+        if (not isinstance(primary, list) or not primary or len(primary) != len(set(primary)) or
+                set(primary) != set(cfg['assets'])):
+            raise ValueError('Confirmatory chỉ được chứa đúng các tài sản chính đã đăng ký.')
+        if len(cfg['folds']) != 1:
+            raise ValueError('Confirmatory dùng đúng một holdout khóa, không chia để lựa kết quả.')
+        cutoff = pd.Timestamp(confirmation['development_cutoff'])
+        holdout_end = pd.Timestamp(confirmation['holdout_end'])
+        locked_at = pd.Timestamp(confirmation['locked_at'])
+        if (cutoff.tzinfo is None or holdout_end.tzinfo is None or locked_at.tzinfo is None or
+                not cutoff < holdout_end):
+            raise ValueError('Mốc khóa xác nhận phải có múi giờ và đúng thứ tự.')
+        fold = cfg['folds'][0]
+        if pd.Timestamp(fold['test_start']) != cutoff or pd.Timestamp(fold['test_end']) != holdout_end:
+            raise ValueError('Ranh giới test phải khớp chính xác holdout đã đăng ký.')
+        minimum = confirmation['minimum_test_rows']
+        if not isinstance(minimum, int) or minimum < 64:
+            raise ValueError('Holdout xác nhận cần tối thiểu 64 nhãn đã purge.')
+        if confirmation['decision_rule'] != 'strong_support_all_primary_assets':
+            raise ValueError('Quy tắc quyết định xác nhận chưa được hỗ trợ.')
     previous = None
     for fold in cfg['folds']:
         start = pd.Timestamp(fold['test_start'])
@@ -48,6 +75,8 @@ def validate(cfg):
     network_mode = cfg.get('network_mode', 'fixed')
     if network_mode not in ('fixed','train_association'):
         raise ValueError('Chế độ mạng không hợp lệ.')
+    if mode == 'confirmatory' and network_mode != 'fixed':
+        raise ValueError('Confirmatory phải dùng mạng cố định đã khóa trước holdout.')
     if network_mode == 'fixed':
         known = pd.Timestamp(cfg["network_available_at"])
         if known.tzinfo is None or known > min(pd.Timestamp(f["train_start"]) for f in cfg["folds"]):
@@ -67,19 +96,33 @@ def validate(cfg):
 
 
 def h1_evidence(metrics, controls, interval):
-    """Báo cáo tiêu chí H1 theo số liệu; exploratory không được đổi thành xác nhận."""
+    """Báo cáo tiêu chí H1; mode quyết định đây là thăm dò hay xác nhận."""
     lower_b0 = all(metrics['E1'][key] < metrics['B0'][key] for key in ('mae','rmse'))
     lower_control_median = all(metrics['E1'][key] < controls[key]['median']
                                for key in ('mae','rmse'))
     ci_below_zero = all(interval[key][1] < 0 for key in ('mae','rmse'))
     random_tail = all(controls[key]['share_not_worse'] <= .05 for key in ('mae','rmse'))
+    strong = lower_b0 and lower_control_median and ci_below_zero and random_tail
     return {'lower_than_B0_both': lower_b0,
             'lower_than_C1_median_both': lower_control_median,
             'ci95_difference_below_zero_both': ci_below_zero,
             'C1_share_not_worse_at_most_0_05_both': random_tail,
             'meets_numeric_criteria': lower_b0 and lower_control_median,
-            'strong_exploratory_support': lower_b0 and lower_control_median
-                                                  and ci_below_zero and random_tail}
+            'strong_support': strong,
+            'strong_exploratory_support': strong}
+
+
+def h1_status(result, cfg):
+    """Áp quy tắc đã khóa; không chọn tài sản sau khi nhìn holdout."""
+    supported = [asset for asset, value in result.items()
+                 if value['h1_evidence']['strong_support']]
+    if cfg['mode'] == 'exploratory':
+        return supported, False, ('Dữ liệu/fold đã được xem trong phát triển exploratory; '
+                                  'cần giao thức khóa và holdout chưa xem.')
+    primary = cfg['confirmation']['primary_assets']
+    confirmed = all(asset in supported for asset in primary)
+    blocker = None if confirmed else 'Ít nhất một tài sản chính không đạt quy tắc trên holdout khóa.'
+    return supported, confirmed, blocker
 
 
 def evaluate(market, releases, cfg):
@@ -97,6 +140,11 @@ def evaluate(market, releases, cfg):
         diagnostics, parts, controls = [], [], []
         for number, fold in enumerate(cfg['folds']):
             train,val,test = data.masks(panel,fold,usable)
+            if (cfg['mode'] == 'confirmatory' and
+                    int(test.sum()) < cfg['confirmation']['minimum_test_rows']):
+                raise ValueError(
+                    f'{asset} chỉ có {int(test.sum())} nhãn holdout; thấp hơn mức đã khóa.'
+                )
             static,dynamic,meta = world.features(levels,events,train,cfg,exposure)
             _,isolated,_ = world.features(levels,events,train,cfg,exposure,linked=False)
             # Chọn cấu hình chỉ bằng train -> validation.
@@ -160,12 +208,12 @@ def evaluate(market, releases, cfg):
     ps = [row['p_value_two_sided'] for row in dm_rows]
     for row,p in zip(dm_rows,statistics.holm(ps)):
         row['p_holm'] = p
-    supported = [asset for asset,value in result.items()
-                 if value['h1_evidence']['strong_exploratory_support']]
-    return {'protocol':'rq1_v3_2_refit_multiscale_world', 'mode':'exploratory','assets':result,
-            'dm':dm_rows,'h1_exploratory_supported':bool(supported),
-            'h1_supported_assets':supported,'h1_confirmed':False,
-            'h1_confirmation_blocker':'Dữ liệu/fold đã được xem trong phát triển exploratory; cần giao thức khóa và holdout chưa xem.',
+    supported, confirmed, blocker = h1_status(result, cfg)
+    return {'protocol':'rq1_v3_3_locked_holdout', 'mode':cfg['mode'],'assets':result,
+            'dm':dm_rows,'h1_exploratory_supported':bool(supported) if cfg['mode'] == 'exploratory' else False,
+            'h1_supported_assets':supported,'h1_confirmed':confirmed,
+            'h1_confirmation_blocker':blocker,
+            'confirmation':cfg.get('confirmation'),
             'limitations':['World là mạng trạng thái quan sát đa thang rút gọn, chưa phải kernel đa tác nhân đầy đủ.',
                            'Chưa có consensus, vintage đa quốc gia đã kiểm chứng hoặc xác suất kịch bản hiệu chỉnh.',
                            'C2 tắt mạng lan truyền nhưng vẫn giữ các trạng thái tĩnh quốc tế.',
@@ -208,8 +256,12 @@ def main():
     pred.to_csv(args.output/'predictions.csv',index=False)
     (args.output/'metrics.json').write_text(encoded,encoding='utf-8')
     assets = ', '.join(result['h1_supported_assets']) or 'không có'
-    print(f'Hoàn tất thăm dò: {args.output}. Tài sản có bằng chứng H1 mạnh: {assets}. '
-          'H1 chưa được xác nhận vì chưa có holdout khóa chưa xem.')
+    if result['mode'] == 'confirmatory':
+        status = 'H1 được xác nhận trên holdout khóa.' if result['h1_confirmed'] else 'H1 không được xác nhận trên holdout khóa.'
+        print(f'Hoàn tất xác nhận: {args.output}. Tài sản đạt quy tắc H1: {assets}. {status}')
+    else:
+        print(f'Hoàn tất thăm dò: {args.output}. Tài sản có bằng chứng H1 mạnh: {assets}. '
+              'H1 chưa được xác nhận vì chưa có holdout khóa chưa xem.')
 
 
 if __name__=='__main__':

@@ -1,6 +1,6 @@
-# RQ1 v3.2 — World đa thang, refit trước kiểm định
+# RQ1 v3.3 — World đa thang và holdout xác nhận khóa
 
-Phiên bản này bổ sung một pipeline độc lập, không thay v2, World demo hay kết luận báo cáo. **Chưa có kết quả thị trường chứng minh E1 tốt hơn B0/C1.** Đây là nền tảng thăm dò đã có kiểm thử phần mềm, không phải hoàn tất toàn bộ kế hoạch World đa tác nhân.
+Phiên bản này bổ sung một pipeline độc lập, không thay v2, World demo hay tự động sửa kết luận báo cáo. Kết quả 2022–2025 chỉ là bằng chứng thăm dò: GLD đạt toàn bộ tiêu chí mạnh, nhưng H1 vẫn chưa được xác nhận vì giai đoạn đó đã được dùng trong phát triển. v3.3 khóa GLD làm tài sản chính và dành 2026-01-01 đến 2026-09-01 làm holdout xác nhận chưa từng được pipeline đánh giá.
 
 ## Phạm vi thực hiện
 
@@ -14,6 +14,7 @@ Phiên bản này bổ sung một pipeline độc lập, không thay v2, World d
 - Sau khi khóa alpha, trọng số và trạng thái bật/tắt bằng validation, mô hình được khớp lại trên train+validation rồi mới dự báo test. Nhãn test không tham gia lựa chọn hoặc refit.
 - C1: xáo trộn khối, giữ cặp cột và ranh giới train/validation/test, chạy lại cùng quy trình chọn tầng. C2: tắt liên kết mạng, giữ trạng thái quốc tế tĩnh.
 - Báo cáo riêng tài sản: MAE/RMSE/QLIKE, bootstrap khối theo fold, DM và Holm trên họ asset-fold, độ nhạy khi bỏ những ngày đóng góp tốt nhất.
+- Chế độ `confirmatory` chỉ nhận đúng tài sản chính đã đăng ký, đúng một holdout, mạng cố định và đủ số nhãn tối thiểu. H1 chỉ được xác nhận khi mọi tài sản chính đồng thời: E1 thấp hơn B0 và trung vị C1 trên MAE/RMSE, khoảng tin cậy 95% của chênh lệch E1−B0 nằm hoàn toàn dưới 0, và không quá 5% đối chứng C1 tốt bằng E1 trên cả hai sai số.
 
 ## Cài đặt và kiểm thử
 
@@ -83,11 +84,39 @@ python -m KHKT_Evaluation.rq1_v3.run --market datasets/rq1_v3/market.csv --sessi
 
 Output không được tồn tại trước; xuất metrics.json, predictions.csv cùng hash đầu vào và cấu hình. `h1_evidence` báo riêng tiêu chí số, khoảng tin cậy và vị trí trong phân phối C1 theo tài sản. `h1_exploratory_supported` không đồng nghĩa `h1_confirmed`: dữ liệu đã xem trong phát triển chỉ có thể cung cấp bằng chứng thăm dò. Giữ nguyên các kết quả thua; không ghi đè bằng lần chạy được lựa chọn.
 
+## Chạy giao thức xác nhận GLD đã khóa
+
+Không sửa `config.us_jp.confirmatory_gld.json` sau khi xem kết quả. Dữ liệu mới được lưu ở thư mục riêng để không ghi đè bộ thăm dò. Cấu hình chỉ dùng GLD, giữ nguyên thuật toán và siêu tham số v3.2, dùng dữ liệu đến 2025 làm phát triển và chỉ đánh giá một lần trên holdout 2026.
+
+```powershell
+python -m KHKT_Evaluation.rq1_v3.fetch_market `
+  --start 2008-01-01 `
+  --end 2026-09-01 `
+  --assets GLD `
+  --directory datasets/rq1_v3_confirmatory_gld
+
+$env:FRED_API_KEY="..."
+python -m KHKT_Evaluation.rq1_v3.fetch_macro `
+  --start 2008-01-01 `
+  --end 2026-09-01 `
+  --output datasets/rq1_v3_confirmatory_gld/releases.csv
+Remove-Item Env:FRED_API_KEY -ErrorAction SilentlyContinue
+
+python -m KHKT_Evaluation.rq1_v3.run `
+  --market datasets/rq1_v3_confirmatory_gld/market.csv `
+  --sessions datasets/rq1_v3_confirmatory_gld/sessions.csv `
+  --releases datasets/rq1_v3_confirmatory_gld/releases.csv `
+  --config KHKT_Evaluation/rq1_v3/config.us_jp.confirmatory_gld.json `
+  --output KHKT_Evaluation/results_rq1_v3/us_jp_gld_confirmatory_001
+```
+
+Nếu `h1_confirmed=true`, kết luận được giới hạn ở GLD, thiết kế US–JP và holdout đã khóa; không suy rộng sang mọi tài sản. Nếu bằng `false`, giữ nguyên kết quả và báo cáo H1 chưa được xác nhận. Dù kết quả nào, không dùng chính holdout này để sửa mô hình rồi gọi lần chạy sau là xác nhận.
+
 ## Những cổng nghiên cứu chưa hoàn tất
 
 1. Nghiệm thu vintage, giá và mạng quốc tế thật; thêm adapter theo nguồn sau khi kiểm tra quyền sử dụng và khả năng lấy lịch sử.
-2. World hiện là surrogate mạng trạng thái đa thang, chưa phải kernel đa tác nhân đầy đủ, chưa có vòng học giả thuyết tự động hay hiệu chỉnh xác suất thiên nga đen. Mạng train-only chỉ là liên hệ dự báo; cần mạng thương mại/tài chính bên ngoài trước kiểm định xác nhận.
+2. World hiện là surrogate mạng trạng thái đa thang, chưa phải kernel đa tác nhân đầy đủ, chưa có vòng học giả thuyết tự động hay hiệu chỉnh xác suất thiên nga đen. Giao thức GLD khóa mạng lan truyền bằng 0 nên chỉ xác nhận giá trị của trạng thái và xung World; muốn xác nhận hiệu ứng lan truyền giữa quốc gia phải bổ sung mạng thương mại/tài chính bên ngoài.
 3. Các tầng vẫn dùng chung validation để khóa lựa chọn, nên có thể còn thiên lệch lựa chọn dù bước refit chỉ dùng dữ liệu có trước test. Cần nested walk-forward và giới hạn ngân sách tìm kiếm trước xác nhận.
 4. Bootstrap hiện có điều kiện trên dự báo đã khớp, block mặc định bằng horizon có thể chưa đủ cho phụ thuộc dài; cần phân tích độ nhạy block đã chốt trước. DM theo fold và Holm không sửa được thiên lệch do đã xem test nhiều lần.
-5. Chưa có C3 đầy đủ, suy luận tổng hợp phụ thuộc chéo tài sản hay khóa giao thức xác nhận. CLI chặn confirmatory. Không dùng ngày lịch sử đã thăm dò làm bằng chứng xác nhận mới.
+5. Chưa có C3 đầy đủ hoặc suy luận tổng hợp phụ thuộc chéo tài sản. Giao thức xác nhận hiện chỉ đăng ký GLD; không dùng ngày lịch sử đã thăm dò làm bằng chứng xác nhận mới và không suy rộng kết quả GLD sang toàn bộ thị trường.
 6. Chỉ sau khi chốt dữ liệu và giao thức mới chạy benchmark thị trường, đánh giá E1 với B0, B1, E_static và phân phối C1. Chỉ cập nhật báo cáo khi có kết quả thực.

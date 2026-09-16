@@ -9,7 +9,7 @@ from unittest.mock import patch
 import numpy as np
 import pandas as pd
 from KHKT_Evaluation.rq1_v3 import data, fetch_macro, fetch_market, models, world, statistics
-from KHKT_Evaluation.rq1_v3.run import evaluate, h1_evidence
+from KHKT_Evaluation.rq1_v3.run import evaluate, h1_evidence, h1_status, validate
 
 
 def fixture():
@@ -205,6 +205,52 @@ class TestRQ1V3(unittest.TestCase):
         evidence=h1_evidence(metrics,controls,interval)
         self.assertTrue(evidence['meets_numeric_criteria'])
         self.assertFalse(evidence['strong_exploratory_support'])
+
+    def test_confirmatory_status_requires_every_registered_asset(self):
+        passed={'h1_evidence':{'strong_support':True}}
+        failed={'h1_evidence':{'strong_support':False}}
+        cfg={'mode':'confirmatory','confirmation':{'primary_assets':['GLD','EWJ']}}
+        supported,confirmed,blocker=h1_status({'GLD':passed,'EWJ':failed},cfg)
+        self.assertEqual(supported,['GLD']); self.assertFalse(confirmed)
+        self.assertIsNotNone(blocker)
+        _,confirmed,blocker=h1_status({'GLD':passed,'EWJ':passed},cfg)
+        self.assertTrue(confirmed); self.assertIsNone(blocker)
+
+    def test_confirmatory_protocol_locks_asset_boundary_and_network(self):
+        _,_,cfg=fixture()
+        cfg['mode']='confirmatory'; cfg['assets']={'TEST':[.5,.5]}
+        cfg['folds']=[cfg['folds'][1]]
+        cfg['confirmation']={
+            'primary_assets':['TEST'],
+            'development_cutoff':cfg['folds'][0]['test_start'],
+            'holdout_end':cfg['folds'][0]['test_end'],
+            'minimum_test_rows':64,
+            'locked_at':'2026-09-16T00:00:00Z',
+            'decision_rule':'strong_support_all_primary_assets'}
+        validate(cfg)
+        cfg['network_mode']='train_association'
+        with self.assertRaises(ValueError): validate(cfg)
+        cfg['network_mode']='fixed'; cfg['assets']['SECOND']=[.5,.5]
+        with self.assertRaises(ValueError): validate(cfg)
+        del cfg['assets']['SECOND']; cfg['folds'][0]['test_start']='2020-12-01T00:00:00Z'
+        with self.assertRaises(ValueError): validate(cfg)
+
+    def test_confirmatory_pipeline_enforces_minimum_holdout_rows(self):
+        m,r,cfg=fixture()
+        cfg['mode']='confirmatory'; cfg['folds']=[cfg['folds'][1]]
+        cfg['confirmation']={
+            'primary_assets':['TEST'],
+            'development_cutoff':cfg['folds'][0]['test_start'],
+            'holdout_end':cfg['folds'][0]['test_end'],
+            'minimum_test_rows':200,
+            'locked_at':'2026-09-16T00:00:00Z',
+            'decision_rule':'strong_support_all_primary_assets'}
+        with self.assertRaises(ValueError): evaluate(m,r,cfg)
+        cfg['confirmation']['minimum_test_rows']=64
+        result,pred=evaluate(m,r,cfg)
+        self.assertEqual(result['mode'],'confirmatory')
+        self.assertEqual(result['protocol'],'rq1_v3_3_locked_holdout')
+        self.assertEqual(set(pred.asset),{'TEST'})
 
     def test_holm_and_identical_bootstrap(self):
         np.testing.assert_allclose(statistics.holm([.01,.04,.03]),[.03,.06,.06])
