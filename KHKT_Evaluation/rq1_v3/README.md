@@ -22,6 +22,12 @@ python -m unittest tests.test_rq1_v3 -v
 python -m unittest tests.test_rq1_v2 tests.test_rq1_innovations -v
 ```
 
+Cài lịch giao dịch dùng riêng cho nghiên cứu:
+
+```powershell
+python -m pip install -r requirements-research.txt
+```
+
 Các fixture là dữ liệu nhân tạo để kiểm tra phần mềm, không được dùng làm bằng chứng nghiên cứu.
 
 ## Chuẩn dữ liệu cần chuẩn bị
@@ -42,12 +48,35 @@ Ma trận `network` có hàng là quốc gia nhận, cột là quốc gia truy�
 
 ## Mở rộng phạm vi theo dữ liệu
 
-Ưu tiên thí điểm US–JP với tài sản cổ phiếu đại diện hai thị trường, sau đó bổ sung khu vực euro/Anh/Canada khi có vintage đạt chuẩn. Có thể mở rộng đến nhiều quốc gia bằng cấu hình; chưa có bộ 10 quốc gia đã kiểm chứng được đóng gói. ETF niêm yết ở Mỹ vẫn theo lịch Mỹ và có tác động tỷ giá, không đồng nhất với chỉ số nội địa.
+Thí điểm US–JP hiện có 11 tài sản thuộc các nhóm cổ phiếu, trái phiếu, vàng, dầu, USD và tiền mã hóa. ETF niêm yết ở Mỹ vẫn theo lịch Mỹ và có tác động tỷ giá, không đồng nhất với chỉ số nội địa. Vàng, dầu và tiền mã hóa dùng trọng số đều Mỹ–Nhật như một thiết kế độ nhạy đã công bố trước; không diễn giải trọng số này là mức phơi nhiễm kinh tế quan sát được.
+
+Tải dữ liệu thị trường và dữ liệu vĩ mô:
+
+```powershell
+python -m KHKT_Evaluation.rq1_v3.fetch_market --start 2008-01-01 --end 2026-01-01
+$env:FRED_API_KEY="..."
+python -m KHKT_Evaluation.rq1_v3.fetch_macro --start 2008-01-01 --end 2026-01-01
+Remove-Item Env:FRED_API_KEY -ErrorAction SilentlyContinue
+```
+
+Giá điều chỉnh của ETF lấy từ endpoint chart Yahoo Finance và được đối chiếu với lịch NYSE độc lập. Đây không phải giao diện nghiên cứu được cam kết ổn định; metadata ghi nguồn và ngày tải. Crypto lấy nến ngày công khai từ Binance. Nếu Binance bị chặn theo khu vực, có thể tạo bộ chín ETF trước:
+
+```powershell
+python -m KHKT_Evaluation.rq1_v3.fetch_market --start 2008-01-01 --end 2026-01-01 --assets SPY QQQ IWM EWJ TLT LQD GLD USO UUP
+```
+
+Khi loại tài sản khỏi bước tải, tạo bản sao cấu hình và xóa đúng tài sản đó khỏi `assets`. Không sửa cấu hình gốc sau khi xem kết quả.
 
 `config.template.json` cố ý chưa chạy được: nguồn, lịch sử sử dụng dữ liệu, ma trận và exposure chưa được điền. Không thay các mục này bằng số tùy ý để vượt kiểm tra. Mốc fold là gợi ý cấu trúc cho thăm dò, không phải holdout mới.
 
 ```powershell
 python -m KHKT_Evaluation.rq1_v3.run --market datasets/v3/market.csv --sessions datasets/v3/sessions.csv --releases datasets/v3/releases.csv --config KHKT_Evaluation/rq1_v3/config.local.json --output KHKT_Evaluation/results_rq1_v3/local_001
+```
+
+Lệnh chạy cho bộ US–JP đã định sẵn:
+
+```powershell
+python -m KHKT_Evaluation.rq1_v3.run --market datasets/rq1_v3/market.csv --sessions datasets/rq1_v3/sessions.csv --releases datasets/rq1_v3/releases.csv --config KHKT_Evaluation/rq1_v3/config.us_jp.exploratory.json --output KHKT_Evaluation/results_rq1_v3/us_jp_001
 ```
 
 Output không được tồn tại trước; xuất metrics.json, predictions.csv cùng hash đầu vào và cấu hình. Giữ nguyên các kết quả thua; không ghi đè bằng lần chạy được lựa chọn.

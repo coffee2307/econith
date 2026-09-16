@@ -5,9 +5,10 @@ import sys
 import tempfile
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 import numpy as np
 import pandas as pd
-from KHKT_Evaluation.rq1_v3 import data, models, world, statistics
+from KHKT_Evaluation.rq1_v3 import data, fetch_macro, fetch_market, models, world, statistics
 from KHKT_Evaluation.rq1_v3.run import evaluate
 
 
@@ -35,6 +36,44 @@ def fixture():
 
 
 class TestRQ1V3(unittest.TestCase):
+    def test_market_collectors_parse_adjusted_and_crypto_close(self):
+        dates=pd.date_range('2020-01-01 17:00:00Z',periods=100,freq='D')
+        payload={'chart':{'error':None,'result':[{
+            'timestamp':[int(x.timestamp()) for x in dates],
+            'indicators':{'adjclose':[{'adjclose':[100.+i for i in range(100)]}]}}]}}
+        rows=fetch_market.yahoo_prices('SPY','2020-01-01','2020-04-30',lambda _:payload)
+        self.assertEqual(len(rows),100); self.assertEqual(rows[0][1],100.)
+
+        start=pd.Timestamp('2020-01-01',tz='UTC')
+        batch=[]
+        for i in range(100):
+            opened=int((start+pd.Timedelta(days=i)).timestamp()*1000)
+            closed=opened+86_400_000-1
+            batch.append([opened,'0','0','0',str(200+i),'0',closed])
+        calls=[]
+        def requester(_):
+            calls.append(1)
+            return batch if len(calls)==1 else []
+        market,sessions=fetch_market.binance_prices('BTCUSDT','2020-01-01','2020-12-31',requester)
+        self.assertEqual(len(market),100); self.assertEqual(market[0]['time'],sessions[0]['time'])
+
+    def test_macro_collector_adds_country_and_quality(self):
+        def normalized(feature, series, transform, observations, start):
+            return [{'available_at':'2020-02-02T00:00:00+00:00',
+                     'observation_at':'2020-01-01T00:00:00+00:00',
+                     'feature':feature,'value':.01,'unit':'fraction','source':series}]
+        with patch.object(fetch_macro,'request_series',return_value=[{}]), \
+             patch.object(fetch_macro,'normalize',side_effect=normalized):
+            frame=fetch_macro.collect('x','2020-01-01','2020-12-31',pause=0)
+        self.assertEqual(len(frame),8)
+        self.assertEqual(set(frame.country),{'US','JP'})
+        self.assertEqual(set(frame.quality),{'observed'})
+
+    def test_asset_catalog_covers_distinct_risk_groups(self):
+        groups={spec[0] for spec in fetch_market.ASSETS.values()}
+        self.assertGreaterEqual(len(fetch_market.ASSETS),10)
+        self.assertTrue({'gold','oil','usd','crypto_bitcoin','bond_us_long_treasury'} <= groups)
+
     def test_future_release_does_not_change_past(self):
         market,r,cfg=fixture()
         r=data.releases(r,cfg['countries'])

@@ -1,0 +1,2 @@
+# Phụ thuộc riêng cho việc dựng và kiểm tra dữ liệu nghiên cứu RQ1 v3.
+pandas_market_calendars==5.4.0
