@@ -36,7 +36,7 @@ def augment(x, y, base, train, validation, cfg):
     best, selected = 0., None
     rows = []
     cap = float(np.quantile(np.abs(y[train]-base[train]), .9))
-    blocks = np.array_split(np.flatnonzero(validation), 3)
+    blocks = np.array_split(np.flatnonzero(validation), cfg.get('validation_blocks', 3))
     for alpha in cfg['alphas']:
         model = fit(x[train], y[train]-base[train], alpha, intercept=False)
         delta = np.clip(predict(model, x), -cap, cap)
@@ -45,13 +45,26 @@ def augment(x, y, base, train, validation, cfg):
             errors = y[validation]-pred[validation]
             losses = np.array([np.mean(abs(errors)), np.sqrt(np.mean(errors**2))])
             gain = (base_loss-losses)/np.maximum(base_loss, 1e-12)
-            wins = sum(np.mean(abs(y[b]-pred[b])) < np.mean(abs(y[b]-base[b])) and
-                       np.mean((y[b]-pred[b])**2) < np.mean((y[b]-base[b])**2) for b in blocks)
-            eligible = wins >= cfg['validation_wins'] and min(gain) >= cfg['min_gain']
+            block_gains = []
+            wins = 0
+            for block in blocks:
+                base_block = np.array([np.mean(abs(y[block]-base[block])),
+                                       np.sqrt(np.mean((y[block]-base[block])**2))])
+                pred_block = np.array([np.mean(abs(y[block]-pred[block])),
+                                       np.sqrt(np.mean((y[block]-pred[block])**2))])
+                block_gain = (base_block-pred_block)/np.maximum(base_block, 1e-12)
+                block_gains.append(float(min(block_gain)))
+                wins += int(np.all(block_gain > 0))
+            worst_block = min(block_gains)
+            eligible = (wins >= cfg['validation_wins'] and min(gain) >= cfg['min_gain']
+                        and worst_block >= cfg.get('min_block_gain', -1.))
             rows.append({'alpha': alpha, 'weight': weight, 'gain_mae': float(gain[0]),
-                         'gain_rmse': float(gain[1]), 'wins': int(wins), 'eligible': bool(eligible)})
-            if eligible and min(gain) > best:
-                best = min(gain)
+                         'gain_rmse': float(gain[1]), 'wins': int(wins),
+                         'block_gains': block_gains, 'worst_block_gain': worst_block,
+                         'eligible': bool(eligible)})
+            robust_score = min(gain) + .25*worst_block
+            if eligible and robust_score > best:
+                best = robust_score
                 selected = (pred, alpha, weight)
     details = {'active': selected is not None, 'cap_train': cap, 'candidates': rows}
     if selected is None:

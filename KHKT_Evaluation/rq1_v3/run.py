@@ -25,8 +25,16 @@ def validate(cfg):
         raise ValueError('Alpha phải dương và hữu hạn.')
     if not cfg['weights'] or any(not np.isfinite(w) or not 0 < w <= 1 for w in cfg['weights']):
         raise ValueError('Trọng số phối hợp phải thuộc (0,1].')
-    if not 1 <= cfg['validation_wins'] <= 3 or not np.isfinite(cfg['min_gain']) or cfg['min_gain'] < 0:
+    blocks = cfg.get('validation_blocks', 3)
+    half_lives = cfg.get('impulse_half_lives', [3., 7., 21.])
+    if (not isinstance(blocks, int) or blocks < 2 or
+            not 1 <= cfg['validation_wins'] <= blocks or
+            not np.isfinite(cfg['min_gain']) or cfg['min_gain'] < 0 or
+            not np.isfinite(cfg.get('min_block_gain', -1.))):
         raise ValueError('Cổng validation không hợp lệ.')
+    if (not half_lives or any(not np.isfinite(x) or x <= 0 for x in half_lives) or
+            len(set(float(x) for x in half_lives)) != len(half_lives)):
+        raise ValueError('Chu kỳ bán rã của xung World không hợp lệ.')
     if len(cfg['folds']) < 2:
         raise ValueError('Cần ít nhất hai fold.')
     previous = None
@@ -37,9 +45,20 @@ def validate(cfg):
             raise ValueError('Test fold chồng lấn.')
         previous = end
     world.graph(cfg)
-    known = pd.Timestamp(cfg["network_available_at"])
-    if known.tzinfo is None or known > min(pd.Timestamp(f["train_start"]) for f in cfg["folds"]):
-        raise ValueError("Mạng phải được biết trước mọi fold huấn luyện.")
+    network_mode = cfg.get('network_mode', 'fixed')
+    if network_mode not in ('fixed','train_association'):
+        raise ValueError('Chế độ mạng không hợp lệ.')
+    if network_mode == 'fixed':
+        known = pd.Timestamp(cfg["network_available_at"])
+        if known.tzinfo is None or known > min(pd.Timestamp(f["train_start"]) for f in cfg["folds"]):
+            raise ValueError("Mạng phải được biết trước mọi fold huấn luyện.")
+    else:
+        for key, default in (('network_half_life',7.),('network_shrinkage',.25),('network_max_weight',.2)):
+            value = cfg.get(key, default)
+            if not np.isfinite(value) or value <= 0:
+                raise ValueError(f'{key} phải dương và hữu hạn.')
+        if cfg.get('network_max_weight',.2) > 1 or cfg.get('network_shrinkage',.25) > 1:
+            raise ValueError('Co mạng và trọng số mạng tối đa không được vượt 1.')
     if not cfg["assets"]:
         raise ValueError("Cần ít nhất một tài sản.")
     for key in ('market_source', 'calendar_audit', 'release_provenance', 'data_use_history'):
@@ -109,9 +128,9 @@ def evaluate(market, releases, cfg):
     ps = [row['p_value_two_sided'] for row in dm_rows]
     for row,p in zip(dm_rows,statistics.holm(ps)):
         row['p_holm'] = p
-    return {'protocol':'rq1_v3_observed_network', 'mode':'exploratory','assets':result,
+    return {'protocol':'rq1_v3_1_multiscale_world', 'mode':'exploratory','assets':result,
             'dm':dm_rows,'h1_confirmed':False,
-            'limitations':['World là mạng trạng thái quan sát rút gọn, chưa phải kernel đa tác nhân đầy đủ.',
+            'limitations':['World là mạng trạng thái quan sát đa thang rút gọn, chưa phải kernel đa tác nhân đầy đủ.',
                            'Chưa có consensus, vintage đa quốc gia đã kiểm chứng hoặc xác suất kịch bản hiệu chỉnh.',
                            'C2 tắt mạng lan truyền nhưng vẫn giữ các trạng thái tĩnh quốc tế.',
                            'HAR dùng bình phương lợi suất ngày; chưa có realized variance trong ngày.',

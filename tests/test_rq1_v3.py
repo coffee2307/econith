@@ -82,6 +82,50 @@ class TestRQ1V3(unittest.TestCase):
         after=world.panel_at(market.time,r,cfg['countries'])
         for a,b in zip(before,after): np.testing.assert_allclose(a[:301],b[:301],equal_nan=True)
 
+    def test_multiscale_impulses_are_causal_and_decay(self):
+        events=np.zeros((12,2,4)); events[3,0,1]=1.
+        before=world.decayed_impulses(events,[2.,4.])
+        changed=events.copy(); changed[9,1,2]=100.
+        after=world.decayed_impulses(changed,[2.,4.])
+        np.testing.assert_allclose(before[:9],after[:9])
+        self.assertGreater(before[4,0,0,1],0.)
+        self.assertGreater(before[4,1,0,1],before[4,0,0,1])
+        self.assertLess(before[8,0,0,1],before[4,0,0,1])
+
+    def test_world_keeps_local_global_gap_and_network_effect(self):
+        levels=np.zeros((40,8)); innovations=np.zeros_like(levels)
+        levels[:,0]=np.linspace(0,1,40); levels[:,4]=np.linspace(0,.2,40)
+        innovations[10,0]=.1
+        train=np.arange(40)<25
+        _,_,cfg=fixture(); cfg['impulse_half_lives']=[2.,5.]
+        static,linked,_=world.features(levels,innovations,train,cfg,[1.,0.])
+        _,isolated,_=world.features(levels,innovations,train,cfg,[1.,0.],linked=False)
+        self.assertEqual(static.shape[1],4*len(data.FEATURES))
+        self.assertEqual(linked.shape[1],2*4*len(data.FEATURES)*2)
+        self.assertGreater(np.max(np.abs(linked-isolated)),0.)
+        self.assertGreater(np.max(np.abs(linked[11:])),0.)
+
+    def test_train_association_network_ignores_future(self):
+        rng=np.random.default_rng(8)
+        shocks=rng.normal(size=(80,2,4))
+        shocks[:,1]=.8*np.roll(shocks[:,0],1,axis=0)+.2*shocks[:,1]
+        train=np.arange(80)<50
+        _,_,cfg=fixture(); cfg.update(network_mode='train_association',network_half_life=5.,
+                                      network_shrinkage=.25,network_max_weight=.15)
+        first=world.association_network(shocks,train,cfg)
+        changed=shocks.copy(); changed[50:]+=1000
+        second=world.association_network(changed,train,cfg)
+        np.testing.assert_allclose(first,second)
+        self.assertGreater(first.sum(),0.)
+        self.assertLessEqual(first.max(),.15)
+
+    def test_zero_world_events_stay_zero(self):
+        levels=np.tile(np.arange(8,dtype=float),(30,1)); innovations=np.zeros_like(levels)
+        train=np.arange(30)<20
+        _,_,cfg=fixture(); _,dynamic,meta=world.features(levels,innovations,train,cfg,[.5,.5])
+        np.testing.assert_array_equal(dynamic,np.zeros_like(dynamic))
+        self.assertEqual(meta['dynamic_nonzero_share'],0.)
+
     def test_reject_naive_and_synthetic_quality(self):
         with self.assertRaises(ValueError): data.utc(['2020-01-01'])
         _,r,cfg=fixture(); r['quality']='synthetic'
@@ -170,6 +214,8 @@ class TestRQ1V3(unittest.TestCase):
 
     def test_missing_country_and_future_network_blocked(self):
         m,r,cfg=fixture(); r=r[r.country=='US']
+        with self.assertRaises(ValueError): evaluate(m,r,cfg)
+        m,r,cfg=fixture(); cfg['impulse_half_lives']=[3.,-1.]
         with self.assertRaises(ValueError): evaluate(m,r,cfg)
         m,r,cfg=fixture(); cfg['network_available_at']='2025-01-01T00:00:00Z'
         with self.assertRaises(ValueError): evaluate(m,r,cfg)
