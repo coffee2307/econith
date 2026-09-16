@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -105,10 +106,11 @@ class TestRQ1V3(unittest.TestCase):
             for arg in ("market","releases","sessions","config"):
                 cmd.extend(["--"+arg,str(root/(arg+(".json" if arg=="config" else ".csv")))])
             cmd.extend(["--output",str(root/"out")])
-            run=subprocess.run(cmd,capture_output=True,text=True)
-            self.assertEqual(run.returncode,0,run.stderr)
+            env=os.environ.copy(); env['PYTHONIOENCODING']='cp1258:strict'
+            run=subprocess.run(cmd,capture_output=True,env=env)
+            self.assertEqual(run.returncode,0,run.stderr.decode('ascii',errors='backslashreplace'))
             saved=(root/"out"/"metrics.json").read_bytes()
-            self.assertNotEqual(subprocess.run(cmd,capture_output=True).returncode,0)
+            self.assertNotEqual(subprocess.run(cmd,capture_output=True,env=env).returncode,0)
             self.assertEqual(saved,(root/"out"/"metrics.json").read_bytes())
 
     def test_missing_country_and_future_network_blocked(self):

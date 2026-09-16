@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import platform
 import subprocess
+import sys
 import numpy as np
 import pandas as pd
 from . import data, models, world, statistics
@@ -121,7 +122,16 @@ def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def configure_console():
+    """Không để bảng mã của terminal làm hỏng một lần chạy đã hoàn tất."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, 'reconfigure', None)
+        if reconfigure is not None:
+            reconfigure(errors='backslashreplace')
+
+
 def main():
+    configure_console()
     parser=argparse.ArgumentParser(description=__doc__)
     for name in ('market','releases','sessions','config','output'):
         parser.add_argument('--'+name,required=True,type=Path)
