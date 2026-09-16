@@ -1,0 +1,38 @@
+{
+  "mode": "exploratory",
+  "countries": ["US", "JP"],
+  "assets": {
+    "SPY": [1.0, 0.0], "QQQ": [1.0, 0.0], "IWM": [1.0, 0.0],
+    "EWJ": [0.0, 1.0], "TLT": [1.0, 0.0], "LQD": [1.0, 0.0],
+    "GLD": [0.5, 0.5], "USO": [0.5, 0.5], "UUP": [1.0, 0.0],
+    "BTCUSDT": [0.5, 0.5], "ETHUSDT": [0.5, 0.5]
+  },
+  "horizon_sessions": 5,
+  "paths": 32,
+  "rollout_steps": 5,
+  "impulse_half_lives": [3, 7, 21],
+  "control_repeats": 200,
+  "bootstrap_repeats": 1000,
+  "alphas": [0.1, 1.0, 10.0],
+  "weights": [0.05, 0.1, 0.25],
+  "validation_blocks": 4,
+  "validation_wins": 3,
+  "min_gain": 0.005,
+  "min_block_gain": -0.01,
+  "seed": 42,
+  "network_mode": "train_association",
+  "network_half_life": 7,
+  "network_shrinkage": 0.25,
+  "network_max_weight": 0.15,
+  "network": [[0.0, 0.0], [0.0, 0.0]],
+  "network_source": "Exploratory train-only lagged absolute macro association; not a causal network",
+  "network_available_at": "2007-12-31T00:00:00Z",
+  "market_source": "Yahoo Finance adjusted close for US-listed ETFs; Binance daily close for crypto; see market.metadata.json",
+  "calendar_audit": "NYSE sessions from pandas_market_calendars; crypto uses continuous UTC daily sessions",
+  "release_provenance": "FRED/ALFRED initial releases, output_type=4 and units=lin; see releases.metadata.json",
+  "data_use_history": "All folds ending by 2026-01-01 are viewed development data. GLD 2026 holdout is explicitly excluded from RQ1 v4.",
+  "folds": [
+    {"train_start":"2018-01-01T00:00:00Z","validation_start":"2020-01-01T00:00:00Z","test_start":"2022-01-01T00:00:00Z","test_end":"2024-01-01T00:00:00Z"},
+    {"train_start":"2018-01-01T00:00:00Z","validation_start":"2022-01-01T00:00:00Z","test_start":"2024-01-01T00:00:00Z","test_end":"2026-01-01T00:00:00Z"}
+  ]
+}
