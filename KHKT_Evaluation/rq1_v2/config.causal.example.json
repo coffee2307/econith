@@ -1,0 +1,34 @@
+{
+  "mode": "exploratory",
+  "release_provenance": "",
+  "unseen_data_declaration": "",
+  "frequency": "1d",
+  "history": "14d",
+  "horizon": "14d",
+  "control_block": "14d",
+  "control_repeats": 200,
+  "bootstrap_repeats": 1000,
+  "seed": 42,
+  "alphas": [0.01, 0.1, 1.0, 10.0, 100.0],
+  "macro_features": {
+    "interest_rate": "fraction",
+    "inflation": "fraction",
+    "unemployment": "fraction",
+    "gdp_growth": "fraction"
+  },
+  "folds": [
+    {
+      "train_start": "2020-01-01T00:00:00Z",
+      "validation_start": "2024-01-01T00:00:00Z",
+      "test_start": "2025-01-01T00:00:00Z",
+      "test_end": "2026-01-01T00:00:00Z"
+    },
+    {
+      "train_start": "2020-01-01T00:00:00Z",
+      "validation_start": "2025-01-01T00:00:00Z",
+      "test_start": "2026-01-01T00:00:00Z",
+      "test_end": "2026-07-27T00:00:00Z"
+    }
+  ],
+  "events": []
+}

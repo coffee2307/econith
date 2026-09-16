@@ -1,5 +1,30 @@
 # RQ1 v2 — bản thử nghiệm độc lập
 
+## World theo tác động riêng của lần công bố
+
+Các lần chạy 3/7/14 ngày cho thấy dữ liệu công bố trực tiếp có tín hiệu nhẹ ở
+chân trời 14 ngày, còn replay World tích lũy làm kết quả kém ổn định. Bản tiếp
+theo chỉ giữ năm tác động World: biến động, dòng lệnh, thanh khoản, lạm phát và
+niềm tin. Mỗi tác động là chênh lệch giữa hai kịch bản có cùng trạng thái hiện
+tại: một nhánh nhận lần công bố mới, nhánh kia giữ giá trị trước đó. Hai nhánh
+được phát 14 ngày bằng cùng tác nhân và không đọc công bố tương lai.
+
+Mô hình chỉ được bật khi giảm ít nhất 0,5% MAE kiểm định và thắng B0 trong cả ba
+đoạn thời gian liên tiếp. Mức hiệu chỉnh được chọn trong 0,25/0,5/1 để hạn chế
+phản ứng quá mạnh. Các quy tắc này được áp dụng giống nhau cho E1 và C1.
+
+Tạo cấu hình local từ `config.causal.example.json`, chép nguyên
+`release_provenance` từ cấu hình local hiện tại, sau đó chạy:
+
+```powershell
+python -m unittest tests.test_rq1_v2 tests.test_rq1_innovations -v
+python -m KHKT_Evaluation.rq1_v2.run --market datasets/features/BTCUSDT_features.parquet --releases datasets/macro_releases.csv --config KHKT_Evaluation/rq1_v2/config.causal.local.json --causal-world-preset --output KHKT_Evaluation/results_rq1_v2/causal_14d
+```
+
+Hai fold mới bắt đầu từ năm 2025 để không tiếp tục chọn thiết kế bằng kết quả
+2023–2024. Chúng vẫn được gọi là thăm dò vì dữ liệu có thể đã xuất hiện trong
+các thử nghiệm V1. Phải giữ cả hai fold và mọi kết quả, kể cả khi E1 thua.
+
 ## Nhánh nâng cấp tín hiệu công bố
 
 Giữ nguyên `local_001`. Chạy cấu hình nâng cấp bằng cờ tùy chọn:

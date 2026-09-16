@@ -14,7 +14,7 @@ from KHKT_Evaluation.common.metrics import diebold_mariano
 from KHKT_Evaluation.rq1_v2.data import prepare
 from KHKT_Evaluation.rq1_v2.model import permute_blocks, select_predict
 from KHKT_Evaluation.rq1_v2.world import replay
-from KHKT_Evaluation.rq1_v2.innovations import release_features, enrich
+from KHKT_Evaluation.rq1_v2.innovations import release_features, enrich, causal_world_features
 
 
 def digest(path):
@@ -49,6 +49,10 @@ def validate_config(cfg):
         raise ValueError("Khối đối chứng phải là bội frequency và không ngắn hơn horizon.")
     if len(cfg["folds"]) < 2:
         raise ValueError("Cần ít nhất hai cửa sổ ngoài mẫu.")
+    blocks = int(cfg.get("validation_blocks", 1))
+    wins = int(cfg.get("required_validation_wins", 1))
+    if blocks < 1 or not 1 <= wins <= blocks:
+        raise ValueError("Số đoạn thắng kiểm định phải thuộc [1, validation_blocks].")
 
 
 def fold_masks(panel, fold, valid_rows):
@@ -104,12 +108,19 @@ def evaluate(market, releases, cfg):
         sub = panel.loc[(panel.index >= pd.Timestamp(fold["train_start"])) & (panel.index < end)].copy()
         dynamic = replay(sub, cfg)
         static = replay(sub, cfg, stateful=False)
-        if cfg.get("release_innovations", False):
+        causal_mode = cfg.get("causal_world_impulses", False)
+        if causal_mode:
+            dynamic = causal_world_features(sub, cfg)
+        elif cfg.get("release_innovations", False):
             dynamic = enrich(sub, dynamic, cfg)
         x = dynamic.to_numpy(dtype=float)
         feature_names = list(dynamic.columns)
         raw = sub[macro].to_numpy(dtype=float)
-        if cfg.get("release_innovations", False):
+        if causal_mode:
+            event_frame = release_features(sub, macro)
+            event_frame = event_frame[[name + "_innovation" for name in macro]]
+            raw = np.column_stack([raw, event_frame.to_numpy(dtype=float)])
+        elif cfg.get("release_innovations", False):
             event_frame = release_features(sub, macro)
             events = event_frame.to_numpy(dtype=float)
             feature_names.extend(event_frame.columns)
@@ -129,13 +140,21 @@ def evaluate(market, releases, cfg):
         frame = pd.DataFrame({"time": sub.index[test], "fold": number, "target": y[test], "B0": b0[test]})
         selected = {}
         variants = {"B1": raw, "E1": x, "E1_plus": np.column_stack([raw, x]), "E_static": xs}
+        selection = {
+            "validation_blocks": int(cfg.get("validation_blocks", 1)),
+            "required_validation_wins": int(cfg.get("required_validation_wins", 1)),
+            "min_relative_gain": float(cfg.get("min_validation_improvement", 0.)),
+            "shrinkages": tuple(cfg.get("shrinkages", [1.])),
+        }
         for name, features in variants.items():
-            frame[name], selected[name] = select_predict(features, y, b0, train, val, test, cfg["alphas"])
+            frame[name], selected[name] = select_predict(
+                features, y, b0, train, val, test, cfg["alphas"], **selection)
         fold_controls = []
         for repeat in range(cfg["control_repeats"]):
             rng = np.random.default_rng(np.random.SeedSequence([cfg["seed"], number, repeat]))
             shuffled = permute_blocks(x, (train, val, test), block, rng)
-            pred, _ = select_predict(shuffled, y, b0, train, val, test, cfg["alphas"])
+            pred, _ = select_predict(
+                shuffled, y, b0, train, val, test, cfg["alphas"], **selection)
             fold_controls.append(pred)
         predictions.append(frame)
         controls.append(np.asarray(fold_controls))
@@ -195,6 +214,8 @@ def main():
     parser.add_argument("--innovation-preset", action="store_true",
                         help="Thăm dò tín hiệu công bố và World phản thực tế; giữ giao thức cũ nếu bỏ cờ.")
     parser.add_argument("--horizon-days", type=int, choices=(3, 7, 14))
+    parser.add_argument("--causal-world-preset", action="store_true",
+                        help="World theo tác động riêng của từng công bố và chọn mô hình ổn định.")
     args = parser.parse_args()
     if args.output.exists():
         parser.error("Output đã tồn tại; dùng thư mục mới để giữ nguyên kết quả cũ.")
@@ -203,6 +224,13 @@ def main():
         if args.innovation_preset:
             cfg.update(mode="exploratory", release_innovations=True,
                        reaction_daily_scale=1 / 30)
+        if args.causal_world_preset:
+            cfg.update(mode="exploratory", causal_world_impulses=True,
+                       release_innovations=False, reaction_daily_scale=1 / 30,
+                       impulse_simulation_days=14, impulse_half_life_days=14,
+                       validation_blocks=3, required_validation_wins=3,
+                       min_validation_improvement=.005,
+                       shrinkages=[.25, .5, 1.])
         if args.horizon_days:
             cfg.update(mode="exploratory", horizon=f"{args.horizon_days}d")
             cfg["control_block"] = f"{max(14, args.horizon_days)}d"
