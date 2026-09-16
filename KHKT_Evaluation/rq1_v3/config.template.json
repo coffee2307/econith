@@ -1,0 +1,56 @@
+{
+  "mode": "exploratory",
+  "countries": [
+    "US",
+    "JP"
+  ],
+  "assets": {
+    "SPY": [
+      1,
+      0
+    ],
+    "EWJ": [
+      0,
+      1
+    ]
+  },
+  "horizon_sessions": 5,
+  "paths": 32,
+  "rollout_steps": 5,
+  "control_repeats": 200,
+  "bootstrap_repeats": 1000,
+  "alphas": [
+    0.1,
+    1,
+    10
+  ],
+  "weights": [
+    0.1,
+    0.25,
+    0.5
+  ],
+  "validation_wins": 2,
+  "min_gain": 0.005,
+  "seed": 42,
+  "network": null,
+  "network_source": "",
+  "network_available_at": "",
+  "market_source": "",
+  "calendar_audit": "",
+  "release_provenance": "",
+  "data_use_history": "",
+  "folds": [
+    {
+      "train_start": "2010-01-01T00:00:00Z",
+      "validation_start": "2018-01-01T00:00:00Z",
+      "test_start": "2020-01-01T00:00:00Z",
+      "test_end": "2022-01-01T00:00:00Z"
+    },
+    {
+      "train_start": "2010-01-01T00:00:00Z",
+      "validation_start": "2020-01-01T00:00:00Z",
+      "test_start": "2022-01-01T00:00:00Z",
+      "test_end": "2024-01-01T00:00:00Z"
+    }
+  ]
+}
