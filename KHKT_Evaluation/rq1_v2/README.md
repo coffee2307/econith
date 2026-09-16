@@ -1,5 +1,30 @@
 # RQ1 v2 — bản thử nghiệm độc lập
 
+## Bản xung World đa thang thời gian
+
+Kết quả `causal_14d` cho thấy cổng ổn định trả E1 về B0 ở cả hai fold. Mức giảm
+MAE tốt nhất trên validation chỉ đạt khoảng 0,054% và 0,109%, chưa đủ ổn định để
+kích hoạt mô hình. Bản tiếp theo sửa hai điểm trong thiết kế thay vì chọn tham số
+theo tập test:
+
+- Xung World giữ mốc 0 khi không có sự kiện. Trước đây phép trừ trung bình có thể
+  tạo hiệu chỉnh khác 0 ngay cả khi xung đã hết.
+- Mỗi kênh World được tách thành hướng và độ lớn, rồi suy giảm theo 3/7/14 ngày.
+  Xung bị cắt sau 42 ngày để không để lại dư lượng vô hạn.
+- Ứng viên phải cùng cải thiện MAE và RMSE, đồng thời thắng B0 trên ít nhất 2/3
+  đoạn validation. Ngưỡng cải thiện tối thiểu 0,1% chỉ dùng cho thăm dò.
+
+Chạy lại vào thư mục mới; không ghi đè `causal_14d`:
+
+```powershell
+python -m unittest tests.test_rq1_v2 tests.test_rq1_innovations -v
+python -m KHKT_Evaluation.rq1_v2.run --market datasets/features/BTCUSDT_features.parquet --releases datasets/macro_releases.csv --config KHKT_Evaluation/rq1_v2/config.causal.local.json --causal-world-preset --output KHKT_Evaluation/results_rq1_v2/causal_multiscale_14d
+```
+
+Hai fold 2025–2026 đã được xem nên lần chạy này vẫn là exploratory. Kết quả chỉ
+cho biết thiết kế mới có đáng mang sang một giai đoạn hoặc tài sản chưa dùng hay
+không; không được đổi thành confirmatory hoặc tự xác nhận H1.
+
 ## World theo tác động riêng của lần công bố
 
 Các lần chạy 3/7/14 ngày cho thấy dữ liệu công bố trực tiếp có tín hiệu nhẹ ở

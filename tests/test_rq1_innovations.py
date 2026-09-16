@@ -60,15 +60,40 @@ class TestInnovations(unittest.TestCase):
     def test_causal_pipeline_is_repeatable(self):
         m, r, c = fixture()
         c.update(causal_world_impulses=True, reaction_daily_scale=1 / 30,
-                 impulse_simulation_days=7, impulse_half_life_days=7,
-                 validation_blocks=3, required_validation_wins=3,
-                 min_validation_improvement=.005, shrinkages=[.25, .5, 1.])
+                 impulse_simulation_days=7, impulse_half_lives_days=[3, 7, 14],
+                 impulse_max_age_days=42, validation_blocks=3,
+                 required_validation_wins=2, min_validation_improvement=.001,
+                 selection_metrics=['mae', 'rmse'], shrinkages=[.25, .5, 1.])
         a, frame, controls = evaluate(m, r, c)
         b, again, other_controls = evaluate(m, r, c)
         self.assertEqual(a['metrics'], b['metrics'])
         pd.testing.assert_frame_equal(frame, again)
         np.testing.assert_array_equal(controls, other_controls)
-        self.assertEqual(len(a['folds'][0]['world_features']), 5)
+        self.assertEqual(len(a['folds'][0]['world_features']), 30)
+
+    def test_causal_features_expire_and_return_to_zero(self):
+        m, r, c = fixture()
+        p, _ = prepare(m, r, c)
+        c.update(reaction_daily_scale=1 / 30, impulse_simulation_days=7,
+                 impulse_half_lives_days=[3, 7, 14], impulse_max_age_days=10)
+        features = causal_world_features(p.iloc[:80], c)
+        self.assertTrue((features.loc['2020-02-20'].abs() < 1e-15).all())
+        self.assertTrue((features.filter(like='_magnitude_') >= 0).all().all())
+
+    def test_zero_centering_keeps_no_event_prediction_at_b0(self):
+        x = np.zeros((150, 1))
+        x[[10, 55, 95, 125], 0] = [1., 1., -1., 1.]
+        b0 = np.ones(150)
+        y = b0 + .2 * x[:, 0]
+        train = np.arange(150) < 50
+        valid = (np.arange(150) >= 50) & (np.arange(150) < 110)
+        test = np.arange(150) >= 110
+        pred, selected = select_predict(
+            x, y, b0, train, valid, test, [.01], center_features=False,
+            min_relative_gain=0.)
+        self.assertTrue(selected['active'])
+        test_x = x[test, 0]
+        np.testing.assert_array_equal(pred[test_x == 0], b0[test][test_x == 0])
 
     def test_stability_gate_rejects_one_block_signal(self):
         rng = np.random.default_rng(19)

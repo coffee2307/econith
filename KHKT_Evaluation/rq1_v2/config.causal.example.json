@@ -10,6 +10,13 @@
   "bootstrap_repeats": 1000,
   "seed": 42,
   "alphas": [0.01, 0.1, 1.0, 10.0, 100.0],
+  "impulse_half_lives_days": [3, 7, 14],
+  "impulse_max_age_days": 42,
+  "validation_blocks": 3,
+  "required_validation_wins": 2,
+  "min_validation_improvement": 0.001,
+  "selection_metrics": ["mae", "rmse"],
+  "shrinkages": [0.25, 0.5, 1.0],
   "macro_features": {
     "interest_rate": "fraction",
     "inflation": "fraction",

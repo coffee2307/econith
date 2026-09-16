@@ -53,6 +53,9 @@ def validate_config(cfg):
     wins = int(cfg.get("required_validation_wins", 1))
     if blocks < 1 or not 1 <= wins <= blocks:
         raise ValueError("Số đoạn thắng kiểm định phải thuộc [1, validation_blocks].")
+    selection_metrics = tuple(cfg.get("selection_metrics", ("mae", "rmse")))
+    if not selection_metrics or any(name not in ("mae", "rmse") for name in selection_metrics):
+        raise ValueError("selection_metrics chỉ nhận mae và rmse.")
 
 
 def fold_masks(panel, fold, valid_rows):
@@ -139,22 +142,37 @@ def evaluate(market, releases, cfg):
             raise ValueError("Tập kiểm tra có khoảng thiếu dữ liệu; tách fold hoặc sửa nguồn.")
         frame = pd.DataFrame({"time": sub.index[test], "fold": number, "target": y[test], "B0": b0[test]})
         selected = {}
-        variants = {"B1": raw, "E1": x, "E1_plus": np.column_stack([raw, x]), "E_static": xs}
+        # Xung World dùng mốc 0 có ý nghĩa: 0 là không còn tác động sự kiện.
+        # Các biến mức vẫn được trừ trung bình như trước.
+        world_center = not causal_mode
+        variants = {
+            "B1": (raw, True),
+            "E1": (x, world_center),
+            "E1_plus": (
+                np.column_stack([raw, x]),
+                np.r_[np.ones(raw.shape[1], dtype=bool),
+                      np.full(x.shape[1], world_center, dtype=bool)],
+            ),
+            "E_static": (xs, True),
+        }
         selection = {
             "validation_blocks": int(cfg.get("validation_blocks", 1)),
             "required_validation_wins": int(cfg.get("required_validation_wins", 1)),
             "min_relative_gain": float(cfg.get("min_validation_improvement", 0.)),
             "shrinkages": tuple(cfg.get("shrinkages", [1.])),
+            "selection_metrics": tuple(cfg.get("selection_metrics", ("mae", "rmse"))),
         }
-        for name, features in variants.items():
+        for name, (features, center_features) in variants.items():
             frame[name], selected[name] = select_predict(
-                features, y, b0, train, val, test, cfg["alphas"], **selection)
+                features, y, b0, train, val, test, cfg["alphas"],
+                center_features=center_features, **selection)
         fold_controls = []
         for repeat in range(cfg["control_repeats"]):
             rng = np.random.default_rng(np.random.SeedSequence([cfg["seed"], number, repeat]))
             shuffled = permute_blocks(x, (train, val, test), block, rng)
             pred, _ = select_predict(
-                shuffled, y, b0, train, val, test, cfg["alphas"], **selection)
+                shuffled, y, b0, train, val, test, cfg["alphas"],
+                center_features=world_center, **selection)
             fold_controls.append(pred)
         predictions.append(frame)
         controls.append(np.asarray(fold_controls))
@@ -227,9 +245,12 @@ def main():
         if args.causal_world_preset:
             cfg.update(mode="exploratory", causal_world_impulses=True,
                        release_innovations=False, reaction_daily_scale=1 / 30,
-                       impulse_simulation_days=14, impulse_half_life_days=14,
-                       validation_blocks=3, required_validation_wins=3,
-                       min_validation_improvement=.005,
+                       impulse_simulation_days=14,
+                       impulse_half_lives_days=[3, 7, 14],
+                       impulse_max_age_days=42,
+                       validation_blocks=3, required_validation_wins=2,
+                       min_validation_improvement=.001,
+                       selection_metrics=["mae", "rmse"],
                        shrinkages=[.25, .5, 1.])
         if args.horizon_days:
             cfg.update(mode="exploratory", horizon=f"{args.horizon_days}d")

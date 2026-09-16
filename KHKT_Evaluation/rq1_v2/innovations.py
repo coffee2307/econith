@@ -122,16 +122,39 @@ def causal_world_features(panel, cfg):
 
     columns = ["vol", "flow", "liquidity", "inflation", "confidence"]
     pulse_frame = pd.DataFrame(pulses, index=panel.index, columns=columns)
-    half_life = float(cfg.get("impulse_half_life_days", 14))
-    decay = []
-    state = np.zeros(len(columns))
-    previous = None
-    for time, values in pulse_frame.iterrows():
-        if previous is not None:
-            days = (time - previous).total_seconds() / 86400
-            state *= 2 ** (-days / half_life)
-        state += values.to_numpy()
-        decay.append(state.copy())
-        previous = time
-    return pd.DataFrame(decay, index=panel.index,
-                        columns=[f"world_impulse_{name}" for name in columns])
+    half_lives = cfg.get("impulse_half_lives_days")
+    if half_lives is None:
+        half_lives = [cfg.get("impulse_half_life_days", 14)]
+    half_lives = tuple(float(value) for value in half_lives)
+    if not half_lives or any(not np.isfinite(value) or value <= 0 for value in half_lives):
+        raise ValueError("impulse_half_lives_days phải gồm các số dương.")
+    max_age = float(cfg.get("impulse_max_age_days", 42))
+    if not np.isfinite(max_age) or max_age <= 0:
+        raise ValueError("impulse_max_age_days phải dương.")
+
+    # Tín hiệu có dấu mô tả hướng tác động. Độ lớn giữ riêng vì cả cú sốc tăng
+    # lẫn giảm đều có thể làm biến động thị trường tăng. Cắt sau max_age để ngày
+    # không còn sự kiện quay đúng về 0 thay vì mang một dư lượng vô hạn.
+    event_rows = np.flatnonzero(np.any(np.abs(pulse_frame.to_numpy()) > 1e-15, axis=1))
+    features = {}
+    for half_life in half_lives:
+        signed = np.zeros_like(pulse_frame.to_numpy())
+        magnitude = np.zeros_like(signed)
+        for position in event_rows:
+            ages = np.asarray(
+                (pulse_frame.index[position:] - pulse_frame.index[position]) / pd.Timedelta(days=1),
+                dtype=float,
+            )
+            keep = ages <= max_age
+            if not np.any(keep):
+                continue
+            weight = 2 ** (-ages[keep] / half_life)
+            value = pulse_frame.iloc[position].to_numpy(dtype=float)
+            stop = position + int(keep.sum())
+            signed[position:stop] += weight[:, None] * value
+            magnitude[position:stop] += weight[:, None] * np.abs(value)
+        tag = str(int(half_life)) if half_life.is_integer() else str(half_life).replace(".", "p")
+        for index, name in enumerate(columns):
+            features[f"world_{name}_signed_hl{tag}"] = signed[:, index]
+            features[f"world_{name}_magnitude_hl{tag}"] = magnitude[:, index]
+    return pd.DataFrame(features, index=panel.index)
