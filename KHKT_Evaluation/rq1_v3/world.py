@@ -106,7 +106,10 @@ def features(levels, innovations, train, cfg, weights, *, linked=True):
     scale = np.std(x[train], axis=0)
     scale = np.where(scale > 1e-8, scale, 1.)
     state = (x-mean)/scale
-    shocks = events/scale
+    # Trước lần công bố đầu tiên, panel có NaN vì chưa biết mức vĩ mô. Điều đó
+    # đồng nghĩa chưa có xung mới, không phải một xung bị thiếu cần nội suy.
+    # Mức state vẫn giữ NaN để mặt nạ usable loại đúng các dòng chưa đủ dữ liệu.
+    shocks = np.where(np.isfinite(events), events/scale, 0.)
     if linked and cfg.get('network_mode', 'fixed') == 'train_association':
         network = association_network(shocks, train, cfg)
         network_method = 'train-only lagged absolute association; not causal'

@@ -126,6 +126,15 @@ class TestRQ1V3(unittest.TestCase):
         np.testing.assert_array_equal(dynamic,np.zeros_like(dynamic))
         self.assertEqual(meta['dynamic_nonzero_share'],0.)
 
+    def test_pre_release_missing_values_mean_no_impulse(self):
+        levels=np.tile(np.arange(8,dtype=float),(30,1))
+        innovations=np.zeros_like(levels); innovations[:5]=np.nan
+        train=(np.arange(30)>=5)&(np.arange(30)<20)
+        _,_,cfg=fixture(); _,dynamic,meta=world.features(levels,innovations,train,cfg,[.5,.5])
+        self.assertTrue(np.isfinite(dynamic).all())
+        np.testing.assert_array_equal(dynamic,np.zeros_like(dynamic))
+        self.assertEqual(meta['dynamic_nonzero_share'],0.)
+
     def test_reject_naive_and_synthetic_quality(self):
         with self.assertRaises(ValueError): data.utc(['2020-01-01'])
         _,r,cfg=fixture(); r['quality']='synthetic'
