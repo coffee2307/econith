@@ -243,7 +243,7 @@ export function WorldSimProvider({ children }: { children: React.ReactNode }) {
     return titanTierOf(code);
   }, []);
 
-  const ensure = useCallback((_code: string) => {
+  const ensure = useCallback(() => {
     // No client-side node spawning — backend owns the live nation set.
   }, []);
 

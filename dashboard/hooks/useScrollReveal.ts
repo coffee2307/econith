@@ -15,8 +15,12 @@ export interface ScrollRevealOptions extends IntersectionObserverInit {
 export function useScrollReveal<T extends HTMLElement = HTMLDivElement>(
   options: ScrollRevealOptions = {},
 ) {
-  const { once = true, threshold = 0.12, rootMargin = "0px 0px -6% 0px", ...rest } =
-    options;
+  const {
+    once = true,
+    threshold = 0.12,
+    rootMargin = "0px 0px -6% 0px",
+    root = null,
+  } = options;
   const ref = useRef<T>(null);
   const [visible, setVisible] = useState(false);
 
@@ -33,12 +37,12 @@ export function useScrollReveal<T extends HTMLElement = HTMLDivElement>(
           setVisible(false);
         }
       },
-      { threshold, rootMargin, ...rest },
+      { threshold, rootMargin, root },
     );
 
     observer.observe(el);
     return () => observer.disconnect();
-  }, [once, threshold, rootMargin, rest.root]);
+  }, [once, threshold, rootMargin, root]);
 
   return { ref, visible };
 }

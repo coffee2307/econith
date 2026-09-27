@@ -177,6 +177,31 @@
     opacity: 0.85;
   }
 
+  /* Mobile keeps every World panel available in a vertical scroll instead of
+     squeezing two fixed-width sidebars around an unusable globe. */
+  @media (max-width: 1023px) {
+    .world-middle-grid {
+      display: flex !important;
+      flex-direction: column;
+      overflow-y: auto !important;
+      overscroll-behavior: contain;
+    }
+    .world-mobile-panel {
+      min-height: 24rem;
+      flex: 0 0 auto;
+      border-right: 0;
+      border-bottom: 1px solid var(--color-line);
+    }
+    .world-globe-panel {
+      min-height: 30rem;
+      flex: 0 0 auto;
+    }
+    .world-resize-handle,
+    .world-resize-handle-h {
+      display: none;
+    }
+  }
+
   /* ECONITH Quant — full-width desk: status + market pinned, body absorbs viewport */
   .quant-page-shell {
     display: grid;
@@ -189,6 +214,28 @@
   @media (min-width: 1024px) {
     .quant-page-shell {
       gap: 1rem;
+    }
+  }
+  @media (max-width: 1023px) {
+    .quant-body-grid {
+      display: block;
+      overflow-y: auto !important;
+      overscroll-behavior: contain;
+    }
+    .quant-analytics-flank,
+    .quant-risk-flank {
+      overflow: visible !important;
+    }
+    .quant-risk-flank {
+      margin-top: 0.625rem;
+    }
+    .quant-alpha-grid {
+      max-height: none !important;
+      min-height: 0 !important;
+      overflow: visible !important;
+    }
+    .quant-log-dock {
+      max-height: 24dvh;
     }
   }
   /* On desktop the whole body row is one non-scrolling frame; each flank scrolls itself. */

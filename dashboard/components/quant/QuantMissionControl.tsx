@@ -166,11 +166,11 @@ export function QuantMissionControl() {
 
       {/* ══ Body + resizable log dock ═════════════════════════════════════ */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-2.5 overflow-hidden lg:grid-cols-[minmax(0,1fr)_22rem] xl:grid-cols-[minmax(0,1fr)_25rem]">
+        <div className="quant-body-grid grid min-h-0 flex-1 grid-cols-1 gap-2.5 overflow-hidden lg:grid-cols-[minmax(0,1fr)_22rem] xl:grid-cols-[minmax(0,1fr)_25rem]">
           {/* LEFT — scroll only inside this column */}
-          <div className="flex min-h-0 flex-col gap-2.5 overflow-y-auto overflow-x-hidden overscroll-contain pr-0.5">
+          <div className="quant-analytics-flank flex min-h-0 flex-col gap-2.5 overflow-y-auto overflow-x-hidden overscroll-contain pr-0.5">
             {/* ALPHA zone — capped height; scroll inside panels, never eats routing */}
-            <div className="grid max-h-[min(40vh,22rem)] min-h-[14rem] shrink-0 grid-cols-1 gap-2.5 overflow-hidden xl:grid-cols-2">
+            <div className="quant-alpha-grid grid max-h-[min(40vh,22rem)] min-h-[14rem] shrink-0 grid-cols-1 gap-2.5 overflow-hidden xl:grid-cols-2">
               <AiEnsemblePanel ai={ai} tLabel={t} className="h-full max-h-full min-h-0" />
               <AlphaDebateWidget debate={debate} alpha={alpha} className="h-full max-h-full min-h-0" />
             </div>
@@ -182,7 +182,7 @@ export function QuantMissionControl() {
           </div>
 
           {/* RIGHT — risk rail (stacked panels, scroll inside column) */}
-          <aside className="flex min-h-0 flex-col gap-2.5 overflow-y-auto overflow-x-hidden overscroll-contain pr-0.5">
+          <aside className="quant-risk-flank flex min-h-0 flex-col gap-2.5 overflow-y-auto overflow-x-hidden overscroll-contain pr-0.5">
             <div className="shrink-0">
               <SentinelRiskPanel sentinel={sentinel} breaker={breaker} tLabel={t} />
             </div>
@@ -196,7 +196,7 @@ export function QuantMissionControl() {
         </div>
 
         <QuantResizeHandle onResize={adjustLogHeight} label={t("quant.resizeLog")} />
-        <div className="flex-none overflow-hidden" style={{ height: logHeight }}>
+        <div className="quant-log-dock flex-none overflow-hidden" style={{ height: logHeight }}>
           <EventLogTerminal events={quantEvents} dock fill />
         </div>
       </div>
@@ -221,6 +221,9 @@ function AiEnsemblePanel({
   const actionColor =
     action === "LONG" ? "text-long" : action === "SHORT" ? "text-short" : "text-muted";
   const actionTone = action === "LONG" ? "long" : action === "SHORT" ? "short" : "neutral";
+  const featureRows = ai?.explain?.top_features?.length
+    ? ai.explain.top_features
+    : (ai?.explain?.attribution ?? []);
 
   return (
     <Panel
@@ -264,14 +267,8 @@ function AiEnsemblePanel({
           {ai?.explain?.method ? (
             <Row left="method" right={String(ai.explain.method)} />
           ) : null}
-          {(ai?.explain?.top_features?.length
-            ? ai.explain.top_features
-            : ai?.explain?.attribution
-          )?.length
-            ? (ai?.explain?.top_features?.length
-                ? ai.explain.top_features
-                : ai?.explain?.attribution!
-              )
+          {featureRows.length
+            ? featureRows
                 .slice(0, 5)
                 .map((a) => {
                   const importance =

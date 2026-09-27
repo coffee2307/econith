@@ -33,12 +33,16 @@ class Settings:
     api_prefix: str = "/api/v1"
 
     # CORS origins for the dashboard (https://localhost by default).
-    cors_origins: tuple[str, ...] = (
+    local_cors_origins: tuple[str, ...] = (
         "https://localhost",
         "https://localhost:3000",
         "http://localhost:3000",
         "http://localhost:3001",
     )
+
+    @property
+    def cors_origins(self) -> tuple[str, ...]:
+        return tuple(dict.fromkeys((*self.local_cors_origins, *self.env.cors_origin_list)))
 
     time_speed_multipliers: tuple[int, ...] = TIME_SPEED_MULTIPLIERS
 

@@ -5,6 +5,7 @@ import type {
   CockpitSocketMessage,
   ICockpitTelemetryFrame,
 } from "@/lib/cockpit/types";
+import { browserWebSocketUrl } from "@/lib/runtime-url";
 
 export type CockpitConnectionStatus =
   | "connecting"
@@ -16,7 +17,7 @@ const DEFAULT_COCKPIT_WS =
   process.env.NEXT_PUBLIC_COCKPIT_WS_URL ??
   (process.env.NEXT_PUBLIC_WS_URL
     ? process.env.NEXT_PUBLIC_WS_URL.replace("/stream/metrics", "/stream/cockpit")
-    : "ws://localhost:8000/api/v1/stream/cockpit");
+    : undefined);
 
 export interface CockpitStream {
   frame: ICockpitTelemetryFrame | null;
@@ -24,7 +25,7 @@ export interface CockpitStream {
   attempts: number;
 }
 
-export function useCockpitStream(url = DEFAULT_COCKPIT_WS): CockpitStream {
+export function useCockpitStream(requestedUrl = DEFAULT_COCKPIT_WS): CockpitStream {
   const [frame, setFrame] = useState<ICockpitTelemetryFrame | null>(null);
   const [status, setStatus] = useState<CockpitConnectionStatus>("connecting");
   const [attempts, setAttempts] = useState(0);
@@ -32,6 +33,11 @@ export function useCockpitStream(url = DEFAULT_COCKPIT_WS): CockpitStream {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+
+    const url = browserWebSocketUrl(
+      "/api/v1/stream/cockpit",
+      requestedUrl,
+    );
 
     let stopped = false;
     let ws: WebSocket | null = null;
@@ -102,7 +108,7 @@ export function useCockpitStream(url = DEFAULT_COCKPIT_WS): CockpitStream {
         }
       }
     };
-  }, [url]);
+  }, [requestedUrl]);
 
   return { frame, status, attempts };
 }
