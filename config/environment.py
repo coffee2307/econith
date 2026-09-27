@@ -34,6 +34,7 @@ class Environment(BaseSettings):
     app_host: str = Field(default="0.0.0.0", alias="APP_HOST")
     app_port: int = Field(default=8000, alias="APP_PORT")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    cors_origins: str = Field(default="", alias="CORS_ORIGINS")
 
     # --- Binance API -----------------------------------------------------
     # Legacy single-key pair (kept for backward compatibility).
@@ -200,6 +201,15 @@ class Environment(BaseSettings):
         """Parsed, de-duplicated set of accepted API keys / bearer tokens."""
         return frozenset(
             tok.strip() for tok in self.api_keys.split(",") if tok.strip()
+        )
+
+    @property
+    def cors_origin_list(self) -> tuple[str, ...]:
+        """Additional browser origins supplied as a comma-separated list."""
+        return tuple(
+            origin.strip().rstrip("/")
+            for origin in self.cors_origins.split(",")
+            if origin.strip()
         )
 
     @property

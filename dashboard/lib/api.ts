@@ -9,10 +9,6 @@
 export const API_BASE =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "/api/v1";
 
-/** Browser-visible API key (set NEXT_PUBLIC_API_KEY to match backend API_KEYS). */
-export const API_KEY =
-  (process.env.NEXT_PUBLIC_API_KEY ?? "").trim();
-
 export interface ApiErrorInfo {
   path: string;
   status: number;
@@ -30,11 +26,10 @@ export function clearLastApiError(): void {
 }
 
 function authHeaders(extra?: Record<string, string>): Record<string, string> {
-  const headers: Record<string, string> = { ...(extra ?? {}) };
-  if (API_KEY) {
-    headers["X-API-Key"] = API_KEY;
-  }
-  return headers;
+  // Production credentials are injected by the same-origin reverse proxy.
+  // Never compile API keys into NEXT_PUBLIC_* variables: browser bundles are
+  // public by design.
+  return { ...(extra ?? {}) };
 }
 
 async function readErrorDetail(res: Response): Promise<string> {

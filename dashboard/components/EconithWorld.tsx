@@ -367,15 +367,15 @@ export default function EconithWorld() {
       style={{ gridTemplateRows: `auto minmax(0, 1fr) ${downH}px` }}
     >
       {/* ================= TOOLBAR (shared header lives in Navbar) ================= */}
-      <div className="flex h-11 flex-none items-center justify-between gap-4 border-b border-line bg-surface px-4">
-        <div className="flex items-center gap-2 rounded-xl border border-line bg-elevated px-3 py-1.5">
+      <div className="flex min-h-11 flex-none flex-wrap items-center justify-between gap-2 border-b border-line bg-surface px-2 py-2 sm:px-4">
+        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-line bg-elevated px-3 py-1.5 sm:flex-none">
           <FontAwesomeIcon icon={faMagnifyingGlass} className="h-3.5 w-3.5 text-faint" />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && searchCountry()}
             placeholder={t("world.searchPlaceholder")}
-            className="w-44 bg-transparent text-sm text-ink placeholder:text-faint focus:outline-none sm:w-56"
+            className="min-w-0 flex-1 bg-transparent text-sm text-ink placeholder:text-faint focus:outline-none sm:w-56"
           />
           <button
             onClick={searchCountry}
@@ -385,7 +385,7 @@ export default function EconithWorld() {
           </button>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex max-w-full items-center gap-2 overflow-x-auto sm:gap-4">
           <span className="hidden rounded-lg border border-world/40 bg-world/10 px-2 py-1 font-mono text-[11px] text-world md:inline-flex">
             {simCodes.length} nodes · {snapshot?.world?.scale?.population_clusters ?? "—"} clusters
           </span>
@@ -421,13 +421,13 @@ export default function EconithWorld() {
 
       {/* ================= MIDDLE ================= */}
       <div
-        className="grid min-h-0 overflow-hidden"
+        className="world-middle-grid grid min-h-0 overflow-hidden"
         style={{
           gridTemplateColumns: `${leftW}px 5px minmax(0, 1fr) 5px ${rightW}px`,
         }}
       >
         {/* LEFT SIDEBAR */}
-        <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-line bg-surface">
+        <aside className="world-mobile-panel flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-line bg-surface">
           <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4">
           <div className="mb-3 flex items-center gap-2">
             <FontAwesomeIcon icon={faSliders} className="h-4 w-4 text-world" />
@@ -562,7 +562,7 @@ export default function EconithWorld() {
         {/* CENTER GLOBE */}
         <section
           ref={globeBoxRef}
-          className="relative min-h-0 min-w-0 overflow-hidden"
+          className="world-globe-panel relative min-h-0 min-w-0 overflow-hidden"
           style={{ backgroundColor: globePalette.bg }}
         >
           {showGlobe ? (
@@ -702,7 +702,9 @@ export default function EconithWorld() {
         />
 
         {/* RIGHT PANEL — events + agent exchange */}
-        <WorldRightPanel events={sim.events} pendingCount={sim.pendingCount} />
+        <div className="world-mobile-panel flex min-h-0 min-w-0 flex-col overflow-hidden">
+          <WorldRightPanel events={sim.events} pendingCount={sim.pendingCount} />
+        </div>
       </div>
 
       {/* ================= DOWNBAR ================= */}

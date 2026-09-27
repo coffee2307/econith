@@ -28,12 +28,12 @@ export function Navbar() {
 
   return (
     <header className="sticky top-0 z-50 border-b border-line bg-base/90 backdrop-blur">
-      <div className="mx-auto flex h-14 w-full max-w-7xl items-center justify-between gap-4 px-6">
+      <div className="mx-auto flex h-14 w-full max-w-7xl items-center justify-between gap-2 px-3 sm:gap-4 sm:px-6">
         <Link href="/" className="flex shrink-0 items-center gap-2.5">
           <span className="flex h-7 w-7 items-center justify-center rounded-xl border border-line bg-elevated">
             <FontAwesomeIcon icon={faCube} className="h-3.5 w-3.5 text-accent" />
           </span>
-          <span className="font-mono text-sm font-semibold tracking-tight text-ink">
+          <span className="hidden font-mono text-sm font-semibold tracking-tight text-ink min-[420px]:inline">
             ECONITH
           </span>
         </Link>
@@ -68,8 +68,10 @@ export function Navbar() {
           })}
         </nav>
 
-        <div className="flex shrink-0 items-center gap-2">
-          <ConnectionBadge status={status} attempts={attempts} />
+        <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+          <span className="hidden md:inline-flex">
+            <ConnectionBadge status={status} attempts={attempts} />
+          </span>
           <LanguageToggle />
           <ThemeToggle />
         </div>

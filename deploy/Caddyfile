@@ -1,0 +1,34 @@
+{$SITE_ADDRESS} {
+    encode zstd gzip
+
+    # The defence demo is intentionally private. Generate the hash with:
+    # docker run --rm caddy:2-alpine caddy hash-password --plaintext 'password'
+    basic_auth {
+        {$DEMO_USERNAME} {$DEMO_PASSWORD_HASH}
+    }
+
+    header {
+        -Server
+        X-Content-Type-Options nosniff
+        X-Frame-Options SAMEORIGIN
+        Referrer-Policy strict-origin-when-cross-origin
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    }
+
+    # Caddy adds the backend credential after browser authentication. The key
+    # never appears in JavaScript or the browser network configuration.
+    handle /api/v1/* {
+        reverse_proxy backend_core:8000 {
+            header_up X-API-Key {$ECONITH_API_KEY}
+        }
+    }
+
+    handle {
+        reverse_proxy frontend_dashboard:3000
+    }
+
+    log {
+        output stdout
+        format console
+    }
+}

@@ -9,6 +9,7 @@
  * auto-reconnection so the UI self-heals across backend reloads.
  */
 import { useEffect, useRef, useState } from "react";
+import { browserWebSocketUrl } from "@/lib/runtime-url";
 
 // --- payload contract (mirrors core/telemetry.MetricsHub.snapshot) ----------
 export interface TimeState {
@@ -224,9 +225,7 @@ export type ConnectionStatus =
   | "reconnecting"
   | "closed";
 
-export const DEFAULT_WS_URL =
-  process.env.NEXT_PUBLIC_WS_URL ??
-  "ws://localhost:8000/api/v1/stream/metrics";
+export const DEFAULT_WS_URL = process.env.NEXT_PUBLIC_WS_URL;
 
 interface UseMetricsStreamOptions {
   url?: string;
@@ -243,7 +242,7 @@ export interface MetricsStream {
 export function useMetricsStream(
   options: UseMetricsStreamOptions = {},
 ): MetricsStream {
-  const url = options.url ?? DEFAULT_WS_URL;
+  const requestedUrl = options.url ?? DEFAULT_WS_URL;
   const baseBackoff = options.baseBackoffMs ?? 500;
   const maxBackoff = options.maxBackoffMs ?? 10_000;
 
@@ -256,6 +255,11 @@ export function useMetricsStream(
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+
+    const url = browserWebSocketUrl(
+      "/api/v1/stream/metrics",
+      requestedUrl,
+    );
 
     let stopped = false;
     let ws: WebSocket | null = null;
@@ -327,7 +331,7 @@ export function useMetricsStream(
         }
       }
     };
-  }, [url, baseBackoff, maxBackoff]);
+  }, [requestedUrl, baseBackoff, maxBackoff]);
 
   return { snapshot, status, attempts };
 }

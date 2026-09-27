@@ -53,6 +53,9 @@ export function useWorldAgentDebate() {
   const { snapshot } = useMetrics();
   const { locale, countryName } = useLocale();
   const { policyAgentLines } = useWorldSim();
+  const worldAgentRows = snapshot?.world_agents;
+  const worldState = snapshot?.world;
+  const worldDialogue = snapshot?.world_dialogue;
 
   const lines: WorldAgentLine[] = useMemo(() => {
     const policy: WorldAgentLine[] = policyAgentLines.map((row) => ({
@@ -69,9 +72,8 @@ export function useWorldAgentDebate() {
 
     // Prefer structured dialogue turns when present (grounded metrics).
     const dialogueTurns =
-      (snapshot as { world_dialogue?: Array<Record<string, unknown>> } | null)
-        ?.world_dialogue ??
-      (snapshot?.world as { dialogue?: Record<string, unknown> } | undefined)?.dialogue;
+      worldDialogue ??
+      (worldState as { dialogue?: Record<string, unknown> } | undefined)?.dialogue;
     const dialogueLines: WorldAgentLine[] = [];
     const turns = asDialogueTurns(dialogueTurns);
     for (let ti = 0; ti < turns.length; ti++) {
@@ -109,7 +111,7 @@ export function useWorldAgentDebate() {
       }
     }
 
-    const raw = snapshot?.world_agents ?? [];
+    const raw = worldAgentRows ?? [];
     const seen = new Set<string>();
     const out: WorldAgentLine[] = [...policy, ...dialogueLines];
     const AGENT_ACTORS = new Set([
@@ -175,7 +177,13 @@ export function useWorldAgentDebate() {
     return out
       .sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime())
       .slice(0, MAX_LINES);
-  }, [snapshot?.world_agents, snapshot?.world, policyAgentLines, locale]);
+  }, [
+    worldAgentRows,
+    worldState,
+    worldDialogue,
+    policyAgentLines,
+    locale,
+  ]);
 
   const localizedLines = useMemo(
     () =>
