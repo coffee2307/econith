@@ -178,7 +178,8 @@
   }
 
   /* Mobile keeps every World panel available in a vertical scroll instead of
-     squeezing two fixed-width sidebars around an unusable globe. */
+     squeezing two fixed-width sidebars around an unusable globe. The globe
+     stays first so the main visual is immediately visible on entry. */
   @media (max-width: 1023px) {
     .world-middle-grid {
       display: flex !important;
@@ -193,7 +194,8 @@
       border-bottom: 1px solid var(--color-line);
     }
     .world-globe-panel {
-      min-height: 30rem;
+      order: -1;
+      min-height: clamp(19rem, 55dvh, 30rem);
       flex: 0 0 auto;
     }
     .world-resize-handle,
