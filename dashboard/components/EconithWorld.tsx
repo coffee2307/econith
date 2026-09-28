@@ -146,6 +146,7 @@ export default function EconithWorld() {
   const [GlobeComp, setGlobeComp] = useState<any>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [material, setMaterial] = useState<any>(null);
+  const [mobileViewport, setMobileViewport] = useState<boolean | null>(null);
   const [features, setFeatures] = useState<GeoFeature[]>([]);
   const [selected, setSelected] = useState("USA");
   const [hovered, setHovered] = useState<string | null>(null);
@@ -230,8 +231,19 @@ export default function EconithWorld() {
   const isSimulated = !!activeCountry; // always true for the 50 (+ ensured clicks)
   const activeTier = sim.tierOf(activeCode);
 
-  // ---- lazy library + theme-aware globe material ----
+  // Mobile uses a lightweight SVG globe: it is stable on devices where WebGL
+  // is limited and avoids a heavy 3D render competing with the control panels.
   useEffect(() => {
+    const media = window.matchMedia("(max-width: 1023px)");
+    const update = () => setMobileViewport(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  // ---- lazy library + theme-aware globe material (desktop only) ----
+  useEffect(() => {
+    if (mobileViewport !== false) return;
     let mounted = true;
     Promise.all([import("react-globe.gl"), import("three")])
       .then(([globeMod, THREE]) => {
@@ -248,7 +260,7 @@ export default function EconithWorld() {
     return () => {
       mounted = false;
     };
-  }, [globePalette.material]);
+  }, [globePalette.material, mobileViewport]);
 
   // ---- fetch polygons, build centroids + name index ----
   useEffect(() => {
@@ -359,7 +371,7 @@ export default function EconithWorld() {
     return 0.02;
   };
 
-  const showGlobe = GlobeComp && material && size.w > 0 && size.h > 0;
+  const showGlobe = mobileViewport === false && GlobeComp && material && size.w > 0 && size.h > 0;
 
   return (
     <div
@@ -565,7 +577,9 @@ export default function EconithWorld() {
           className="world-globe-panel relative min-h-0 min-w-0 overflow-hidden"
           style={{ backgroundColor: globePalette.bg }}
         >
-          {showGlobe ? (
+          {mobileViewport === true ? (
+            <MobileWorldGlobe />
+          ) : showGlobe ? (
             <div className="absolute inset-0 overflow-hidden">
             <GlobeComp
               ref={globeRef}
@@ -686,7 +700,7 @@ export default function EconithWorld() {
             </div>
           ) : null}
 
-          <div className="pointer-events-none absolute bottom-3 left-3 font-mono text-[11px] text-faint">
+          <div className="pointer-events-none absolute bottom-3 left-3 hidden font-mono text-[11px] text-faint lg:block">
             {t("world.globeHint")}
           </div>
         </section>
@@ -783,6 +797,55 @@ export default function EconithWorld() {
 // ===========================================================================
 //  Sub-components
 // ===========================================================================
+function MobileWorldGlobe() {
+  return (
+    <div
+      className="absolute inset-0 flex items-center justify-center overflow-hidden px-4 py-5"
+      role="img"
+      aria-label="Economic world overview"
+    >
+      <svg
+        viewBox="0 0 320 320"
+        className="h-full w-full max-h-[28rem] max-w-[28rem]"
+        aria-hidden="true"
+      >
+        <defs>
+          <radialGradient id="mobile-world-ocean" cx="34%" cy="28%" r="72%">
+            <stop offset="0%" stopColor="#dff6ff" />
+            <stop offset="58%" stopColor="#6ec8ea" />
+            <stop offset="100%" stopColor="#1677a6" />
+          </radialGradient>
+          <clipPath id="mobile-world-clip">
+            <circle cx="160" cy="160" r="128" />
+          </clipPath>
+        </defs>
+        <circle cx="160" cy="160" r="136" fill="#38bdf8" opacity="0.14" />
+        <circle cx="160" cy="160" r="128" fill="url(#mobile-world-ocean)" />
+        <g clipPath="url(#mobile-world-clip)" fill="none" stroke="#f8fdff" strokeOpacity="0.42" strokeWidth="1.2">
+          <ellipse cx="160" cy="160" rx="128" ry="42" />
+          <ellipse cx="160" cy="160" rx="128" ry="78" />
+          <path d="M32 160h256M52 106h216M52 214h216" />
+          <ellipse cx="160" cy="160" rx="48" ry="128" />
+          <ellipse cx="160" cy="160" rx="92" ry="128" />
+        </g>
+        <g clipPath="url(#mobile-world-clip)" fill="#7ddf9b" stroke="#167a69" strokeWidth="1.5" strokeLinejoin="round">
+          <path d="M79 90l29-19 29 11 9 25-17 19-6 33-21 6-11-23-19-6-4-20z" />
+          <path d="M126 166l24 8 8 22-8 33-13 28-13-11 3-30-12-24z" />
+          <path d="M164 79l24-10 31 8 22 24-8 21-28 9-13-14-19 5-15-14z" />
+          <path d="M187 139l30 5 25 23-8 27-25 9-16-19 6-19-15-9z" />
+          <path d="M246 215l19 8 8 22-15 17-20-9-2-19z" />
+        </g>
+        <circle cx="160" cy="160" r="128" fill="none" stroke="#0f4c75" strokeOpacity="0.55" strokeWidth="3" />
+        <circle cx="216" cy="101" r="5" fill="#fbbf24" stroke="#ffffff" strokeWidth="2" />
+        <circle cx="216" cy="101" r="10" fill="none" stroke="#fbbf24" strokeOpacity="0.45" strokeWidth="2" />
+      </svg>
+      <div className="pointer-events-none absolute bottom-5 rounded-full border border-sky-200 bg-white/85 px-3 py-1 font-mono text-[10px] font-semibold tracking-[0.14em] text-sky-800 shadow-sm">
+        WORLD OVERVIEW
+      </div>
+    </div>
+  );
+}
+
 function StatRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between">
