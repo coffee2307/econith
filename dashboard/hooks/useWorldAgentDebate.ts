@@ -27,6 +27,7 @@ export interface WorldAgentLine {
 }
 
 const ACTOR_VI: Record<string, string> = {
+  "Policy change": "Thay đổi chính sách",
   "Corporate AI": "AI doanh nghiệp",
   "Government AI": "AI chính phủ",
   "Societal AI": "AI xã hội",
