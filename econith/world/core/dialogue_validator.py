@@ -409,17 +409,22 @@ def build_fallback_bundle(
     locale: str = "en",
     material_reason: str = "",
 ) -> DialogueTurnBundle:
-    """Status-only bundle when LLM is unavailable.
+    """Build a grounded, read-only causal trace when the LLM is unavailable.
 
-    Intentionally emits **no policy decisions**. Hardcoded tighten/ease used to
-    drive physics here and made every nation look scripted. Control-law
-    governors still run via HierarchyBroker independently.
+    The trace is deliberately *not* a policy decision and therefore never
+    changes the simulation. It makes the observed pathway legible to a human:
+    a material household / labour event is followed by the relevant enterprise
+    and public-policy monitoring step. All three rows carry the same measured
+    event metrics, rather than invented actions or numbers.
     """
     cast = build_cast(events, locale=locale)
     grounded: list[GroundedMetric] = []
     utterances: list[DialogueUtterance] = []
     vi = locale.startswith("vi")
-    for e in events[:4]:
+    # One material event produces one concise three-role trace. Showing four
+    # unrelated countries at once made the panel look like repeated household
+    # alerts rather than an interaction between agents.
+    for e in events[:1]:
         node = getattr(e, "node", "") or ""
         kind = getattr(e, "kind", "") or ""
         intensity = float(getattr(e, "intensity", 0.0) or 0.0)
@@ -433,56 +438,51 @@ def build_fallback_bundle(
         grounded.extend(gm)
 
         if kind == "labor_strike":
-            d = float(metrics.get("dissatisfaction", intensity) or intensity)
-            text = (
-                f"{node}: bất mãn ~{d*100:.0f}% — đang chờ các bên thương lượng."
-                if vi else
-                f"{node}: dissatisfaction ~{d*100:.0f}% — awaiting bargaining among agents."
-            )
-            role = "Công đoàn" if vi else "Labor"
-            agent_id = f"labor-{node}"
+            trace = [
+                ("labor", "Công đoàn", "Labor", "Bất mãn lao động tăng; người lao động yêu cầu xem xét điều kiện làm việc.", "Labour dissatisfaction rose; workers request a review of working conditions."),
+                ("corp", "Doanh nghiệp", "Enterprise", "Doanh nghiệp đánh giá tác động đến sản xuất và chi phí nhân công.", "Enterprises assess the effect on production and labour costs."),
+                ("gov", "Chính phủ", "Government", "Chính phủ theo dõi việc làm và ổn định xã hội trước khi cân nhắc phản ứng.", "Government monitors jobs and social stability before considering a response."),
+            ]
         elif kind == "demand_contraction":
-            ci = float(metrics.get("consumption_index", max(0.0, 1.0 - intensity)) or 0.0)
-            text = (
-                f"{node}: cầu tiêu dùng ~{ci*100:.0f}% xu hướng — hộ gia đình đang quan sát."
-                if vi else
-                f"{node}: demand ~{ci*100:.0f}% of trend — households observing."
-            )
-            role = "Hộ gia đình" if vi else "Household"
-            agent_id = f"hh-{node}"
+            trace = [
+                ("hh", "Hộ gia đình", "Household", "Người dân giảm chi tiêu; nhu cầu tiêu dùng đang yếu đi.", "Households reduce spending; consumer demand is weakening."),
+                ("corp", "Doanh nghiệp", "Enterprise", "Doanh nghiệp theo dõi đơn hàng, sản lượng và nhu cầu tuyển dụng.", "Enterprises monitor orders, output and hiring demand."),
+                ("cb", "Ngân hàng trung ương", "Central Bank", "Ngân hàng trung ương theo dõi tăng trưởng và lạm phát trước khi điều chỉnh lãi suất.", "The central bank monitors growth and inflation before changing rates."),
+            ]
         elif kind == "safe_haven_migration":
-            text = (
-                f"{node}: dòng vốn trú ẩn tăng (cường độ {intensity:.2f}) — chưa có quyết định chính sách."
-                if vi else
-                f"{node}: safe-haven outflow intensifies ({intensity:.2f}) — no policy call yet."
-            )
-            role = "Hộ gia đình" if vi else "Household"
-            agent_id = f"hh-{node}"
+            trace = [
+                ("hh", "Hộ gia đình", "Household", "Dòng tiền chuyển sang tài sản trú ẩn; tâm lý thận trọng tăng lên.", "Funds move to safe-haven assets; precautionary sentiment rises."),
+                ("corp", "Doanh nghiệp", "Enterprise", "Doanh nghiệp theo dõi thanh khoản và chi phí vốn.", "Enterprises monitor liquidity and funding costs."),
+                ("cb", "Ngân hàng trung ương", "Central Bank", "Ngân hàng trung ương theo dõi thanh khoản của hệ thống tài chính.", "The central bank monitors financial-system liquidity."),
+            ]
         else:
-            text = (
-                f"{node}: tín hiệu {kind} (cường độ {intensity:.2f})."
-                if vi else
-                f"{node}: {kind} signal (intensity {intensity:.2f})."
-            )
-            role = "Hộ gia đình" if vi else "Household"
-            agent_id = f"hh-{node}"
+            trace = [
+                ("hh", "Hộ gia đình", "Household", "Nhu cầu tiêu dùng tăng; đây là tín hiệu đầu vào cho hoạt động sản xuất.", "Consumer demand rises; this becomes an input for production decisions."),
+                ("corp", "Doanh nghiệp", "Enterprise", "Doanh nghiệp theo dõi đơn hàng để đánh giá sản lượng và tuyển dụng.", "Enterprises monitor orders to assess output and hiring."),
+                ("cb", "Ngân hàng trung ương", "Central Bank", "Ngân hàng trung ương theo dõi tăng trưởng và lạm phát trước khi điều chỉnh lãi suất.", "The central bank monitors growth and inflation before changing rates."),
+            ]
 
-        utterances.append(
-            DialogueUtterance(
-                agent_id=agent_id,
-                role=role,
-                country=node,
-                text=strip_ungrounded_numbers(text, gm),
-                locale=locale,
-                metrics=gm,
+        previous_id = ""
+        for prefix, role_vi, role_en, text_vi, text_en in trace:
+            agent_id = f"{prefix}-{node}"
+            utterances.append(
+                DialogueUtterance(
+                    agent_id=agent_id,
+                    role=role_vi if vi else role_en,
+                    country=node,
+                    text=strip_ungrounded_numbers(text_vi if vi else text_en, gm),
+                    locale=locale,
+                    metrics=gm,
+                    responds_to=previous_id,
+                )
             )
-        )
+            previous_id = agent_id
 
     return DialogueTurnBundle(
         tick=tick,
-        decisions=[],  # no hardcode policy
+        decisions=[],
         utterances=utterances,
-        source="status",
+        source="causal_trace",
         rejected=0,
         material_reason=material_reason,
         level="info",

@@ -144,7 +144,7 @@ def test_hallucinated_rate_in_utterance_stripped() -> None:
     assert "25%" not in utterances[0].text
 
 
-def test_fallback_is_status_only_no_hardcode_policy() -> None:
+def test_fallback_causal_trace_has_no_hardcode_policy() -> None:
     events = [
         EmergentEvent(
             node="USA",
@@ -156,7 +156,10 @@ def test_fallback_is_status_only_no_hardcode_policy() -> None:
     bundle = build_fallback_bundle(tick=10, events=events, locale="en", material_reason="x")
     assert bundle.decisions == []
     assert bundle.utterances
-    assert bundle.source == "status"
+    assert bundle.source == "causal_trace"
+    assert len(bundle.utterances) == 3
+    assert [u.role for u in bundle.utterances] == ["Labor", "Enterprise", "Government"]
+    assert bundle.utterances[1].responds_to == bundle.utterances[0].agent_id
     assert bundle.cast
 
     applied: list = []
@@ -173,7 +176,7 @@ def test_fallback_is_status_only_no_hardcode_policy() -> None:
         locale="en",
     )
     assert out is not None
-    # Status fallback must NOT push hardcode directives into physics.
+    # The causal trace must NOT push hardcoded directives into physics.
     assert applied == []
     out2 = orch.maybe_schedule(
         tick=1,

@@ -23,6 +23,15 @@ export function WorldAgentExchange() {
   const { t, locale } = useLocale();
   const { lines, live, policyLive } = useWorldAgentDebate();
   const timeLocale = locale === "vi" ? "vi-VN" : "en-GB";
+  const provenanceLabel = (source?: string) => {
+    if (source === "causal_trace") {
+      return locale === "vi" ? "Chuỗi phản ứng" : "Causal trace";
+    }
+    if (source === "policy") {
+      return locale === "vi" ? "Theo dõi chính sách" : "Policy monitor";
+    }
+    return "";
+  };
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -80,7 +89,9 @@ export function WorldAgentExchange() {
                     {line.countryLabel ? ` · ${line.countryLabel}` : ""}
                   </span>
                   <span className="font-mono text-faint">
-                    {line.provenance ? `${line.provenance} · ` : ""}
+                    {provenanceLabel(line.provenance)
+                      ? `${provenanceLabel(line.provenance)} · `
+                      : ""}
                     {line.simDay != null ? `${t("common.day")} ${line.simDay}` : ""}
                     {line.simDay != null ? " · " : ""}
                     {new Date(line.ts).toLocaleTimeString(timeLocale, {
@@ -91,6 +102,11 @@ export function WorldAgentExchange() {
                 <p className="mt-1.5 text-xs leading-relaxed text-ink">
                   {line.text}
                 </p>
+                {line.respondsTo ? (
+                  <p className="mt-1 text-[10px] text-muted">
+                    ↳ {locale === "vi" ? "Phản hồi bước trước" : "Responds to the previous step"}
+                  </p>
+                ) : null}
                 {line.metrics && line.metrics.length > 0 ? (
                   <div className="mt-2 flex flex-wrap gap-1">
                     {line.metrics.slice(0, 4).map((m, idx) => (

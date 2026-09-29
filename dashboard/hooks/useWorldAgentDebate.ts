@@ -23,6 +23,7 @@ export interface WorldAgentLine {
   source: string;
   provenance?: string;
   metrics?: GroundedMetricChip[];
+  respondsTo?: string;
 }
 
 const ACTOR_VI: Record<string, string> = {
@@ -34,6 +35,8 @@ const ACTOR_VI: Record<string, string> = {
   Household: "Hộ gia đình",
   Labor: "Lao động",
   "Central Bank": "Ngân hàng trung ương",
+  Enterprise: "Doanh nghiệp",
+  Government: "Chính phủ",
   Dialogue: "Đối thoại",
 };
 
@@ -89,6 +92,7 @@ export function useWorldAgentDebate() {
           text_vi?: string;
           locale?: string;
           metrics?: GroundedMetricChip[];
+          responds_to?: string;
         }>;
       };
       for (let ui = 0; ui < (turn.utterances ?? []).length; ui++) {
@@ -107,13 +111,18 @@ export function useWorldAgentDebate() {
           source: "dialogue",
           provenance: turn.source,
           metrics: u.metrics,
+          respondsTo: u.responds_to,
         });
       }
     }
 
     const raw = worldAgentRows ?? [];
-    const seen = new Set<string>();
     const out: WorldAgentLine[] = [...policy, ...dialogueLines];
+    // Structured dialogue and raw telemetry can describe the same event.
+    // Seed the set so the panel shows one readable chain rather than duplicates.
+    const seen = new Set(
+      out.map((line) => `${line.actor}|${line.country}|${line.text.slice(0, 60)}`),
+    );
     const AGENT_ACTORS = new Set([
       "Corporate AI",
       "Government AI",
@@ -131,6 +140,7 @@ export function useWorldAgentDebate() {
         metrics?: GroundedMetricChip[];
         provenance?: string;
         text_vi?: string;
+        responds_to?: string;
       };
       const actor = row.actor || row.source || "";
       const source = row.source || "";
@@ -172,6 +182,7 @@ export function useWorldAgentDebate() {
         source: row.source || "",
         provenance: row.provenance,
         metrics: row.metrics,
+        respondsTo: row.responds_to ?? row.respondsTo,
       });
     }
     return out
