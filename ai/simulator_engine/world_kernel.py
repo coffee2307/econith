@@ -1709,18 +1709,138 @@ class WorldKernel:
         c = self._world.countries.get(code)
         if c is None:
             return {"ok": False, "error": f"unknown country {code}"}
+        previous: float | None = None
         if group == "" and hasattr(c, field):
+            previous = float(getattr(c, field))
             setattr(c, field, _clamp_field(field, float(value)))
             ok = True
         else:
             model = getattr(c, group)
+            if field in type(model).model_fields:
+                previous = float(getattr(model, field))
             ok = field in type(model).model_fields and c.set_field(group, field, _clamp_field(field, float(value)))
         if not ok:
             return {"ok": False, "error": f"unknown field {group}.{field}"}
         text = f"policy set {group + '.' if group else ''}{field} = {value:.4g}"
         await self._emit_event({"country": c.name, "text": text,
                                 "level": "warn", "source": "policy"})
+        await self._emit_policy_reaction_trace(
+            country=c.name,
+            code=code,
+            group=group,
+            field=field,
+            previous=previous if previous is not None else float(value),
+            current=float(value),
+        )
         return {"ok": True, "code": code, "group": group, "field": field, "value": value}
+
+    async def _emit_policy_reaction_trace(
+        self,
+        *,
+        country: str,
+        code: str,
+        group: str,
+        field: str,
+        previous: float,
+        current: float,
+    ) -> None:
+        """Explain a manual policy edit through affected model channels.
+
+        This is a transparent causal trace, not an LLM conversation and not a
+        new policy decision. It only states which existing channels in World
+        are updated or monitored after the user changes a country variable.
+        """
+        from core.locale_prefs import dashboard_locale
+
+        locale = dashboard_locale()
+        vi = locale.startswith("vi")
+        if abs(current - previous) <= 1e-12:
+            return
+        changed_up = current > previous + 1e-12
+        pct_fields = {
+            "interest_rate", "reserve_requirement", "inflation_cpi",
+            "corporate_tax", "vat",
+        }
+        before = f"{previous * 100:.1f}%" if field in pct_fields else f"{previous:.2f}"
+        after = f"{current * 100:.1f}%" if field in pct_fields else f"{current:.2f}"
+        transition_vi = (
+            f"tăng từ {before} lên {after}"
+            if changed_up else f"giảm từ {before} xuống {after}"
+        )
+        transition_en = (
+            f"increased from {before} to {after}"
+            if changed_up else f"decreased from {before} to {after}"
+        )
+
+        if group == "monetary" and field in {"interest_rate", "reserve_requirement"}:
+            label_vi = "lãi suất chính sách" if field == "interest_rate" else "tỷ lệ dự trữ bắt buộc"
+            label_en = "policy interest rate" if field == "interest_rate" else "reserve requirement"
+            trace = [
+                ("cb", "Ngân hàng trung ương", "Central Bank",
+                 f"{label_vi.capitalize()} {transition_vi}; điều kiện tín dụng trong mô hình được cập nhật.",
+                 f"The {label_en} {transition_en}; credit conditions in the model are updated."),
+                ("corp", "Doanh nghiệp", "Enterprise",
+                 "Doanh nghiệp theo dõi chi phí vay vốn, kế hoạch đầu tư và sản lượng.",
+                 "Enterprises monitor borrowing costs, investment plans and output."),
+                ("hh", "Hộ gia đình", "Household",
+                 "Hộ gia đình theo dõi chi phí vay, lãi tiết kiệm và chi tiêu.",
+                 "Households monitor borrowing costs, saving returns and spending."),
+            ]
+        elif group == "fiscal" and field in {"corporate_tax", "individual_tax", "vat"}:
+            label_vi = {
+                "corporate_tax": "thuế doanh nghiệp",
+                "individual_tax": "thuế thu nhập",
+                "vat": "thuế tiêu dùng",
+            }[field]
+            trace = [
+                ("gov", "Chính phủ", "Government",
+                 f"{label_vi.capitalize()} {transition_vi}; ngân sách và điều kiện kinh doanh được cập nhật.",
+                 f"The {field.replace('_', ' ')} {transition_en}; fiscal conditions are updated."),
+                ("corp", "Doanh nghiệp", "Enterprise",
+                 "Doanh nghiệp theo dõi chi phí, lợi nhuận và kế hoạch đầu tư.",
+                 "Enterprises monitor costs, margins and investment plans."),
+                ("hh", "Hộ gia đình", "Household",
+                 "Hộ gia đình theo dõi thu nhập khả dụng và mức chi tiêu.",
+                 "Households monitor disposable income and spending."),
+            ]
+        else:
+            label = f"{group + '.' if group else ''}{field}"
+            trace = [
+                ("gov", "Chính phủ", "Government",
+                 f"Chỉ số {label} {transition_vi}; trạng thái kinh tế của {country} được cập nhật.",
+                 f"The {label} {transition_en}; {country}'s economic state is updated."),
+                ("corp", "Doanh nghiệp", "Enterprise",
+                 "Doanh nghiệp theo dõi tác động đến chi phí, sản lượng và đầu tư.",
+                 "Enterprises monitor effects on costs, output and investment."),
+                ("hh", "Hộ gia đình", "Household",
+                 "Hộ gia đình theo dõi tác động đến thu nhập, giá cả và chi tiêu.",
+                 "Households monitor effects on income, prices and spending."),
+            ]
+
+        utterances: list[dict[str, object]] = []
+        previous_id = ""
+        for prefix, role_vi, role_en, text_vi, text_en in trace:
+            agent_id = f"policy-{prefix}-{code}"
+            utterances.append({
+                "agent_id": agent_id,
+                "role": role_vi if vi else role_en,
+                "country": code,
+                "text": text_vi if vi else text_en,
+                "text_vi": text_vi,
+                "locale": locale,
+                "metrics": [],
+                "responds_to": previous_id,
+            })
+            previous_id = agent_id
+        await self._bus.publish(
+            "world.dialogue.turn",
+            tick=self._sim_day,
+            decisions=[],
+            utterances=utterances,
+            source="policy_trace",
+            rejected=0,
+            level="info",
+        )
 
     async def set_tariff(self, src: str, dst: str, value: float) -> dict:
         if not math.isfinite(value) or not 0.0 <= value <= 1.0:
