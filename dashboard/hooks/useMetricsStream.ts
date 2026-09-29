@@ -252,6 +252,8 @@ export function useMetricsStream(
 
   // Keep latest setters stable for the long-lived effect closure.
   const attemptRef = useRef(0);
+  const lastFrameAtRef = useRef(0);
+  const fallbackInFlightRef = useRef(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -264,6 +266,29 @@ export function useMetricsStream(
     let stopped = false;
     let ws: WebSocket | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let fallbackTimer: ReturnType<typeof setInterval> | null = null;
+
+    // The dashboard normally receives five WebSocket snapshots per second.
+    // A short REST fallback prevents an authenticated proxy, sleeping tab, or
+    // transient WebSocket upgrade issue from leaving World / Quant blank even
+    // while the backend is healthy and already publishing telemetry.
+    const refreshFallback = async () => {
+      if (stopped || fallbackInFlightRef.current) return;
+      fallbackInFlightRef.current = true;
+      try {
+        const res = await fetch("/api/v1/metrics", {
+          cache: "no-store",
+          headers: { Accept: "application/json" },
+        });
+        if (!res.ok) return;
+        const parsed = (await res.json()) as MetricsSnapshot;
+        if (!stopped) setSnapshot(parsed);
+      } catch {
+        // WebSocket retry remains the primary recovery path.
+      } finally {
+        fallbackInFlightRef.current = false;
+      }
+    };
 
     const open = () => {
       if (stopped) return;
@@ -284,6 +309,7 @@ export function useMetricsStream(
       ws.onmessage = (event: MessageEvent) => {
         try {
           const parsed = JSON.parse(event.data as string) as MetricsSnapshot;
+          lastFrameAtRef.current = Date.now();
           setSnapshot(parsed);
         } catch {
           // ignore malformed frame
@@ -315,11 +341,21 @@ export function useMetricsStream(
       timer = setTimeout(open, delay);
     };
 
+    // Populate the first render immediately, then poll only if the WebSocket
+    // has not delivered a frame for three seconds.
+    void refreshFallback();
+    fallbackTimer = setInterval(() => {
+      if (Date.now() - lastFrameAtRef.current > 3_000) {
+        void refreshFallback();
+      }
+    }, 1_000);
+
     open();
 
     return () => {
       stopped = true;
       if (timer) clearTimeout(timer);
+      if (fallbackTimer) clearInterval(fallbackTimer);
       if (ws) {
         ws.onclose = null; // prevent reconnect on intentional teardown
         ws.onerror = null;
