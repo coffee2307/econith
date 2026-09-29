@@ -47,24 +47,24 @@ const COPY = {
     rearm: "Re-arm Sentinel",
   },
   vi: {
-    title: "Bảng điều khiển",
-    modeLabel: "Chế độ vận hành",
-    reality: "THỰC TẾ",
-    simulation: "MÔ PHỎNG",
+    title: "Thử tình huống",
+    modeLabel: "Cách Quant dùng dữ liệu",
+    reality: "CHỈ DỮ LIỆU THỊ TRƯỜNG",
+    simulation: "KẾT HỢP WORLD",
     realityDesc:
-      "Bộ não giao dịch độc lập. Chặn ghép nối World, tắt tiêm bất thường.",
+      "Quant chỉ dùng dữ liệu thị trường; World không tác động vào kết quả.",
     simulationDesc:
-      "Sandbox RL. World ↔ Quant ghép nối, bật tiêm bất thường.",
-    enterSim: "Vào mô phỏng",
-    exitSim: "Về thực tế",
+      "Quant kết hợp dữ liệu thị trường và tình huống từ World; không giao dịch thật.",
+    enterSim: "Dùng World",
+    exitSim: "Chỉ dùng thị trường",
     switching: "Đang chuyển…",
-    injectTitle: "Tiêm bất thường",
+    injectTitle: "Tạo tình huống kiểm tra",
     locked:
-      "Tiêm bất thường bị khóa ở chế độ THỰC TẾ — giữ bộ não giao dịch không bị nhiễu bởi cú sốc tổng hợp.",
-    flashCrash: "Sập nhanh",
-    latencySpike: "Sốc độ trễ",
-    volSpike: "Sốc biến động",
-    rearm: "Kích hoạt lại Sentinel",
+      "Chỉ có thể tạo tình huống thử khi đang dùng World.",
+    flashCrash: "Giảm giá nhanh",
+    latencySpike: "Tăng độ trễ",
+    volSpike: "Tăng biến động",
+    rearm: "Bật lại kiểm soát rủi ro",
   },
 } as const;
 
