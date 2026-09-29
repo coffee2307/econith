@@ -29,6 +29,7 @@ import {
 import type { MacroFeature } from "@/constants/macroFeatures";
 import { isSimNation } from "@/constants/simNations";
 import { titanTierOf } from "@/constants/titanWorld";
+import { VI_FEATURE_LABELS } from "@/locales/viFeatures";
 import type { SimEvent } from "@/lib/worldModel";
 import type { PolicyAgentLine } from "@/lib/worldAgentReactions";
 
@@ -172,17 +173,24 @@ export function WorldSimProvider({ children }: { children: React.ReactNode }) {
         });
       });
       const now = Date.now();
+      const label =
+        locale === "vi"
+          ? VI_FEATURE_LABELS[feature.key] ?? "chỉ số đã chọn"
+          : feature.label;
+      const displayValue = feature.fraction
+        ? `${uiValue.toFixed(1)}%`
+        : uiValue.toFixed(2);
       const text =
         locale === "vi"
-          ? `${code}: đã gửi điều chỉnh ${feature.key} = ${uiValue.toFixed(2)} tới backend.`
-          : `${code}: submitted ${feature.key} = ${uiValue.toFixed(2)} to backend.`;
+          ? `${code}: đã cập nhật ${label} thành ${displayValue}.`
+          : `${code}: updated ${label} to ${displayValue}.`;
       setPolicyAgentLines((prev) =>
         [
           {
             id: `pol-${now}`,
             ts: new Date(now).toISOString(),
             simDay: snapshot?.time?.sim_day,
-            actor: "Government AI",
+            actor: "Policy change",
             country: code,
             text,
             level: "warn" as const,
