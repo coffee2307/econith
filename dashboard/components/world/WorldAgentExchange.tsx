@@ -30,6 +30,9 @@ export function WorldAgentExchange() {
     if (source === "policy") {
       return locale === "vi" ? "Theo dõi chính sách" : "Policy monitor";
     }
+    if (source === "policy_trace") {
+      return locale === "vi" ? "Tác động chính sách" : "Policy impact";
+    }
     return "";
   };
 
