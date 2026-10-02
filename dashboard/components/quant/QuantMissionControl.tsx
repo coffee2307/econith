@@ -80,6 +80,7 @@ export function QuantMissionControl() {
   const alt = snapshot?.alt;
   const quantEvents = snapshot?.events ?? [];
   const quantMode = snapshot?.quant_mode?.mode ?? "REALITY";
+  const couplingEnabled = snapshot?.quant_mode?.coupling_enabled === true;
   const marketSource = market?.source ?? "unknown";
   const routing = snapshot?.routing;
   const debate = snapshot?.debate;
@@ -271,6 +272,7 @@ export function QuantMissionControl() {
           reality={realitySample}
           simulation={simulationSample}
           currentMode={quantMode}
+          couplingEnabled={couplingEnabled}
           locale={locale}
           scenarioLabel={scenarioLabel}
         />
