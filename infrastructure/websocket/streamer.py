@@ -2,9 +2,10 @@
 
 Binance market-data streamer (master plan, Phase 1, Step 1).
 
-If real Binance credentials are absent (the default in local/dev), the streamer
-transparently becomes a **high-fidelity mock generator** that emits JSON frames
-which match Binance's *production* schemas exactly:
+Production defaults to Binance's public WebSocket, which does not require API
+credentials. An explicit ``BINANCE_MARKET_DATA_MODE=mock`` switches the streamer
+to a **high-fidelity mock generator** that emits JSON frames matching Binance's
+production schemas exactly:
 
   * ``<symbol>@aggTrade``        -- tick-by-tick aggregate trades
   * ``<symbol>@depth20@100ms``   -- L2 partial order book, top-20 levels
@@ -30,6 +31,7 @@ from typing import Any, Literal
 from config.environment import get_environment
 from core.engine import TimeEngine
 from core.event_bus import EventBus
+from core.mode import QuantMode, current_mode
 
 logger = logging.getLogger("econith.infra.ws.streamer")
 
@@ -77,9 +79,17 @@ class BinanceWebSocketStreamer:
         self._queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=10_000)
         self._running = False
         self._task: asyncio.Task[None] | None = None
+        self._connected = False
+        self._last_event_ms: int | None = None
+        self._live_overlay = 1.0
 
         if force_mock is None:
-            self._mock = not self._env.has_binance_data_credentials
+            # Binance's spot WebSocket is public. The previous credential gate
+            # silently replaced real BTC prices with a random walk whenever no
+            # API key was configured, even while Quant displayed REALITY.
+            self._mock = (
+                str(self._env.binance_market_data_mode).strip().lower() == "mock"
+            )
         else:
             self._mock = force_mock
 
@@ -91,6 +101,23 @@ class BinanceWebSocketStreamer:
     @property
     def is_mock(self) -> bool:
         return self._mock
+
+    @property
+    def data_source(self) -> str:
+        if self._mock:
+            return "synthetic_mock"
+        if current_mode() is QuantMode.SIMULATION:
+            return "binance_public_simulation"
+        return "binance_public"
+
+    def status(self) -> dict[str, Any]:
+        return {
+            "source": self.data_source,
+            "connected": self._connected,
+            "last_event_ms": self._last_event_ms,
+            "symbol": self.symbol,
+            "url": None if self._mock else self.live_url,
+        }
 
     async def start(self) -> None:
         if self._running:
@@ -107,6 +134,7 @@ class BinanceWebSocketStreamer:
 
     async def stop(self) -> None:
         self._running = False
+        self._connected = False
         if self._task:
             self._task.cancel()
             try:
@@ -165,7 +193,7 @@ class BinanceWebSocketStreamer:
     @property
     def live_url(self) -> str:
         """Combined-stream endpoint derived from the configured WS base URL."""
-        base = self._env.binance_ws_base_url.rstrip("/")
+        base = self._env.binance_data_ws_base_url.rstrip("/")
         # Promote a single-stream base (".../ws") to the combined endpoint.
         if base.endswith("/ws"):
             base = base[: -len("/ws")]
@@ -196,6 +224,7 @@ class BinanceWebSocketStreamer:
                 async with websockets.connect(
                     self.live_url, ping_interval=180, ping_timeout=10, max_queue=1024
                 ) as ws:
+                    self._connected = True
                     backoff = 1.0  # reset on a clean connect
                     await self._bus.publish(
                         "system.log",
@@ -210,6 +239,7 @@ class BinanceWebSocketStreamer:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 -- reconnect on any transport error
+                self._connected = False
                 await self._bus.publish(
                     "system.log",
                     level="warn",
@@ -228,9 +258,54 @@ class BinanceWebSocketStreamer:
         stream = msg.get("stream", "")
         data = msg.get("data", msg)
         if "aggTrade" in stream or data.get("e") == "aggTrade":
+            if current_mode() is QuantMode.SIMULATION:
+                data = self._overlay_live_trade(dict(data))
             await self._emit("md.aggTrade", data)
         elif "depth" in stream or "bids" in data:
+            if current_mode() is QuantMode.SIMULATION:
+                data = self._overlay_live_depth(dict(data))
             await self._emit("md.depth", data)
+
+    def _overlay_live_trade(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Apply demo-only anomalies on top of the current public price."""
+        if self._state.pending_shock_pct:
+            self._live_overlay *= 1.0 + self._state.pending_shock_pct
+            self._state.pending_shock_pct = 0.0
+        if self._state.vol_multiplier > 1.0:
+            jitter = random.gauss(0.0, self._state.vol * self._state.vol_multiplier)
+            self._live_overlay *= 1.0 + jitter
+            self._state.vol_multiplier = max(1.0, self._state.vol_multiplier * 0.97)
+        try:
+            data["p"] = f"{float(data['p']) * self._live_overlay:.2f}"
+        except (KeyError, TypeError, ValueError):
+            pass
+        if self._state.stale_frames > 0:
+            for key in ("E", "T"):
+                if isinstance(data.get(key), (int, float)):
+                    data[key] = int(data[key]) - self._state.stale_lag_ms
+            self._state.stale_frames -= 1
+        # Slowly return the simulated overlay toward the real market.
+        self._live_overlay += (1.0 - self._live_overlay) * 0.002
+        return data
+
+    def _overlay_live_depth(self, data: dict[str, Any]) -> dict[str, Any]:
+        for key in ("bids", "asks", "b", "a"):
+            levels = data.get(key)
+            if not isinstance(levels, list):
+                continue
+            adjusted: list[list[Any]] = []
+            for level in levels:
+                if not isinstance(level, list) or not level:
+                    adjusted.append(level)
+                    continue
+                try:
+                    adjusted.append(
+                        [f"{float(level[0]) * self._live_overlay:.2f}", *level[1:]]
+                    )
+                except (TypeError, ValueError):
+                    adjusted.append(level)
+            data[key] = adjusted
+        return data
 
     # -- price / book synthesis ----------------------------------------------
     def _advance_price(self) -> None:
@@ -316,4 +391,11 @@ class BinanceWebSocketStreamer:
         if self._queue.full():
             self._queue.get_nowait()  # drop oldest under back-pressure
         self._queue.put_nowait(frame)
-        await self._bus.publish(topic, symbol=self._state.symbol, frame=frame)
+        self._connected = True
+        self._last_event_ms = int(time.time() * 1000)
+        await self._bus.publish(
+            topic,
+            symbol=self._state.symbol,
+            frame=frame,
+            source=self.data_source,
+        )

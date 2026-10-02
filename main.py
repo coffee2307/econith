@@ -469,6 +469,7 @@ async def health() -> dict:
         "service": "backend_core",
         "version": settings.app_version,
         "mock": getattr(streamer, "is_mock", None),
+        "market_data": streamer.status() if streamer else None,
         "quant_mode": get_mode_manager().snapshot(),
         "execution": ccxt.execution_status() if ccxt else None,
         "subsystems": sorted(components.keys()),

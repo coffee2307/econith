@@ -59,6 +59,7 @@ class MarketDataPipeline:
             symbol=trade.symbol,
             price=trade.price,
             event_ms=trade.event_ms,
+            source=event.payload.get("source", "unknown"),
         )
         await self._bus.publish(
             "indicator.volume_delta",
@@ -68,6 +69,7 @@ class MarketDataPipeline:
             sell_volume=vd.sell_volume,
             window_s=vd.window_s,
             trade_count=vd.trade_count,
+            source=event.payload.get("source", "unknown"),
         )
 
     async def _on_depth(self, event: Event) -> None:
@@ -87,4 +89,5 @@ class MarketDataPipeline:
             mid=snapshot.mid,
             best_bid=snapshot.best_bid,
             best_ask=snapshot.best_ask,
+            source=event.payload.get("source", "unknown"),
         )

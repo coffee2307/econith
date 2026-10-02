@@ -65,6 +65,11 @@ class Environment(BaseSettings):
     binance_data_ws_base_url: str = Field(
         default="wss://stream.binance.com:9443/ws", alias="BINANCE_DATA_WS_BASE_URL"
     )
+    # Public Binance market-data streams do not require API credentials.
+    # Use ``mock`` only when an explicitly synthetic offline feed is wanted.
+    binance_market_data_mode: str = Field(
+        default="live", alias="BINANCE_MARKET_DATA_MODE"
+    )
     # Demo / testnet plane (futures testnet by default for Quant desk).
     binance_demo_rest_base_url: str = Field(
         default="https://testnet.binancefuture.com", alias="BINANCE_DEMO_REST_BASE_URL"

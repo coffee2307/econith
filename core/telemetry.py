@@ -101,6 +101,8 @@ class MetricsHub:
             "buy_volume": None,
             "sell_volume": None,
             "trade_count": None,
+            "source": "unknown",
+            "event_ms": None,
         }
         self._alt: dict[str, Any] = {
             "funding_rate": None,
@@ -155,6 +157,8 @@ class MetricsHub:
     async def _on_ticker(self, event: Event) -> None:
         self._market["symbol"] = event.payload.get("symbol")
         self._market["price"] = round(float(event.payload["price"]), 2)
+        self._market["source"] = event.payload.get("source", "unknown")
+        self._market["event_ms"] = event.payload.get("event_ms")
 
     async def _on_obi(self, event: Event) -> None:
         p = event.payload

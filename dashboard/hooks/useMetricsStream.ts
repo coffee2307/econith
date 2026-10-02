@@ -31,6 +31,8 @@ export interface MarketState {
   buy_volume: number | null;
   sell_volume: number | null;
   trade_count: number | null;
+  source?: "binance_public" | "binance_public_simulation" | "synthetic_mock" | "unknown";
+  event_ms?: number | null;
 }
 
 export interface AltState {
