@@ -7,11 +7,15 @@
  *   STATUS (top command bar) → ALPHA (AI ensemble + debate) →
  *   EXECUTION (smart routing) → RISK (Sentinel + data + operator) → LOG.
  */
+import { useEffect, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faShieldHalved,
   faBrain,
   faSatelliteDish,
+  faGaugeHigh,
+  faArrowRightArrowLeft,
+  faChartColumn,
 } from "@fortawesome/free-solid-svg-icons";
 import { useMetrics } from "@/components/MetricsProvider";
 import { EventLogTerminal } from "@/components/EventLogTerminal";
@@ -30,6 +34,11 @@ import { tQuantEnum } from "@/lib/i18n/quantEnum";
 import { fmtNum, fmtPct, fmtSigned, fmtUsd } from "@/lib/format";
 import type { ConnectionStatus } from "@/hooks/useMetricsStream";
 import { useExecutionStatus, type ExecutionRouting } from "@/hooks/useExecutionStatus";
+import {
+  QuantImpactComparison,
+  ResearchEvidence,
+  type QuantComparisonSample,
+} from "@/components/quant/QuantImpactLab";
 
 const BREAKER_TONE: Record<string, BadgeTone> = {
   CLOSED: "ok",
@@ -53,12 +62,17 @@ const EXEC_TONE: Record<ExecutionRouting, BadgeTone> = {
   DEGRADED: "warn",
   OFFLINE: "danger",
 };
+const LAST_SCENARIO_STORAGE = "econith-last-world-scenario";
 
 export function QuantMissionControl() {
   const { snapshot, status, attempts } = useMetrics();
-  const { t } = useLocale();
+  const { locale, t } = useLocale();
   const { execution } = useExecutionStatus();
   const { height: logHeight, adjust: adjustLogHeight } = useQuantLogHeight();
+  const [view, setView] = useState<"live" | "impact" | "evidence">("live");
+  const [realitySample, setRealitySample] = useState<QuantComparisonSample | null>(null);
+  const [simulationSample, setSimulationSample] = useState<QuantComparisonSample | null>(null);
+  const [scenarioLabel, setScenarioLabel] = useState<string | null>(null);
 
   const market = snapshot?.market;
   const sentinel = snapshot?.sentinel;
@@ -69,6 +83,34 @@ export function QuantMissionControl() {
   const routing = snapshot?.routing;
   const debate = snapshot?.debate;
   const alpha = snapshot?.alpha;
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(LAST_SCENARIO_STORAGE);
+      if (!raw) return;
+      const scenario = JSON.parse(raw) as { code?: string; label?: string; before?: string; after?: string };
+      if (scenario.code && scenario.label) {
+        setScenarioLabel(`${scenario.code} · ${scenario.label}: ${scenario.before ?? "—"} → ${scenario.after ?? "—"}`);
+      }
+    } catch {
+      /* ignore an unavailable or malformed session entry */
+    }
+  }, [view]);
+
+  useEffect(() => {
+    if (!snapshot?.market || !snapshot?.sentinel) return;
+    const sample: QuantComparisonSample = {
+      mode: quantMode,
+      symbol: snapshot.market.symbol ?? "—",
+      capturedAt: snapshot.ts,
+      risk: snapshot.sentinel.var ?? 0,
+      drawdown: snapshot.sentinel.drawdown ?? 0,
+      alerts: (snapshot.events ?? []).filter((event) => event.level === "warn" || event.level === "danger").length,
+      price: snapshot.market.price ?? 0,
+    };
+    if (quantMode === "REALITY") setRealitySample(sample);
+    else setSimulationSample(sample);
+  }, [quantMode, snapshot]);
 
   const breaker = sentinel?.state ?? "—";
   const mode = sentinel?.mode ?? "—";
@@ -145,8 +187,17 @@ export function QuantMissionControl() {
         </div>
       </header>
 
-      {/* ══ Market micro-ticker ═══════════════════════════════════════════ */}
-      <div className="flex flex-none flex-wrap items-stretch gap-2 rounded-lg border border-line bg-surface/60 px-3 py-2">
+      <div className="flex flex-none items-center justify-center">
+        <div className="flex max-w-full items-center gap-1 overflow-x-auto rounded-xl border border-line bg-surface/95 p-1.5 shadow-sm">
+          <QuantViewButton active={view === "live"} onClick={() => setView("live")} icon={faGaugeHigh} label={locale === "vi" ? "Theo dõi thị trường" : "Market monitor"} />
+          <QuantViewButton active={view === "impact"} onClick={() => setView("impact")} icon={faArrowRightArrowLeft} label={locale === "vi" ? "World tác động thế nào?" : "World impact"} />
+          <QuantViewButton active={view === "evidence"} onClick={() => setView("evidence")} icon={faChartColumn} label={locale === "vi" ? "Kết quả đã kiểm định" : "Validated results"} />
+        </div>
+      </div>
+
+      {view === "live" ? <>
+        {/* ══ Market micro-ticker ═══════════════════════════════════════════ */}
+        <div className="flex flex-none flex-wrap items-stretch gap-2 rounded-lg border border-line bg-surface/60 px-3 py-2">
         <Ticker label={`${t("quant.price")} · ${market?.symbol ?? "—"}`} value={fmtUsd(market?.price)} lead />
         <TickerDivider />
         <Ticker label={t("quant.mid")} value={fmtUsd(market?.mid)} />
@@ -162,10 +213,10 @@ export function QuantMissionControl() {
           tone={(market?.volume_delta ?? 0) > 0 ? "long" : (market?.volume_delta ?? 0) < 0 ? "short" : undefined}
         />
         <Ticker label={t("quant.telemetry.trades")} value={market?.trade_count?.toLocaleString() ?? "—"} />
-      </div>
+        </div>
 
-      {/* ══ Body + resizable log dock ═════════════════════════════════════ */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {/* ══ Body + resizable log dock ═════════════════════════════════════ */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="quant-body-grid grid min-h-0 flex-1 grid-cols-1 gap-2.5 overflow-hidden lg:grid-cols-[minmax(0,1fr)_22rem] xl:grid-cols-[minmax(0,1fr)_25rem]">
           {/* LEFT — scroll only inside this column */}
           <div className="quant-analytics-flank flex min-h-0 flex-col gap-2.5 overflow-y-auto overflow-x-hidden overscroll-contain pr-0.5">
@@ -199,8 +250,44 @@ export function QuantMissionControl() {
         <div className="quant-log-dock flex-none overflow-hidden" style={{ height: logHeight }}>
           <EventLogTerminal events={quantEvents} dock fill />
         </div>
-      </div>
+        </div>
+      </> : view === "impact" ? (
+        <QuantImpactComparison
+          reality={realitySample}
+          simulation={simulationSample}
+          currentMode={quantMode}
+          locale={locale}
+          scenarioLabel={scenarioLabel}
+        />
+      ) : (
+        <ResearchEvidence locale={locale} />
+      )}
     </div>
+  );
+}
+
+function QuantViewButton({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: typeof faGaugeHigh;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${
+        active ? "bg-world text-black" : "text-muted hover:bg-elevated hover:text-ink"
+      }`}
+    >
+      <FontAwesomeIcon icon={icon} className="h-3 w-3" />
+      {label}
+    </button>
   );
 }
 

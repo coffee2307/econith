@@ -18,12 +18,15 @@ import {
   faArrowRightArrowLeft,
   faLayerGroup,
   faChartLine,
+  faEarthAsia,
+  faDiagramProject,
 } from "@fortawesome/free-solid-svg-icons";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useLocale } from "@/contexts/LocaleContext";
 import { useMetrics } from "@/components/MetricsProvider";
 import { useWorldSim } from "@/contexts/WorldSimContext";
 import { WorldRightPanel } from "@/components/world/WorldRightPanel";
+import { WorldNetworkView } from "@/components/world/WorldNetworkView";
 import { pauseTime, resumeTime, setTimeSpeed } from "@/lib/api";
 import type { CountryMacro } from "@/hooks/useMetricsStream";
 import {
@@ -83,6 +86,7 @@ const DOWNBAR_STORAGE = "econith-world-downbar";
 const DOWNBAR_DEFAULT = 144;
 const DOWNBAR_MIN = 80;
 const DOWNBAR_MAX = 480;
+const LAST_SCENARIO_STORAGE = "econith-last-world-scenario";
 const SIDEBAR_LEVERS = [
   "monetary.interest_rate",
   "monetary.reserve_requirement",
@@ -137,7 +141,7 @@ function fmtVal(v: number, f: MacroFeature): string {
 // ===========================================================================
 export default function EconithWorld() {
   const { theme } = useTheme();
-  const { t, featureLabel, countryName, continentName } = useLocale();
+  const { locale, t, featureLabel, countryName, continentName } = useLocale();
   const { snapshot } = useMetrics();
   const sim = useWorldSim();
   const globePalette = GLOBE_THEME[theme];
@@ -161,6 +165,15 @@ export default function EconithWorld() {
   const [leftW, setLeftW] = useState(SIDEBAR_DEFAULT);
   const [rightW, setRightW] = useState(SIDEBAR_DEFAULT);
   const [downH, setDownH] = useState(DOWNBAR_DEFAULT);
+  const [centerView, setCenterView] = useState<"globe" | "network">("globe");
+  const [impactBaseline, setImpactBaseline] = useState<Record<string, CountryMacro> | null>(null);
+  const [impactOrigin, setImpactOrigin] = useState<string | null>(null);
+  const [impactScenario, setImpactScenario] = useState<{
+    code: string;
+    label: string;
+    before: string;
+    after: string;
+  } | null>(null);
   const leftWRef = useRef(SIDEBAR_DEFAULT);
   const rightWRef = useRef(SIDEBAR_DEFAULT);
   const downHRef = useRef(DOWNBAR_DEFAULT);
@@ -319,12 +332,36 @@ export default function EconithWorld() {
 
   const applyDrafts = useCallback(() => {
     if (!hasDrafts) return;
+    // Capture a comparable baseline before sending any mutation. The network
+    // then visualises real backend deltas as snapshots arrive after Apply.
+    setImpactBaseline(structuredClone(countries));
+    setImpactOrigin(activeCode);
+    setCenterView("network");
+    const firstDraft = Object.entries(overrides)[0];
+    if (firstDraft) {
+      const [key, nextValue] = firstDraft;
+      const feature = MACRO_FEATURES.find((item) => item.key === key);
+      if (feature) {
+        const scenario = {
+          code: activeCode,
+          label: featureLabel(feature.key),
+          before: fmtVal(uiValue(activeCountry, feature, {}), feature),
+          after: fmtVal(nextValue, feature),
+        };
+        setImpactScenario(scenario);
+        try {
+          sessionStorage.setItem(LAST_SCENARIO_STORAGE, JSON.stringify(scenario));
+        } catch {
+          /* session storage may be unavailable in private contexts */
+        }
+      }
+    }
     for (const [key, uiVal] of Object.entries(overrides)) {
       const f = MACRO_FEATURES.find((x) => x.key === key);
       if (f) sim.editFeature(activeCode, f, uiVal);
     }
     setOverrides({});
-  }, [activeCode, hasDrafts, overrides, sim]);
+  }, [activeCode, activeCountry, countries, featureLabel, hasDrafts, overrides, sim]);
 
   const discardDrafts = useCallback(() => {
     setOverrides({});
@@ -399,7 +436,7 @@ export default function EconithWorld() {
 
         <div className="flex max-w-full items-center gap-2 overflow-x-auto sm:gap-4">
           <span className="hidden rounded-lg border border-world/40 bg-world/10 px-2 py-1 font-mono text-[11px] text-world md:inline-flex">
-            {simCodes.length} nodes · {snapshot?.world?.scale?.population_clusters ?? "—"} clusters
+            {simCodes.length} {locale === "vi" ? "quốc gia" : "countries"} · {snapshot?.world?.scale?.population_clusters ?? "—"} {locale === "vi" ? "cụm tác nhân" : "agent clusters"}
           </span>
           <div className="flex items-center gap-1.5 rounded-xl border border-line bg-elevated px-2 py-1">
             <button
@@ -577,7 +614,44 @@ export default function EconithWorld() {
           className="world-globe-panel relative min-h-0 min-w-0 overflow-hidden"
           style={{ backgroundColor: globePalette.bg }}
         >
-          {mobileViewport === true ? (
+          <div className="absolute left-1/2 top-3 z-30 flex -translate-x-1/2 items-center gap-1 rounded-xl border border-line bg-surface/95 p-1.5 shadow-lg backdrop-blur">
+            <button
+              type="button"
+              onClick={() => setCenterView("globe")}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${
+                centerView === "globe" ? "bg-world text-black" : "text-muted hover:bg-elevated hover:text-ink"
+              }`}
+            >
+              <FontAwesomeIcon icon={faEarthAsia} className="h-3 w-3" />
+              {locale === "vi" ? "Quả địa cầu" : "Globe"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setCenterView("network")}
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[11px] font-semibold transition ${
+                centerView === "network" ? "bg-world text-black" : "text-muted hover:bg-elevated hover:text-ink"
+              }`}
+            >
+              <FontAwesomeIcon icon={faDiagramProject} className="h-3 w-3" />
+              {locale === "vi" ? "Mạng lưới tác động" : "Impact network"}
+            </button>
+          </div>
+
+          {centerView === "network" ? (
+            <WorldNetworkView
+              countries={countries}
+              alliances={snapshot?.world?.alliances}
+              tariffs={snapshot?.world?.tariffs}
+              baseline={impactBaseline}
+              origin={impactOrigin}
+              scenario={impactScenario}
+              selected={activeCode}
+              onSelect={selectCountry}
+              agents={snapshot?.world_agents}
+              locale={locale}
+              countryName={countryName}
+            />
+          ) : mobileViewport === true ? (
             <MobileWorldGlobe />
           ) : showGlobe ? (
             <div className="absolute inset-0 overflow-hidden">
@@ -635,7 +709,7 @@ export default function EconithWorld() {
           )}
 
           {/* quick-inspect popup */}
-          {popup ? (
+          {centerView === "globe" && popup ? (
             <div
               className="pointer-events-auto absolute z-20 w-56 rounded-xl border border-line bg-surface p-3"
               style={{
@@ -700,9 +774,9 @@ export default function EconithWorld() {
             </div>
           ) : null}
 
-          <div className="pointer-events-none absolute bottom-3 left-3 hidden font-mono text-[11px] text-faint lg:block">
+          {centerView === "globe" ? <div className="pointer-events-none absolute bottom-3 left-3 hidden font-mono text-[11px] text-faint lg:block">
             {t("world.globeHint")}
-          </div>
+          </div> : null}
         </section>
 
         <ResizeHandle
