@@ -1,10 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faMinus, faPlus } from "@fortawesome/free-solid-svg-icons";
 import type {
   CountryMacro,
   WorldAgentEvent,
 } from "@/hooks/useMetricsStream";
+import { ISO3_TO_NAME } from "@/constants/macroFeatures";
 import {
   TITAN_NODES,
   TITAN_REGIONAL_CLUSTERS,
@@ -19,6 +22,7 @@ interface NetworkNode {
   y: number;
   radius: number;
   region: string;
+  visualRegion: VisualRegionKey;
 }
 
 interface NetworkEdge {
@@ -38,9 +42,46 @@ interface NodeActivity {
   changedAt: number;
 }
 
-const WORLD_W = 1640;
+type VisualRegionKey =
+  | "northAmerica"
+  | "southAmerica"
+  | "europe"
+  | "asia"
+  | "africaMiddleEast"
+  | "oceania";
+
+interface VisualRegion {
+  key: VisualRegionKey;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  label: { vi: string; en: string };
+}
+
+const WORLD_W = 1800;
 const WORLD_H = 1080;
 const EDGE_COUNT = 6000;
+const VISUAL_REGIONS: readonly VisualRegion[] = [
+  { key: "northAmerica", x: 35, y: 75, width: 535, height: 430, label: { vi: "BẮC MỸ & CARIBE", en: "NORTH AMERICA & CARIBBEAN" } },
+  { key: "europe", x: 600, y: 75, width: 535, height: 430, label: { vi: "CHÂU ÂU", en: "EUROPE" } },
+  { key: "asia", x: 1165, y: 75, width: 600, height: 430, label: { vi: "CHÂU Á & Á-ÂU", en: "ASIA & EURASIA" } },
+  { key: "southAmerica", x: 35, y: 545, width: 535, height: 440, label: { vi: "NAM MỸ", en: "SOUTH AMERICA" } },
+  { key: "africaMiddleEast", x: 600, y: 545, width: 535, height: 440, label: { vi: "CHÂU PHI & TRUNG ĐÔNG", en: "AFRICA & MIDDLE EAST" } },
+  { key: "oceania", x: 1165, y: 545, width: 600, height: 440, label: { vi: "CHÂU ĐẠI DƯƠNG", en: "OCEANIA" } },
+] as const;
+
+const EUROPE_FALLBACK = new Set(["BIH", "ALB", "MKD", "MLT", "CYP"]);
+const OCEANIA_FALLBACK = new Set(["KIR", "MHL", "PLW", "FSM", "NRU", "TUV", "ASM", "GUM"]);
+
+function visualRegionFor(code: string, region: string): VisualRegionKey {
+  if (region === "NorthAmerica" || region === "Caribbean") return "northAmerica";
+  if (region === "SouthAmerica") return "southAmerica";
+  if (region.includes("Europe") || EUROPE_FALLBACK.has(code)) return "europe";
+  if (region === "MENA" || region === "SubSaharanAfrica") return "africaMiddleEast";
+  if (region === "Oceania" || OCEANIA_FALLBACK.has(code)) return "oceania";
+  return "asia";
+}
 
 const COPY = {
   vi: {
@@ -73,6 +114,9 @@ const COPY = {
     paused: "World đang dừng",
     day: "Ngày",
     activeNodes: "quốc gia vừa thay đổi",
+    regionHint: "Các quốc gia được xếp theo khu vực để dễ theo dõi đường lan truyền.",
+    collapse: "Thu nhỏ bảng quốc gia",
+    expand: "Mở bảng quốc gia",
   },
   en: {
     views: {
@@ -104,6 +148,9 @@ const COPY = {
     paused: "World is paused",
     day: "Day",
     activeNodes: "countries just changed",
+    regionHint: "Countries are grouped by region so propagation paths are easier to follow.",
+    collapse: "Collapse country panel",
+    expand: "Open country panel",
   },
 } as const;
 
@@ -169,79 +216,50 @@ function makeGraph(
   Object.entries(TITAN_REGIONAL_CLUSTERS).forEach(([region, codes]) => {
     codes.forEach((code) => regionByCode.set(code, region));
   });
-  const regionNames = Object.keys(TITAN_REGIONAL_CLUSTERS);
-  const regionCenters = new Map<string, { x: number; y: number }>();
-  regionNames.forEach((region, index) => {
-    const angle = (index / regionNames.length) * Math.PI * 2 - Math.PI / 2;
-    const ring = index % 3 === 0 ? 0.72 : index % 3 === 1 ? 0.5 : 0.32;
-    regionCenters.set(region, {
-      x: WORLD_W / 2 + Math.cos(angle) * WORLD_W * ring * 0.47,
-      y: WORLD_H / 2 + Math.sin(angle) * WORLD_H * ring * 0.43,
-    });
-  });
-
   const gdps = TITAN_NODES.map((code) => Math.max(1e9, countries[code]?.gdp ?? 5e10));
   const minLog = Math.min(...gdps.map((gdp) => Math.log10(gdp)));
   const maxLog = Math.max(...gdps.map((gdp) => Math.log10(gdp)));
-  const regionCounters = new Map<string, number>();
-  const nodes: NetworkNode[] = TITAN_NODES.map((code, index) => {
+  const nodeMeta = TITAN_NODES.map((code, index) => {
     const region = regionByCode.get(code) ?? "Global";
-    const center = regionCenters.get(region) ?? { x: WORLD_W / 2, y: WORLD_H / 2 };
-    const localIndex = regionCounters.get(region) ?? 0;
-    regionCounters.set(region, localIndex + 1);
-    const angle = localIndex * 2.399963 + hash01(code) * 0.9;
-    const radius = 30 + 43 * Math.sqrt(localIndex);
     const gdp = gdps[index];
     const scale = (Math.log10(gdp) - minLog) / Math.max(0.01, maxLog - minLog);
     return {
       code,
       gdp,
       region,
-      x: clamp(center.x + Math.cos(angle) * radius, 45, WORLD_W - 45),
-      y: clamp(center.y + Math.sin(angle) * radius, 45, WORLD_H - 45),
-      radius: 14 + scale * 14,
+      visualRegion: visualRegionFor(code, region),
+      radius: 11 + scale * 12,
     };
   });
 
-  // Deterministic collision pass. The old regional spiral allowed neighbouring
-  // clusters to overlap, especially for large-GDP nodes. Keep the geographic
-  // anchors, but resolve every circle pair before locking the layout so live
-  // snapshots can repaint without making the network jump around.
-  for (let iteration = 0; iteration < 260; iteration += 1) {
-    const cooling = 1 - iteration / 260;
-    for (let index = 0; index < nodes.length; index += 1) {
-      const node = nodes[index];
-      const center = regionCenters.get(node.region) ?? { x: WORLD_W / 2, y: WORLD_H / 2 };
-      const anchorForce = 0.0025 + cooling * 0.002;
-      node.x += (center.x - node.x) * anchorForce;
-      node.y += (center.y - node.y) * anchorForce;
-      for (let otherIndex = index + 1; otherIndex < nodes.length; otherIndex += 1) {
-        const other = nodes[otherIndex];
-        let dx = other.x - node.x;
-        let dy = other.y - node.y;
-        let distance = Math.hypot(dx, dy);
-        const minimum = node.radius + other.radius + 10;
-        if (distance >= minimum) continue;
-        if (distance < 0.001) {
-          const angle = hash01(`${node.code}:${other.code}`) * Math.PI * 2;
-          dx = Math.cos(angle);
-          dy = Math.sin(angle);
-          distance = 1;
-        }
-        const overlap = (minimum - distance) * 0.52;
-        const ux = dx / distance;
-        const uy = dy / distance;
-        node.x -= ux * overlap;
-        node.y -= uy * overlap;
-        other.x += ux * overlap;
-        other.y += uy * overlap;
-      }
-    }
-    nodes.forEach((node) => {
-      node.x = clamp(node.x, node.radius + 18, WORLD_W - node.radius - 18);
-      node.y = clamp(node.y, node.radius + 18, WORLD_H - node.radius - 18);
+  const placements = new Map<string, { x: number; y: number; radius: number }>();
+  VISUAL_REGIONS.forEach((visualRegion) => {
+    const members = nodeMeta
+      .filter((node) => node.visualRegion === visualRegion.key)
+      .sort((a, b) => b.gdp - a.gdp || a.code.localeCompare(b.code));
+    const innerWidth = visualRegion.width - 48;
+    const innerHeight = visualRegion.height - 78;
+    const columns = Math.max(2, Math.ceil(Math.sqrt((members.length * innerWidth) / innerHeight)));
+    const rows = Math.max(1, Math.ceil(members.length / columns));
+    const cellWidth = innerWidth / columns;
+    const cellHeight = innerHeight / rows;
+    members.forEach((node, index) => {
+      const column = index % columns;
+      const row = Math.floor(index / columns);
+      const jitterX = (hash01(`${node.code}:x`) - 0.5) * Math.min(10, cellWidth * 0.12);
+      const jitterY = (hash01(`${node.code}:y`) - 0.5) * Math.min(8, cellHeight * 0.1);
+      placements.set(node.code, {
+        x: visualRegion.x + 24 + cellWidth * (column + 0.5) + jitterX,
+        y: visualRegion.y + 58 + cellHeight * (row + 0.5) + jitterY,
+        radius: Math.min(node.radius, cellWidth * 0.31, cellHeight * 0.31),
+      });
     });
-  }
+  });
+
+  const nodes: NetworkNode[] = nodeMeta.map((node) => {
+    const placement = placements.get(node.code) ?? { x: WORLD_W / 2, y: WORLD_H / 2, radius: node.radius };
+    return { ...node, ...placement };
+  });
 
   const maxGdp = Math.max(...gdps);
   const candidates: NetworkEdge[] = [];
@@ -309,6 +327,7 @@ export function WorldNetworkView({
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [metric, setMetric] = useState<ImpactMetric>("risk");
   const [activeNodeCount, setActiveNodeCount] = useState(0);
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const graphLockedRef = useRef(Object.keys(countries).length > 0);
   const [graph, setGraph] = useState(() => makeGraph(countries, alliances, tariffs));
   const previousMetricsRef = useRef<Map<string, [number, number, number, number]>>(new Map());
@@ -328,8 +347,10 @@ export function WorldNetworkView({
     () => graph.nodes.map((node) => metricDelta(countries[node.code], baseline?.[node.code], metric)),
     [baseline, countries, graph.nodes, metric],
   );
-  const maxImpact = Math.max(1e-8, ...rawImpacts.map((value) => Math.abs(value)));
-  const impacts = rawImpacts.map((value) => clamp(value / maxImpact, -1, 1));
+  const impacts = useMemo(() => {
+    const maxImpact = Math.max(1e-8, ...rawImpacts.map((value) => Math.abs(value)));
+    return rawImpacts.map((value) => clamp(value / maxImpact, -1, 1));
+  }, [rawImpacts]);
 
   useEffect(() => {
     const previous = previousMetricsRef.current;
@@ -388,20 +409,68 @@ export function WorldNetworkView({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !size.width || !size.height) return;
-    const ratio = Math.min(2, window.devicePixelRatio || 1);
+    const ratio = Math.min(1.5, window.devicePixelRatio || 1);
     canvas.width = size.width * ratio;
     canvas.height = size.height * ratio;
     canvas.style.width = `${size.width}px`;
     canvas.style.height = `${size.height}px`;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    const staticLayer = document.createElement("canvas");
+    staticLayer.width = WORLD_W;
+    staticLayer.height = WORLD_H;
+    const staticCtx = staticLayer.getContext("2d");
+    if (!staticCtx) return;
+    const dark = document.documentElement.classList.contains("dark");
+
+    VISUAL_REGIONS.forEach((region) => {
+      staticCtx.beginPath();
+      staticCtx.roundRect(region.x, region.y, region.width, region.height, 26);
+      staticCtx.fillStyle = dark ? "rgba(15,23,42,0.90)" : "rgba(255,255,255,0.94)";
+      staticCtx.fill();
+      staticCtx.strokeStyle = dark ? "rgba(71,85,105,0.65)" : "rgba(148,163,184,0.45)";
+      staticCtx.lineWidth = 1.4;
+      staticCtx.stroke();
+      staticCtx.fillStyle = dark ? "rgba(148,163,184,0.90)" : "rgba(71,85,105,0.92)";
+      staticCtx.font = "700 17px ui-sans-serif, system-ui, sans-serif";
+      staticCtx.textAlign = "left";
+      staticCtx.textBaseline = "middle";
+      staticCtx.fillText(region.label[locale], region.x + 22, region.y + 27);
+    });
+
+    // All 6,000 relationships remain visible, but they are rasterised once as
+    // a quiet context layer. Only links carrying a recent backend state change
+    // are animated in the live layer below.
+    graph.edges.forEach((edge) => {
+      const a = graph.nodes[edge.source];
+      const b = graph.nodes[edge.target];
+      const impact = (impacts[edge.source] + impacts[edge.target]) / 2;
+      staticCtx.beginPath();
+      staticCtx.moveTo(a.x, a.y);
+      staticCtx.lineTo(b.x, b.y);
+      staticCtx.strokeStyle = baseline
+        ? rgbaForImpact(impact, 0.018 + edge.weight * 0.025)
+        : dark
+          ? `rgba(148,163,184,${0.012 + edge.weight * 0.022})`
+          : `rgba(71,85,105,${0.009 + edge.weight * 0.018})`;
+      staticCtx.lineWidth = 0.48 + edge.weight * 0.24;
+      staticCtx.stroke();
+    });
+
     let animationFrame = 0;
+    let previousFrame = 0;
     const draw = (now: number) => {
+      if (running && now - previousFrame < 32) {
+        animationFrame = window.requestAnimationFrame(draw);
+        return;
+      }
+      previousFrame = now;
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
       ctx.clearRect(0, 0, size.width, size.height);
       ctx.save();
       ctx.translate(transform.x, transform.y);
       ctx.scale(transform.scale, transform.scale);
+      ctx.drawImage(staticLayer, 0, 0);
 
       const activity = graph.nodes.map((node) => {
         const signal = activityRef.current.get(node.code);
@@ -410,6 +479,7 @@ export function WorldNetworkView({
         return age >= 1800 ? 0 : signal.strength * (1 - age / 1800);
       });
 
+      let particleCount = 0;
       graph.edges.forEach((edge, edgeIndex) => {
         const a = graph.nodes[edge.source];
         const b = graph.nodes[edge.target];
@@ -419,24 +489,20 @@ export function WorldNetworkView({
           ? Math.max(Math.abs(impacts[edge.source]), Math.abs(impacts[edge.target]))
           : 0;
         const active = Math.max(live, compared);
-        const alpha = baseline
-          ? 0.022 + edge.weight * 0.04 + active * 0.25
-          : 0.025 + edge.weight * 0.045 + live * 0.22;
+        if (active < 0.08 || edgeIndex % 11 !== 0) return;
+        const alpha = 0.08 + active * 0.26;
         ctx.beginPath();
         ctx.moveTo(a.x, a.y);
         ctx.lineTo(b.x, b.y);
-        ctx.strokeStyle = baseline
-          ? rgbaForImpact(impact, alpha)
-          : live > 0.04
-            ? `rgba(14,165,233,${alpha})`
-            : `rgba(71,85,105,${alpha})`;
-        ctx.lineWidth = 0.42 + active * 1.45;
+        ctx.strokeStyle = baseline ? rgbaForImpact(impact, alpha) : `rgba(14,165,233,${alpha})`;
+        ctx.lineWidth = 0.7 + active * 1.15;
         ctx.stroke();
 
         // A moving bead is rendered only on a deterministic subset of active
         // links. Its existence is driven by a real state delta; animation merely
         // makes the latest backend tick legible to the human eye.
-        if (running && live > 0.16 && edgeIndex % 9 === 0) {
+        if (running && live > 0.16 && particleCount < 24 && edgeIndex % 33 === 0) {
+          particleCount += 1;
           const progress = (now * 0.00045 * (1 + edge.weight) + edgeIndex * 0.071) % 1;
           const x = a.x + (b.x - a.x) * progress;
           const y = a.y + (b.y - a.y) * progress;
@@ -454,10 +520,10 @@ export function WorldNetworkView({
         const live = activity[index];
         const isSelected = node.code === selected;
         const isOrigin = node.code === origin;
-        if (running && live > 0.02) {
-          const pulse = (Math.sin(now * 0.01 + index) + 1) / 2;
+        if (running && live > 0.08) {
+          const pulse = (Math.sin(now * 0.006 + index) + 1) / 2;
           ctx.beginPath();
-          ctx.arc(node.x, node.y, node.radius + 4 + pulse * 7 * live, 0, Math.PI * 2);
+          ctx.arc(node.x, node.y, node.radius + 3 + pulse * 5 * live, 0, Math.PI * 2);
           ctx.fillStyle = baseline
             ? rgbaForImpact(impact, 0.06 + live * 0.13)
             : `rgba(14,165,233,${0.05 + live * 0.13})`;
@@ -482,7 +548,7 @@ export function WorldNetworkView({
     };
     draw(performance.now());
     return () => window.cancelAnimationFrame(animationFrame);
-  }, [baseline, graph, impacts, origin, running, selected, size, transform]);
+  }, [baseline, graph, impacts, locale, origin, running, selected, size, transform]);
 
   const findNode = useCallback(
     (clientX: number, clientY: number) => {
@@ -508,6 +574,10 @@ export function WorldNetworkView({
   const selectedCurrent = countries[selected];
   const selectedBaseline = baseline?.[selected];
   const selectedAgents = agents.filter((event) => event.country === selected).slice(0, 4);
+  const selectedFullName = countryName(
+    selected,
+    ISO3_TO_NAME[selected] ?? selectedCurrent?.name ?? selected,
+  );
   return (
     <div ref={hostRef} className="absolute inset-0 overflow-hidden bg-[#f8fafc] dark:bg-[#090b10]">
       <canvas
@@ -603,18 +673,46 @@ export function WorldNetworkView({
           <LegendDot color="#64748b" label={copy.legendNone} />
         </div>
         <p className="mt-1 text-[10px] text-faint">{baseline && origin ? `${copy.active} ${origin}. ` : ""}{copy.drag}</p>
+        <p className="mt-0.5 text-[9px] text-faint">{copy.regionHint}</p>
       </div>
 
-      {selectedNode ? (
+      {selectedNode && inspectorCollapsed ? (
+        <button
+          type="button"
+          onClick={() => setInspectorCollapsed(false)}
+          className="absolute bottom-3 right-3 flex max-w-[min(22rem,calc(100%-1.5rem))] items-center gap-2 rounded-xl border border-line bg-surface/96 px-3 py-2 text-left shadow-lg backdrop-blur transition hover:border-world/50"
+          aria-label={copy.expand}
+          title={copy.expand}
+        >
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-world/15 text-world">
+            <FontAwesomeIcon icon={faPlus} className="h-3 w-3" />
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-xs font-bold text-ink">{selectedFullName}</span>
+            <span className="block font-mono text-[9px] text-faint">{selected} · {copy.expand}</span>
+          </span>
+        </button>
+      ) : selectedNode ? (
         <aside className="absolute bottom-3 right-3 max-h-[68%] w-[min(21rem,calc(100%-1.5rem))] overflow-y-auto rounded-2xl border border-line bg-surface/96 p-4 shadow-xl backdrop-blur">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-world">{selected}</p>
-              <h3 className="text-base font-bold text-ink">{countryName(selected, selectedCurrent?.name ?? selected)}</h3>
+              <h3 className="text-base font-bold text-ink">{selectedFullName}</h3>
             </div>
-            <span className="rounded-lg bg-elevated px-2 py-1 font-mono text-[10px] text-muted">
-              GDP ${(selectedNode.gdp / 1e12).toFixed(2)}T
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="rounded-lg bg-elevated px-2 py-1 font-mono text-[10px] text-muted">
+                GDP ${(selectedNode.gdp / 1e12).toFixed(2)}T
+              </span>
+              <button
+                type="button"
+                onClick={() => setInspectorCollapsed(true)}
+                className="flex h-7 w-7 items-center justify-center rounded-lg border border-line bg-elevated text-muted transition hover:border-world/50 hover:text-ink"
+                aria-label={copy.collapse}
+                title={copy.collapse}
+              >
+                <FontAwesomeIcon icon={faMinus} className="h-3 w-3" />
+              </button>
+            </div>
           </div>
 
           {selectedBaseline ? (

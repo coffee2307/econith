@@ -1,4 +1,5 @@
 import { TITAN_HUB_CODES, TITAN_PROXY_CODES } from "@/constants/titanWorld";
+import { ISO3_TO_NAME } from "@/constants/macroFeatures";
 import type { Dictionary } from "@/lib/i18n/types";
 import { VI_FEATURE_LABELS } from "./viFeatures";
 
@@ -64,7 +65,7 @@ const VI_COUNTRY_NAMES: Record<string, string> = {
 };
 
 const countryNames = Object.fromEntries(
-  [...TITAN_HUB_CODES, ...TITAN_PROXY_CODES].map((c) => [c, VI_COUNTRY_NAMES[c] ?? c]),
+  [...TITAN_HUB_CODES, ...TITAN_PROXY_CODES].map((c) => [c, VI_COUNTRY_NAMES[c] ?? ISO3_TO_NAME[c] ?? c]),
 );
 
 export const vi: Dictionary = {
