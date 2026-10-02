@@ -32,6 +32,10 @@ export const TITAN_N_HUBS = TITAN_HUB_CODES.length;
 export const TITAN_N_PROXIES = TITAN_PROXY_CODES.length;
 export const TITAN_N_NODES = TITAN_N_HUBS + TITAN_N_PROXIES;
 export const TITAN_FEATURE_DIM = 113;
+export const TITAN_NODES: readonly string[] = [
+  ...TITAN_HUB_CODES,
+  ...TITAN_PROXY_CODES,
+];
 
 /** Aggregation clusters for zoomed-out globe rendering (collapse DOM points). */
 export const TITAN_REGIONAL_CLUSTERS: Record<string, readonly string[]> = {
