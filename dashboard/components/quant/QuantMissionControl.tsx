@@ -80,6 +80,7 @@ export function QuantMissionControl() {
   const alt = snapshot?.alt;
   const quantEvents = snapshot?.events ?? [];
   const quantMode = snapshot?.quant_mode?.mode ?? "REALITY";
+  const marketSource = market?.source ?? "unknown";
   const routing = snapshot?.routing;
   const debate = snapshot?.debate;
   const alpha = snapshot?.alpha;
@@ -167,6 +168,20 @@ export function QuantMissionControl() {
             value={tQuantEnum(t, "quantMode", quantMode)}
             tone={quantMode === "REALITY" ? "ok" : "warn"}
             live={quantMode === "SIMULATION"}
+          />
+          <StatusBadge
+            label={locale === "vi" ? "Nguồn giá" : "Price source"}
+            value={
+              marketSource === "binance_public"
+                ? "BINANCE LIVE"
+                : marketSource === "binance_public_simulation"
+                  ? locale === "vi" ? "BINANCE + MÔ PHỎNG" : "BINANCE + SIM"
+                : marketSource === "synthetic_mock"
+                  ? locale === "vi" ? "DỮ LIỆU GIẢ LẬP" : "SYNTHETIC"
+                  : locale === "vi" ? "CHƯA XÁC ĐỊNH" : "UNKNOWN"
+            }
+            tone={marketSource === "binance_public" ? "ok" : marketSource === "binance_public_simulation" || marketSource === "synthetic_mock" ? "warn" : "danger"}
+            live={marketSource === "binance_public"}
           />
           {execution ? (
             <StatusBadge
