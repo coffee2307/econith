@@ -33,6 +33,11 @@ interface Transform {
   scale: number;
 }
 
+interface NodeActivity {
+  strength: number;
+  changedAt: number;
+}
+
 const WORLD_W = 1640;
 const WORLD_H = 1080;
 const EDGE_COUNT = 6000;
@@ -47,7 +52,7 @@ const COPY = {
     },
     drag: "Kéo để di chuyển · cuộn để thu phóng · bấm quốc gia để xem",
     nodes: "150 quốc gia",
-    links: "6.000 mối liên kết",
+    links: "6.000 đường liên kết mô hình",
     waiting: "Chưa có tình huống so sánh",
     waitingDesc:
       "Điều chỉnh một chỉ số ở bảng bên trái rồi bấm Áp dụng. Mạng sẽ so sánh trạng thái trước và sau.",
@@ -62,8 +67,12 @@ const COPY = {
     legendHigher: "Áp lực tăng",
     legendLower: "Áp lực giảm",
     legendNone: "Chưa thay đổi rõ",
-    source: "Mạng được dựng từ quy mô GDP, liên minh và thuế quan trong trạng thái World.",
+    source: "Các đường nối là lớp trực quan hóa được dựng từ quy mô GDP, liên minh và thuế quan; màu và nhịp sáng lấy từ thay đổi thật của World.",
     scenario: "Tình huống đang quan sát",
+    running: "World đang xử lý liên tục",
+    paused: "World đang dừng",
+    day: "Ngày",
+    activeNodes: "quốc gia vừa thay đổi",
   },
   en: {
     views: {
@@ -74,7 +83,7 @@ const COPY = {
     },
     drag: "Drag to pan · scroll to zoom · click a country to inspect",
     nodes: "150 countries",
-    links: "6,000 relationships",
+    links: "6,000 model links",
     waiting: "No comparison scenario yet",
     waitingDesc:
       "Adjust a metric in the left panel and press Apply. The network will compare the before and after states.",
@@ -89,8 +98,12 @@ const COPY = {
     legendHigher: "Pressure increased",
     legendLower: "Pressure decreased",
     legendNone: "No clear change",
-    source: "The network uses GDP scale, alliances and tariffs in the current World state.",
+    source: "Links visualise GDP scale, alliances and tariffs; colours and pulses come from actual World state changes.",
     scenario: "Scenario being observed",
+    running: "World is processing continuously",
+    paused: "World is paused",
+    day: "Day",
+    activeNodes: "countries just changed",
   },
 } as const;
 
@@ -186,9 +199,49 @@ function makeGraph(
       region,
       x: clamp(center.x + Math.cos(angle) * radius, 45, WORLD_W - 45),
       y: clamp(center.y + Math.sin(angle) * radius, 45, WORLD_H - 45),
-      radius: 12 + scale * 15,
+      radius: 14 + scale * 14,
     };
   });
+
+  // Deterministic collision pass. The old regional spiral allowed neighbouring
+  // clusters to overlap, especially for large-GDP nodes. Keep the geographic
+  // anchors, but resolve every circle pair before locking the layout so live
+  // snapshots can repaint without making the network jump around.
+  for (let iteration = 0; iteration < 260; iteration += 1) {
+    const cooling = 1 - iteration / 260;
+    for (let index = 0; index < nodes.length; index += 1) {
+      const node = nodes[index];
+      const center = regionCenters.get(node.region) ?? { x: WORLD_W / 2, y: WORLD_H / 2 };
+      const anchorForce = 0.0025 + cooling * 0.002;
+      node.x += (center.x - node.x) * anchorForce;
+      node.y += (center.y - node.y) * anchorForce;
+      for (let otherIndex = index + 1; otherIndex < nodes.length; otherIndex += 1) {
+        const other = nodes[otherIndex];
+        let dx = other.x - node.x;
+        let dy = other.y - node.y;
+        let distance = Math.hypot(dx, dy);
+        const minimum = node.radius + other.radius + 10;
+        if (distance >= minimum) continue;
+        if (distance < 0.001) {
+          const angle = hash01(`${node.code}:${other.code}`) * Math.PI * 2;
+          dx = Math.cos(angle);
+          dy = Math.sin(angle);
+          distance = 1;
+        }
+        const overlap = (minimum - distance) * 0.52;
+        const ux = dx / distance;
+        const uy = dy / distance;
+        node.x -= ux * overlap;
+        node.y -= uy * overlap;
+        other.x += ux * overlap;
+        other.y += uy * overlap;
+      }
+    }
+    nodes.forEach((node) => {
+      node.x = clamp(node.x, node.radius + 18, WORLD_W - node.radius - 18);
+      node.y = clamp(node.y, node.radius + 18, WORLD_H - node.radius - 18);
+    });
+  }
 
   const maxGdp = Math.max(...gdps);
   const candidates: NetworkEdge[] = [];
@@ -230,6 +283,8 @@ export function WorldNetworkView({
   agents = [],
   locale,
   countryName,
+  running,
+  simDay,
 }: {
   countries: Record<string, CountryMacro>;
   alliances?: Record<string, Record<string, number>>;
@@ -242,6 +297,8 @@ export function WorldNetworkView({
   agents?: WorldAgentEvent[];
   locale: "en" | "vi";
   countryName: (code: string, fallback?: string) => string;
+  running: boolean;
+  simDay: number;
 }) {
   const copy = COPY[locale];
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -251,11 +308,17 @@ export function WorldNetworkView({
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, scale: 0.72 });
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [metric, setMetric] = useState<ImpactMetric>("risk");
+  const [activeNodeCount, setActiveNodeCount] = useState(0);
+  const graphLockedRef = useRef(Object.keys(countries).length > 0);
+  const [graph, setGraph] = useState(() => makeGraph(countries, alliances, tariffs));
+  const previousMetricsRef = useRef<Map<string, [number, number, number, number]>>(new Map());
+  const activityRef = useRef<Map<string, NodeActivity>>(new Map());
 
-  const graph = useMemo(
-    () => makeGraph(countries, alliances, tariffs),
-    [countries, alliances, tariffs],
-  );
+  useEffect(() => {
+    if (graphLockedRef.current || Object.keys(countries).length === 0) return;
+    setGraph(makeGraph(countries, alliances, tariffs));
+    graphLockedRef.current = true;
+  }, [alliances, countries, tariffs]);
   const nodeByCode = useMemo(
     () => new Map(graph.nodes.map((node, index) => [node.code, { node, index }])),
     [graph.nodes],
@@ -267,6 +330,38 @@ export function WorldNetworkView({
   );
   const maxImpact = Math.max(1e-8, ...rawImpacts.map((value) => Math.abs(value)));
   const impacts = rawImpacts.map((value) => clamp(value / maxImpact, -1, 1));
+
+  useEffect(() => {
+    const previous = previousMetricsRef.current;
+    const next = new Map<string, [number, number, number, number]>();
+    const now = performance.now();
+    let changedCount = 0;
+    graph.nodes.forEach((node) => {
+      const country = countries[node.code];
+      const values: [number, number, number, number] = [
+        readMetric(country, "growth"),
+        readMetric(country, "inflation"),
+        readMetric(country, "rate"),
+        readMetric(country, "unemployment"),
+      ];
+      next.set(node.code, values);
+      const before = previous.get(node.code);
+      if (!before) return;
+      const movement = values.reduce(
+        (sum, value, index) => sum + Math.abs(value - before[index]),
+        0,
+      );
+      if (movement > 1e-8) {
+        changedCount += 1;
+        activityRef.current.set(node.code, {
+          strength: clamp(0.22 + movement * 180, 0.22, 1),
+          changedAt: now,
+        });
+      }
+    });
+    previousMetricsRef.current = next;
+    setActiveNodeCount(changedCount);
+  }, [countries, graph.nodes, simDay]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -300,50 +395,94 @@ export function WorldNetworkView({
     canvas.style.height = `${size.height}px`;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    ctx.clearRect(0, 0, size.width, size.height);
-    ctx.save();
-    ctx.translate(transform.x, transform.y);
-    ctx.scale(transform.scale, transform.scale);
+    let animationFrame = 0;
+    const draw = (now: number) => {
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, size.width, size.height);
+      ctx.save();
+      ctx.translate(transform.x, transform.y);
+      ctx.scale(transform.scale, transform.scale);
 
-    graph.edges.forEach((edge) => {
-      const a = graph.nodes[edge.source];
-      const b = graph.nodes[edge.target];
-      const impact = (impacts[edge.source] + impacts[edge.target]) / 2;
-      const active = baseline ? Math.max(Math.abs(impacts[edge.source]), Math.abs(impacts[edge.target])) : 0;
-      const alpha = baseline
-        ? 0.025 + edge.weight * 0.045 + active * 0.22
-        : 0.035 + edge.weight * 0.055;
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.lineTo(b.x, b.y);
-      ctx.strokeStyle = baseline
-        ? rgbaForImpact(impact, alpha)
-        : `rgba(71,85,105,${alpha})`;
-      ctx.lineWidth = 0.45 + active * 1.4;
-      ctx.stroke();
-    });
+      const activity = graph.nodes.map((node) => {
+        const signal = activityRef.current.get(node.code);
+        if (!signal) return 0;
+        const age = now - signal.changedAt;
+        return age >= 1800 ? 0 : signal.strength * (1 - age / 1800);
+      });
 
-    graph.nodes.forEach((node, index) => {
-      const impact = impacts[index];
-      const isSelected = node.code === selected;
-      const isOrigin = node.code === origin;
-      ctx.beginPath();
-      ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
-      ctx.fillStyle = baseline ? rgbaForImpact(impact, 0.94) : "rgba(71,85,105,0.92)";
-      if (isOrigin) ctx.fillStyle = "rgba(14,165,233,0.98)";
-      ctx.fill();
-      ctx.strokeStyle = isSelected ? "#f8fafc" : isOrigin ? "#38bdf8" : "rgba(255,255,255,0.72)";
-      ctx.lineWidth = isSelected ? 3.2 : isOrigin ? 2.4 : 1;
-      ctx.stroke();
-      ctx.fillStyle = "#ffffff";
-      ctx.font = `700 ${Math.max(8, Math.min(12, node.radius * 0.62))}px ui-monospace, SFMono-Regular, monospace`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(node.code, node.x, node.y + 0.5);
-    });
-    ctx.restore();
-  }, [baseline, graph, impacts, origin, selected, size, transform]);
+      graph.edges.forEach((edge, edgeIndex) => {
+        const a = graph.nodes[edge.source];
+        const b = graph.nodes[edge.target];
+        const impact = (impacts[edge.source] + impacts[edge.target]) / 2;
+        const live = Math.max(activity[edge.source], activity[edge.target]);
+        const compared = baseline
+          ? Math.max(Math.abs(impacts[edge.source]), Math.abs(impacts[edge.target]))
+          : 0;
+        const active = Math.max(live, compared);
+        const alpha = baseline
+          ? 0.022 + edge.weight * 0.04 + active * 0.25
+          : 0.025 + edge.weight * 0.045 + live * 0.22;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.strokeStyle = baseline
+          ? rgbaForImpact(impact, alpha)
+          : live > 0.04
+            ? `rgba(14,165,233,${alpha})`
+            : `rgba(71,85,105,${alpha})`;
+        ctx.lineWidth = 0.42 + active * 1.45;
+        ctx.stroke();
+
+        // A moving bead is rendered only on a deterministic subset of active
+        // links. Its existence is driven by a real state delta; animation merely
+        // makes the latest backend tick legible to the human eye.
+        if (running && live > 0.16 && edgeIndex % 9 === 0) {
+          const progress = (now * 0.00045 * (1 + edge.weight) + edgeIndex * 0.071) % 1;
+          const x = a.x + (b.x - a.x) * progress;
+          const y = a.y + (b.y - a.y) * progress;
+          ctx.beginPath();
+          ctx.arc(x, y, 1.6 + live * 1.8, 0, Math.PI * 2);
+          ctx.fillStyle = baseline
+            ? rgbaForImpact(impact, 0.82)
+            : "rgba(14,165,233,0.84)";
+          ctx.fill();
+        }
+      });
+
+      graph.nodes.forEach((node, index) => {
+        const impact = impacts[index];
+        const live = activity[index];
+        const isSelected = node.code === selected;
+        const isOrigin = node.code === origin;
+        if (running && live > 0.02) {
+          const pulse = (Math.sin(now * 0.01 + index) + 1) / 2;
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, node.radius + 4 + pulse * 7 * live, 0, Math.PI * 2);
+          ctx.fillStyle = baseline
+            ? rgbaForImpact(impact, 0.06 + live * 0.13)
+            : `rgba(14,165,233,${0.05 + live * 0.13})`;
+          ctx.fill();
+        }
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
+        ctx.fillStyle = baseline ? rgbaForImpact(impact, 0.94) : "rgba(71,85,105,0.94)";
+        if (isOrigin) ctx.fillStyle = "rgba(14,165,233,0.98)";
+        ctx.fill();
+        ctx.strokeStyle = isSelected ? "#f8fafc" : isOrigin ? "#38bdf8" : "rgba(255,255,255,0.76)";
+        ctx.lineWidth = isSelected ? 3.2 : isOrigin ? 2.4 : 1;
+        ctx.stroke();
+        ctx.fillStyle = "#ffffff";
+        ctx.font = `700 ${Math.max(8, Math.min(12, node.radius * 0.6))}px ui-monospace, SFMono-Regular, monospace`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(node.code, node.x, node.y + 0.5);
+      });
+      ctx.restore();
+      if (running) animationFrame = window.requestAnimationFrame(draw);
+    };
+    draw(performance.now());
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [baseline, graph, impacts, origin, running, selected, size, transform]);
 
   const findNode = useCallback(
     (clientX: number, clientY: number) => {
@@ -369,7 +508,6 @@ export function WorldNetworkView({
   const selectedCurrent = countries[selected];
   const selectedBaseline = baseline?.[selected];
   const selectedAgents = agents.filter((event) => event.country === selected).slice(0, 4);
-
   return (
     <div ref={hostRef} className="absolute inset-0 overflow-hidden bg-[#f8fafc] dark:bg-[#090b10]">
       <canvas
@@ -428,6 +566,10 @@ export function WorldNetworkView({
         </span>
         <span className="rounded-full border border-line bg-surface/92 px-3 py-1 font-mono text-[10px] font-semibold text-ink shadow-sm backdrop-blur">
           {copy.links}
+        </span>
+        <span className={`rounded-full border px-3 py-1 font-mono text-[10px] font-semibold shadow-sm backdrop-blur ${running ? "border-ok/35 bg-ok/10 text-ok" : "border-line bg-surface/92 text-muted"}`}>
+          <span className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full ${running ? "animate-pulse bg-ok" : "bg-faint"}`} />
+          {running ? copy.running : copy.paused} · {copy.day} {simDay.toLocaleString()} · {activeNodeCount} {copy.activeNodes}
         </span>
       </div>
 

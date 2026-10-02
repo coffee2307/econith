@@ -177,6 +177,7 @@ export default function EconithWorld() {
   const leftWRef = useRef(SIDEBAR_DEFAULT);
   const rightWRef = useRef(SIDEBAR_DEFAULT);
   const downHRef = useRef(DOWNBAR_DEFAULT);
+  const initialPauseRequestedRef = useRef(false);
 
   useEffect(() => {
     leftWRef.current = leftW;
@@ -235,6 +236,14 @@ export default function EconithWorld() {
   const running = time?.running ?? false;
   const multiplier = time?.multiplier ?? 1;
   const simDay = time?.sim_day ?? 0;
+
+  // Open the presentation surface in a controlled state. This uses the public
+  // clock API and leaves every World rule and research result unchanged.
+  useEffect(() => {
+    if (initialPauseRequestedRef.current) return;
+    initialPauseRequestedRef.current = true;
+    void pauseTime();
+  }, []);
 
   // 150-node backend world (50 hubs + 100 proxies) — every nation is editable.
   const countries = sim.countries;
@@ -315,8 +324,8 @@ export default function EconithWorld() {
     const g = globeRef.current;
     if (!g) return;
     const c = g.controls();
-    c.autoRotate = true;
-    c.autoRotateSpeed = running ? Math.min(4, 0.25 * multiplier) : 0.05;
+    c.autoRotate = running;
+    c.autoRotateSpeed = running ? Math.min(4, 0.25 * multiplier) : 0;
   }, [running, multiplier, GlobeComp]);
 
   // ---- reset overrides when switching country ----
@@ -650,6 +659,8 @@ export default function EconithWorld() {
               agents={snapshot?.world_agents}
               locale={locale}
               countryName={countryName}
+              running={running}
+              simDay={simDay}
             />
           ) : mobileViewport === true ? (
             <MobileWorldGlobe />
@@ -791,7 +802,12 @@ export default function EconithWorld() {
 
         {/* RIGHT PANEL — events + agent exchange */}
         <div className="world-mobile-panel flex min-h-0 min-w-0 flex-col overflow-hidden">
-          <WorldRightPanel events={sim.events} pendingCount={sim.pendingCount} />
+          <WorldRightPanel
+            events={sim.events}
+            pendingCount={sim.pendingCount}
+            running={running}
+            simDay={simDay}
+          />
         </div>
       </div>
 

@@ -18,12 +18,35 @@ import { useMetrics } from "@/components/MetricsProvider";
 import { useLocale } from "@/contexts/LocaleContext";
 import { Panel } from "@/components/quant/ui/Panel";
 import {
+  pauseTime,
+  resumeTime,
   sentinelInject,
   sentinelReset,
   setQuantMode,
   type AnomalyKind,
   type QuantModeName,
 } from "@/lib/api";
+
+interface ScenarioReading {
+  latency: number;
+  risk: number;
+  drawdown: number;
+  price: number;
+  alerts: number;
+  safety: string;
+}
+
+interface ScenarioRun {
+  kind: AnomalyKind;
+  startedAt: number;
+  baseline: ScenarioReading;
+  latest: ScenarioReading;
+  status: "running" | "done" | "failed";
+  wasPaused: boolean;
+  error?: string;
+}
+
+const SCENARIO_WINDOW_MS = 8000;
 
 const COPY = {
   en: {
@@ -45,6 +68,17 @@ const COPY = {
     latencySpike: "Latency shock",
     volSpike: "Volatility spike",
     rearm: "Re-arm Sentinel",
+    running: "Running live test",
+    done: "Observation completed",
+    failed: "Test could not start",
+    progress: "Live observation window",
+    latency: "Latency",
+    risk: "Estimated risk",
+    drawdown: "Drawdown",
+    price: "Market price",
+    alerts: "Warnings",
+    safety: "Safety state",
+    actual: "Actual change reported by the system",
   },
   vi: {
     title: "Thử tình huống",
@@ -65,6 +99,17 @@ const COPY = {
     latencySpike: "Tăng độ trễ",
     volSpike: "Tăng biến động",
     rearm: "Bật lại kiểm soát rủi ro",
+    running: "Đang chạy kiểm tra trực tiếp",
+    done: "Đã hoàn tất theo dõi",
+    failed: "Không thể bắt đầu kiểm tra",
+    progress: "Khoảng theo dõi trực tiếp",
+    latency: "Độ trễ",
+    risk: "Rủi ro ước tính",
+    drawdown: "Mức giảm",
+    price: "Giá thị trường",
+    alerts: "Cảnh báo",
+    safety: "Trạng thái an toàn",
+    actual: "Thay đổi thực tế hệ thống vừa ghi nhận",
   },
 } as const;
 
@@ -77,6 +122,11 @@ export function QuantControls() {
   const [mode, setMode] = useState<QuantModeName>(serverMode ?? "REALITY");
   const [switching, setSwitching] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [scenarioRun, setScenarioRun] = useState<ScenarioRun | null>(null);
+  const [clock, setClock] = useState(0);
+  const scenarioStatus = scenarioRun?.status;
+  const scenarioStartedAt = scenarioRun?.startedAt;
+  const scenarioWasPaused = scenarioRun?.wasPaused ?? false;
 
   useEffect(() => {
     if (serverMode && !switching) setMode(serverMode);
@@ -99,8 +149,73 @@ export function QuantControls() {
     await fn();
     setBusy(null);
   };
-  const inject = (kind: AnomalyKind) =>
-    trigger(() => sentinelInject(kind), kind);
+
+  const captureReading = (): ScenarioReading => ({
+    latency: snapshot?.sentinel?.latency_ms ?? 0,
+    risk: snapshot?.sentinel?.var ?? 0,
+    drawdown: snapshot?.sentinel?.drawdown ?? 0,
+    price: snapshot?.market?.price ?? 0,
+    alerts: (snapshot?.events ?? []).filter(
+      (event) => event.level === "warn" || event.level === "danger",
+    ).length,
+    safety: `${snapshot?.sentinel?.state ?? "—"} · ${snapshot?.sentinel?.mode ?? "—"}`,
+  });
+
+  const inject = async (kind: AnomalyKind) => {
+    if (busy) return;
+    const wasPaused = snapshot?.time?.running === false;
+    const baseline = captureReading();
+    setClock(Date.now());
+    setBusy(kind);
+    if (wasPaused) await resumeTime();
+    const result = await sentinelInject(kind);
+    if (!result?.injected) {
+      setScenarioRun({
+        kind,
+        startedAt: Date.now(),
+        baseline,
+        latest: baseline,
+        status: "failed",
+        wasPaused,
+        error: result?.error ?? "request failed",
+      });
+      if (wasPaused) await pauseTime();
+    } else {
+      setScenarioRun({
+        kind,
+        startedAt: Date.now(),
+        baseline,
+        latest: baseline,
+        status: "running",
+        wasPaused,
+      });
+    }
+    setBusy(null);
+  };
+
+  useEffect(() => {
+    if (!scenarioRun || scenarioRun.status !== "running") return;
+    const latest = captureReading();
+    setScenarioRun((current) => current && current.status === "running"
+      ? { ...current, latest }
+      : current);
+  // Snapshot identity changes only when the backend publishes a new reading.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapshot]);
+
+  useEffect(() => {
+    if (scenarioStatus !== "running" || scenarioStartedAt == null) return;
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      setClock(now);
+      if (now - scenarioStartedAt < SCENARIO_WINDOW_MS) return;
+      setScenarioRun((current) => current && current.status === "running"
+        ? { ...current, status: "done" }
+        : current);
+      if (scenarioWasPaused) void pauseTime();
+    }, 200);
+    return () => window.clearInterval(timer);
+  }, [scenarioStartedAt, scenarioStatus, scenarioWasPaused]);
 
   return (
     <Panel
@@ -155,7 +270,7 @@ export function QuantControls() {
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => inject("shock")}
+              onClick={() => void inject("shock")}
               disabled={busy === "shock"}
               className="quant-ctrl-btn border-danger bg-danger/10 text-danger hover:bg-danger hover:text-white"
             >
@@ -164,7 +279,7 @@ export function QuantControls() {
             </button>
             <button
               type="button"
-              onClick={() => inject("latency")}
+              onClick={() => void inject("latency")}
               disabled={busy === "latency"}
               className="quant-ctrl-btn border-warn bg-warn/10 text-warn hover:bg-warn hover:text-black"
             >
@@ -173,7 +288,7 @@ export function QuantControls() {
             </button>
             <button
               type="button"
-              onClick={() => inject("vol")}
+              onClick={() => void inject("vol")}
               disabled={busy === "vol"}
               className="quant-ctrl-btn border-warn bg-warn/10 text-warn hover:bg-warn hover:text-black"
             >
@@ -192,6 +307,14 @@ export function QuantControls() {
         )}
       </div>
 
+      {scenarioRun ? (
+        <ScenarioObservation
+          run={scenarioRun}
+          now={clock}
+          labels={c}
+        />
+      ) : null}
+
       <div className="border-t border-line pt-3">
         <button
           type="button"
@@ -204,5 +327,82 @@ export function QuantControls() {
         </button>
       </div>
     </Panel>
+  );
+}
+
+function ScenarioObservation({
+  run,
+  now,
+  labels,
+}: {
+  run: ScenarioRun;
+  now: number;
+  labels: typeof COPY.vi | typeof COPY.en;
+}) {
+  const progress = run.status === "done"
+    ? 100
+    : Math.min(100, ((now - run.startedAt) / SCENARIO_WINDOW_MS) * 100);
+  const title = run.kind === "shock"
+    ? labels.flashCrash
+    : run.kind === "latency"
+      ? labels.latencySpike
+      : labels.volSpike;
+  const metricRows = [
+    {
+      label: labels.latency,
+      before: `${run.baseline.latency.toFixed(0)} ms`,
+      after: `${run.latest.latency.toFixed(0)} ms`,
+      changed: Math.abs(run.latest.latency - run.baseline.latency) > 1,
+    },
+    {
+      label: labels.risk,
+      before: `${(run.baseline.risk * 100).toFixed(2)}%`,
+      after: `${(run.latest.risk * 100).toFixed(2)}%`,
+      changed: Math.abs(run.latest.risk - run.baseline.risk) > 1e-5,
+    },
+    {
+      label: labels.drawdown,
+      before: `${(run.baseline.drawdown * 100).toFixed(2)}%`,
+      after: `${(run.latest.drawdown * 100).toFixed(2)}%`,
+      changed: Math.abs(run.latest.drawdown - run.baseline.drawdown) > 1e-5,
+    },
+    {
+      label: labels.price,
+      before: `$${run.baseline.price.toLocaleString(undefined, { maximumFractionDigits: 2 })}`,
+      after: `$${run.latest.price.toLocaleString(undefined, { maximumFractionDigits: 2 })}`,
+      changed: Math.abs(run.latest.price - run.baseline.price) > 0.01,
+    },
+  ];
+  return (
+    <section className="overflow-hidden rounded-xl border border-world/35 bg-world/5">
+      <div className="flex items-center justify-between gap-3 border-b border-line px-3 py-2.5">
+        <div>
+          <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-world">{labels.actual}</p>
+          <p className="mt-0.5 text-xs font-bold text-ink">{title}</p>
+        </div>
+        <span className={`rounded-full px-2 py-1 text-[9px] font-semibold ${run.status === "failed" ? "bg-danger/10 text-danger" : run.status === "done" ? "bg-ok/10 text-ok" : "bg-world/15 text-world"}`}>
+          {run.status === "failed" ? labels.failed : run.status === "done" ? labels.done : labels.running}
+        </span>
+      </div>
+      {run.status === "failed" ? (
+        <p className="px-3 py-3 text-[11px] text-danger">{run.error}</p>
+      ) : (
+        <>
+          <div className="px-3 pt-3">
+            <div className="mb-1 flex justify-between text-[9px] text-faint"><span>{labels.progress}</span><span>{Math.round(progress)}%</span></div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-base"><div className="h-full rounded-full bg-world transition-[width] duration-200" style={{ width: `${progress}%` }} /></div>
+          </div>
+          <div className="grid grid-cols-1 gap-1.5 p-3 sm:grid-cols-2">
+            {metricRows.map((row) => (
+              <div key={row.label} className="rounded-lg border border-line bg-surface px-2.5 py-2">
+                <p className="text-[9px] uppercase tracking-wide text-faint">{row.label}</p>
+                <p className="mt-1 flex items-center gap-1.5 font-mono text-[11px]"><span className="text-muted">{row.before}</span><span className="text-faint">→</span><strong className={row.changed ? "text-world" : "text-muted"}>{row.after}</strong></p>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center justify-between border-t border-line px-3 py-2 text-[10px]"><span className="text-muted">{labels.safety}</span><strong className="font-mono text-ink">{run.baseline.safety} → {run.latest.safety}</strong></div>
+        </>
+      )}
+    </section>
   );
 }
