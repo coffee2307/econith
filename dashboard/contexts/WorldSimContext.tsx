@@ -49,6 +49,23 @@ export interface WorldSim {
   ensure: (code: string) => void;
   policyAgentLines: PolicyAgentLine[];
   backendLive: (code: string) => boolean;
+  impact: WorldImpactState;
+  setImpact: (next: WorldImpactState) => void;
+}
+
+export interface WorldImpactScenario {
+  code: string;
+  label: string;
+  before: string;
+  after: string;
+  kind?: "feature" | "tariff";
+  pairKey?: string;
+}
+
+export interface WorldImpactState {
+  baseline: Record<string, CountryMacro> | null;
+  origin: string | null;
+  scenario: WorldImpactScenario | null;
 }
 
 const WorldSimContext = createContext<WorldSim | null>(null);
@@ -64,6 +81,13 @@ export function WorldSimProvider({ children }: { children: React.ReactNode }) {
   const [events, setEvents] = useState<SimEvent[]>([]);
   const [draftOverrides, setDraftOverrides] = useState<Record<string, Record<string, number>>>({});
   const [policyAgentLines, setPolicyAgentLines] = useState<PolicyAgentLine[]>([]);
+  // This comparison belongs to the live simulator, not a single route. Keeping
+  // it here lets World retain its before/after colours after visiting Quant.
+  const [impact, setImpact] = useState<WorldImpactState>({
+    baseline: null,
+    origin: null,
+    scenario: null,
+  });
   const seenBackendRef = useRef<Map<string, number>>(new Map());
   const seqRef = useRef(0);
 
@@ -271,6 +295,8 @@ export function WorldSimProvider({ children }: { children: React.ReactNode }) {
       ensure,
       policyAgentLines,
       backendLive,
+      impact,
+      setImpact,
     }),
     [
       countries,
@@ -284,6 +310,7 @@ export function WorldSimProvider({ children }: { children: React.ReactNode }) {
       ensure,
       policyAgentLines,
       backendLive,
+      impact,
     ],
   );
 

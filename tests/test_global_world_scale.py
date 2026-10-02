@@ -66,6 +66,28 @@ def test_150_country_tick_and_proxy_mutation() -> None:
     assert math.isfinite(kernel.country_dict("KHM")["interest_rate"])
 
 
+def test_manual_policy_edit_reaches_trade_channel_and_partner_nodes() -> None:
+    kernel = WorldKernel(EventBus(), event_probability=0.0)
+    usa = kernel.world.countries["USA"]
+    chn = kernel.world.countries["CHN"]
+    usa_exports_before = usa.fiscal.export_index
+    chn_exports_before = chn.fiscal.export_index
+
+    result = asyncio.run(
+        kernel.mutate_country(
+            "USA",
+            "monetary",
+            "interest_rate",
+            usa.monetary.interest_rate + 0.05,
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["propagated_changes"] > 0
+    assert usa.fiscal.export_index < usa_exports_before
+    assert chn.fiscal.export_index > chn_exports_before
+
+
 def test_invalid_mutations_do_not_change_state() -> None:
     kernel = WorldKernel(EventBus(), event_probability=0.0)
     before = kernel.world.to_dict()

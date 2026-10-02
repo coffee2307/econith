@@ -218,8 +218,8 @@ function fmtPct(value: number) {
   return `${sign}${(value * 100).toFixed(2)}%`;
 }
 
-function rgbaForImpact(value: number, alpha = 1) {
-  if (Math.abs(value) < 0.035) return `rgba(100,116,139,${alpha})`;
+function rgbaForImpact(value: number, alpha = 1, threshold = 0.035) {
+  if (Math.abs(value) < threshold) return `rgba(100,116,139,${alpha})`;
   if (value > 0) return `rgba(16,185,129,${alpha})`;
   const strength = Math.min(1, Math.abs(value));
   return strength > 0.58
@@ -415,6 +415,9 @@ export function WorldNetworkView({
     const maxImpact = Math.max(1e-8, ...rawImpacts.map((value) => Math.abs(value)));
     return rawImpacts.map((value) => clamp(value / maxImpact, -1, 1));
   }, [rawImpacts]);
+  // Export changes spread more gradually than a direct rate change. Keep those
+  // smaller, real deltas visible instead of classifying every recipient as grey.
+  const impactThreshold = metric === "exports" ? 0.004 : 0.035;
 
   useEffect(() => {
     const previous = previousMetricsRef.current;
@@ -542,7 +545,7 @@ export function WorldNetworkView({
       staticCtx.moveTo(a.x, a.y);
       staticCtx.lineTo(b.x, b.y);
       staticCtx.strokeStyle = baseline
-        ? rgbaForImpact(impact, 0.018 + edge.weight * 0.025)
+        ? rgbaForImpact(impact, 0.018 + edge.weight * 0.025, impactThreshold)
         : dark
           ? `rgba(148,163,184,${0.012 + edge.weight * 0.022})`
           : `rgba(71,85,105,${0.009 + edge.weight * 0.018})`;
@@ -587,24 +590,34 @@ export function WorldNetworkView({
         ctx.beginPath();
         ctx.moveTo(a.x, a.y);
         ctx.lineTo(b.x, b.y);
-        ctx.strokeStyle = baseline ? rgbaForImpact(impact, alpha) : `rgba(14,165,233,${alpha})`;
+        ctx.strokeStyle = baseline
+          ? rgbaForImpact(impact, alpha, impactThreshold)
+          : `rgba(14,165,233,${alpha})`;
         ctx.lineWidth = 0.7 + active * 1.15;
         ctx.stroke();
 
-        // A moving bead is rendered only on a deterministic subset of active
-        // links. Its existence is driven by a real state delta; animation merely
-        // makes the latest backend tick legible to the human eye.
-        if (running && live > 0.16 && particleCount < 24 && edgeIndex % 33 === 0) {
+        // Render a continuous dashed stream rather than isolated glowing dots.
+        // The phase is deterministic per link, so the signal reads like current
+        // moving through a cable instead of particles being launched at random.
+        if (running && active > 0.12 && particleCount < 340 && edgeIndex % 17 === 0) {
           particleCount += 1;
-          const progress = (now * 0.00045 * (1 + edge.weight) + edgeIndex * 0.071) % 1;
-          const x = a.x + (b.x - a.x) * progress;
-          const y = a.y + (b.y - a.y) * progress;
+          const direction = edge.source === nodeByCode.get(origin ?? "")?.index ? 1 : -1;
+          const phase = now * 0.020 * (0.8 + edge.weight * 0.55) * direction + edgeIndex * 2.1;
+          const streamColor = baseline
+            ? rgbaForImpact(impact, 0.74, impactThreshold)
+            : "rgba(14,165,233,0.80)";
+          ctx.save();
           ctx.beginPath();
-          ctx.arc(x, y, 1.6 + live * 1.8, 0, Math.PI * 2);
-          ctx.fillStyle = baseline
-            ? rgbaForImpact(impact, 0.82)
-            : "rgba(14,165,233,0.84)";
-          ctx.fill();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.setLineDash([4 + edge.weight * 5, 12 - edge.weight * 3]);
+          ctx.lineDashOffset = -phase;
+          ctx.strokeStyle = streamColor;
+          ctx.lineWidth = 1.1 + active * 1.3;
+          ctx.shadowBlur = 3 + active * 3;
+          ctx.shadowColor = streamColor;
+          ctx.stroke();
+          ctx.restore();
         }
       });
 
@@ -618,13 +631,15 @@ export function WorldNetworkView({
           ctx.beginPath();
           ctx.arc(node.x, node.y, node.radius + 3 + pulse * 5 * live, 0, Math.PI * 2);
           ctx.fillStyle = baseline
-            ? rgbaForImpact(impact, 0.06 + live * 0.13)
+            ? rgbaForImpact(impact, 0.06 + live * 0.13, impactThreshold)
             : `rgba(14,165,233,${0.05 + live * 0.13})`;
           ctx.fill();
         }
         ctx.beginPath();
         ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
-        ctx.fillStyle = baseline ? rgbaForImpact(impact, 0.94) : "rgba(71,85,105,0.94)";
+        ctx.fillStyle = baseline
+          ? rgbaForImpact(impact, 0.94, impactThreshold)
+          : "rgba(71,85,105,0.94)";
         if (isOrigin) ctx.fillStyle = "rgba(14,165,233,0.98)";
         ctx.fill();
         ctx.strokeStyle = isSelected ? "#f8fafc" : isOrigin ? "#38bdf8" : "rgba(255,255,255,0.76)";
@@ -641,7 +656,7 @@ export function WorldNetworkView({
     };
     draw(performance.now());
     return () => window.cancelAnimationFrame(animationFrame);
-  }, [baseline, graph, impacts, locale, origin, running, selected, size, transform]);
+  }, [baseline, graph, impactThreshold, impacts, locale, nodeByCode, origin, running, selected, size, transform]);
 
   const findNode = useCallback(
     (clientX: number, clientY: number) => {
