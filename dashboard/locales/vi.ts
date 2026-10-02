@@ -62,6 +62,23 @@ const VI_COUNTRY_NAMES: Record<string, string> = {
   GRC: "Hy Lạp",
   HUN: "Hungary",
   CZE: "Séc",
+  HKG: "Hồng Kông",
+  MAC: "Ma Cao",
+  MLT: "Malta",
+  MDV: "Maldives",
+  BRB: "Barbados",
+  VUT: "Vanuatu",
+  WSM: "Samoa",
+  TON: "Tonga",
+  SLB: "Quần đảo Solomon",
+  KIR: "Kiribati",
+  MHL: "Quần đảo Marshall",
+  PLW: "Palau",
+  FSM: "Liên bang Micronesia",
+  NRU: "Nauru",
+  TUV: "Tuvalu",
+  ASM: "Samoa thuộc Mỹ",
+  GUM: "Guam",
 };
 
 const countryNames = Object.fromEntries(

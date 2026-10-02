@@ -110,7 +110,7 @@ const COPY = {
     legendHigher: "Áp lực tăng",
     legendLower: "Áp lực giảm",
     legendNone: "Chưa thay đổi rõ",
-    source: "Các đường nối là lớp trực quan hóa được dựng từ quy mô GDP, liên minh và thuế quan; màu và nhịp sáng lấy từ thay đổi thật của World.",
+    source: "Các đường nối thể hiện quan hệ mô hình từ quy mô GDP, liên minh và thuế quan; màu thể hiện thay đổi của World, còn dòng chảy cho biết hệ thống đang chạy.",
     scenario: "Tình huống đang quan sát",
     running: "World đang xử lý liên tục",
     paused: "World đang dừng",
@@ -145,7 +145,7 @@ const COPY = {
     legendHigher: "Pressure increased",
     legendLower: "Pressure decreased",
     legendNone: "No clear change",
-    source: "Links visualise GDP scale, alliances and tariffs; colours and pulses come from actual World state changes.",
+    source: "Links visualise GDP scale, alliances and tariffs; colours show World changes and the flowing signal shows the system is running.",
     scenario: "Scenario being observed",
     running: "World is processing continuously",
     paused: "World is paused",
@@ -568,54 +568,44 @@ export function WorldNetworkView({
       ctx.scale(transform.scale, transform.scale);
       ctx.drawImage(staticLayer, 0, 0);
 
-      const activity = graph.nodes.map((node) => {
-        const signal = activityRef.current.get(node.code);
-        if (!signal) return 0;
-        const age = now - signal.changedAt;
-        return age >= 1800 ? 0 : signal.strength * (1 - age / 1800);
-      });
-
-      let particleCount = 0;
+      let flowCount = 0;
       graph.edges.forEach((edge, edgeIndex) => {
         const a = graph.nodes[edge.source];
         const b = graph.nodes[edge.target];
         const impact = (impacts[edge.source] + impacts[edge.target]) / 2;
-        const live = Math.max(activity[edge.source], activity[edge.target]);
         const compared = baseline
           ? Math.max(Math.abs(impacts[edge.source]), Math.abs(impacts[edge.target]))
           : 0;
-        const active = Math.max(live, compared);
-        if (active < 0.08 || edgeIndex % 11 !== 0) return;
-        const alpha = 0.08 + active * 0.26;
-        ctx.beginPath();
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
-        ctx.strokeStyle = baseline
-          ? rgbaForImpact(impact, alpha, impactThreshold)
-          : `rgba(14,165,233,${alpha})`;
-        ctx.lineWidth = 0.7 + active * 1.15;
-        ctx.stroke();
+        // Keep policy-impact links at a fixed intensity. The previous activity
+        // fade was reset by every backend tick, which made the network flash.
+        if (compared >= 0.08 && edgeIndex % 11 === 0) {
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.strokeStyle = rgbaForImpact(impact, 0.19 + compared * 0.18, impactThreshold);
+          ctx.lineWidth = 0.72 + compared * 0.9;
+          ctx.stroke();
+        }
 
-        // Render a continuous dashed stream rather than isolated glowing dots.
-        // The phase is deterministic per link, so the signal reads like current
-        // moving through a cable instead of particles being launched at random.
-        if (running && active > 0.12 && particleCount < 340 && edgeIndex % 17 === 0) {
-          particleCount += 1;
+        // A constant moving dash represents the continuously advancing World.
+        // Only the dash offset changes, making the flow smooth rather than
+        // repeatedly brightening and fading like individual particles.
+        if (running && flowCount < 300 && edgeIndex % 19 === 0) {
+          flowCount += 1;
           const direction = edge.source === nodeByCode.get(origin ?? "")?.index ? 1 : -1;
-          const phase = now * 0.020 * (0.8 + edge.weight * 0.55) * direction + edgeIndex * 2.1;
-          const streamColor = baseline
-            ? rgbaForImpact(impact, 0.74, impactThreshold)
-            : "rgba(14,165,233,0.80)";
+          const phase = now * 0.010 * (0.9 + edge.weight * 0.35) * direction + edgeIndex * 1.7;
+          const streamColor = baseline && compared >= 0.08
+            ? rgbaForImpact(impact, 0.48, impactThreshold)
+            : "rgba(14,165,233,0.30)";
           ctx.save();
           ctx.beginPath();
           ctx.moveTo(a.x, a.y);
           ctx.lineTo(b.x, b.y);
-          ctx.setLineDash([4 + edge.weight * 5, 12 - edge.weight * 3]);
+          ctx.setLineDash([7 + edge.weight * 4, 18 - edge.weight * 3]);
           ctx.lineDashOffset = -phase;
           ctx.strokeStyle = streamColor;
-          ctx.lineWidth = 1.1 + active * 1.3;
-          ctx.shadowBlur = 3 + active * 3;
-          ctx.shadowColor = streamColor;
+          ctx.lineWidth = baseline && compared >= 0.08 ? 1.45 : 0.8;
+          ctx.lineCap = "round";
           ctx.stroke();
           ctx.restore();
         }
@@ -623,18 +613,8 @@ export function WorldNetworkView({
 
       graph.nodes.forEach((node, index) => {
         const impact = impacts[index];
-        const live = activity[index];
         const isSelected = node.code === selected;
         const isOrigin = node.code === origin;
-        if (running && live > 0.08) {
-          const pulse = (Math.sin(now * 0.006 + index) + 1) / 2;
-          ctx.beginPath();
-          ctx.arc(node.x, node.y, node.radius + 3 + pulse * 5 * live, 0, Math.PI * 2);
-          ctx.fillStyle = baseline
-            ? rgbaForImpact(impact, 0.06 + live * 0.13, impactThreshold)
-            : `rgba(14,165,233,${0.05 + live * 0.13})`;
-          ctx.fill();
-        }
         ctx.beginPath();
         ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
         ctx.fillStyle = baseline
