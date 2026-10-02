@@ -87,6 +87,14 @@ const DOWNBAR_DEFAULT = 144;
 const DOWNBAR_MIN = 80;
 const DOWNBAR_MAX = 480;
 const LAST_SCENARIO_STORAGE = "econith-last-world-scenario";
+type ImpactScenario = {
+  code: string;
+  label: string;
+  before: string;
+  after: string;
+  kind?: "feature" | "tariff";
+  pairKey?: string;
+};
 const SIDEBAR_LEVERS = [
   "monetary.interest_rate",
   "monetary.reserve_requirement",
@@ -168,11 +176,11 @@ export default function EconithWorld() {
   const [centerView, setCenterView] = useState<"globe" | "network">("globe");
   const [impactBaseline, setImpactBaseline] = useState<Record<string, CountryMacro> | null>(null);
   const [impactOrigin, setImpactOrigin] = useState<string | null>(null);
-  const [impactScenario, setImpactScenario] = useState<{
-    code: string;
-    label: string;
-    before: string;
-    after: string;
+  const [impactScenario, setImpactScenario] = useState<ImpactScenario | null>(null);
+  const tariffBaselineRef = useRef<{
+    pairKey: string;
+    countries: Record<string, CountryMacro>;
+    directions: Set<string>;
   } | null>(null);
   const leftWRef = useRef(SIDEBAR_DEFAULT);
   const rightWRef = useRef(SIDEBAR_DEFAULT);
@@ -344,6 +352,7 @@ export default function EconithWorld() {
     // Capture a comparable baseline before sending any mutation. The network
     // then visualises real backend deltas as snapshots arrive after Apply.
     setImpactBaseline(structuredClone(countries));
+    tariffBaselineRef.current = null;
     setImpactOrigin(activeCode);
     setCenterView("network");
     const firstDraft = Object.entries(overrides)[0];
@@ -356,6 +365,7 @@ export default function EconithWorld() {
           label: featureLabel(feature.key),
           before: fmtVal(uiValue(activeCountry, feature, {}), feature),
           after: fmtVal(nextValue, feature),
+          kind: "feature" as const,
         };
         setImpactScenario(scenario);
         try {
@@ -371,6 +381,59 @@ export default function EconithWorld() {
     }
     setOverrides({});
   }, [activeCode, activeCountry, countries, featureLabel, hasDrafts, overrides, sim]);
+
+  const imposeTariffWithComparison = useCallback(
+    (src: string, dst: string, rate: number) => {
+      const pairKey = [src, dst].sort().join(":");
+      const direction = `${src}->${dst}`;
+      const reverseDirection = `${dst}->${src}`;
+      let session = tariffBaselineRef.current;
+      if (!session || session.pairKey !== pairKey) {
+        session = {
+          pairKey,
+          countries: structuredClone(countries),
+          directions: new Set<string>(),
+        };
+        tariffBaselineRef.current = session;
+      }
+
+      const reverseRate = sim.tariffs?.[dst]?.[src] ?? 0;
+      const currentRate = sim.tariffs?.[src]?.[dst] ?? 0;
+      const reciprocal = session.directions.has(reverseDirection) || reverseRate > 0.05;
+      session.directions.add(direction);
+      const scenario: ImpactScenario = {
+        code: reciprocal ? `${src} ↔ ${dst}` : `${src} → ${dst}`,
+        label:
+          locale === "vi"
+            ? reciprocal
+              ? "Thuế quan hai chiều"
+              : "Thuế nhập khẩu"
+            : reciprocal
+              ? "Two-way tariffs"
+              : "Import tariff",
+        before: reciprocal
+          ? `${(currentRate * 100).toFixed(0)}% / ${(reverseRate * 100).toFixed(0)}%`
+          : `${(currentRate * 100).toFixed(0)}%`,
+        after: reciprocal
+          ? `${(rate * 100).toFixed(0)}% / ${(reverseRate * 100).toFixed(0)}%`
+          : `${(rate * 100).toFixed(0)}%`,
+        kind: "tariff",
+        pairKey,
+      };
+
+      setImpactBaseline(session.countries);
+      setImpactOrigin(src);
+      setImpactScenario(scenario);
+      setCenterView("network");
+      try {
+        sessionStorage.setItem(LAST_SCENARIO_STORAGE, JSON.stringify(scenario));
+      } catch {
+        /* session storage may be unavailable in private contexts */
+      }
+      sim.imposeTariff(src, dst, rate);
+    },
+    [countries, locale, sim],
+  );
 
   const discardDrafts = useCallback(() => {
     setOverrides({});
@@ -568,7 +631,7 @@ export default function EconithWorld() {
             activeCode={activeCode}
             simCodes={simCodes}
             tariffs={sim.tariffs}
-            onImpose={sim.imposeTariff}
+            onImpose={imposeTariffWithComparison}
           />
 
           {hasDrafts ? (
