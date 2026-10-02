@@ -96,17 +96,23 @@ export function QuantImpactComparison({
   reality,
   simulation,
   currentMode,
+  couplingEnabled,
   locale,
   scenarioLabel,
 }: {
   reality: QuantComparisonSample | null;
   simulation: QuantComparisonSample | null;
   currentMode: QuantModeName;
+  /** Authoritative backend state: only true when World signals enter Quant. */
+  couplingEnabled: boolean;
   locale: "vi" | "en";
   scenarioLabel?: string | null;
 }) {
   const c = COPY[locale];
-  const active = currentMode === "SIMULATION";
+  // Do not infer the bridge from the selected tab/mode alone.  The backend
+  // exposes an explicit gate, which is also what prevents World data leaking
+  // into a "market data only" run.
+  const active = currentMode === "SIMULATION" && couplingEnabled;
   const metrics = [
     { key: "risk", label: c.risk, format: (value: number) => pct(value) },
     { key: "drawdown", label: c.drawdown, format: (value: number) => pct(value) },

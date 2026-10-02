@@ -766,8 +766,12 @@ export default function EconithWorld() {
               onGlobeReady={() => {
                 const g = globeRef.current;
                 if (g) {
-                  g.controls().autoRotate = true;
-                  g.controls().autoRotateSpeed = 0.25;
+                  // The renderer can become ready after the simulation is
+                  // paused.  Respect the shared runtime state here as well as
+                  // in the effect above; otherwise this callback restarts the
+                  // visual globe even though World is stopped.
+                  g.controls().autoRotate = running;
+                  g.controls().autoRotateSpeed = running ? Math.min(4, 0.25 * multiplier) : 0;
                   g.pointOfView({ lat: 25, lng: 10, altitude: 2.4 });
                 }
               }}
