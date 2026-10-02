@@ -122,6 +122,7 @@ class Sentinel:
         self._risk_unfreeze_at: float = 0.0
 
         self._running = False
+        self._paused = False
         self._task: Optional[asyncio.Task[None]] = None
 
     # -- lifecycle ------------------------------------------------------------
@@ -193,6 +194,12 @@ class Sentinel:
         self._peak_equity = self._equity
         self._risk_frozen = False
         self._var_soft_breach = False
+
+    def pause(self) -> None:
+        self._paused = True
+
+    def resume(self) -> None:
+        self._paused = False
 
     # -- event handlers -------------------------------------------------------
     async def _on_fill(self, event: Event) -> None:
@@ -328,6 +335,8 @@ class Sentinel:
     async def run(self) -> None:
         while self._running:
             await asyncio.sleep(self._status_interval)
+            if self._paused:
+                continue
 
             # recompute VaR / C-VaR each cycle
             est = self._risk.estimate()

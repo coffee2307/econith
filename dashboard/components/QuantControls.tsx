@@ -10,6 +10,8 @@ import {
   faClock,
   faWaveSquare,
   faRotateRight,
+  faPlay,
+  faPause,
   faLock,
   faFlask,
   faShieldHalved,
@@ -19,6 +21,9 @@ import { useLocale } from "@/contexts/LocaleContext";
 import { Panel } from "@/components/quant/ui/Panel";
 import {
   pauseTime,
+  pauseRuntime,
+  resetQuantSimulation,
+  resumeRuntime,
   resumeTime,
   sentinelInject,
   sentinelReset,
@@ -79,6 +84,10 @@ const COPY = {
     alerts: "Warnings",
     safety: "Safety state",
     actual: "Actual change reported by the system",
+    simulationControls: "Simulation controls",
+    pauseAll: "Pause World + Quant",
+    playAll: "Run World + Quant",
+    resetSimulation: "Reset simulation",
   },
   vi: {
     title: "Thử tình huống",
@@ -110,6 +119,10 @@ const COPY = {
     alerts: "Cảnh báo",
     safety: "Trạng thái an toàn",
     actual: "Thay đổi thực tế hệ thống vừa ghi nhận",
+    simulationControls: "Điều khiển mô phỏng",
+    pauseAll: "Dừng World và Quant",
+    playAll: "Chạy World và Quant",
+    resetSimulation: "Đặt lại mô phỏng",
   },
 } as const;
 
@@ -134,6 +147,7 @@ export function QuantControls() {
 
   const isReality = mode === "REALITY";
   const injectionEnabled = !isReality;
+  const runtimeRunning = snapshot?.time?.running ?? false;
 
   const toggleMode = async () => {
     const next: QuantModeName = isReality ? "SIMULATION" : "REALITY";
@@ -147,6 +161,22 @@ export function QuantControls() {
   const trigger = async (fn: () => Promise<unknown>, key: string) => {
     setBusy(key);
     await fn();
+    setBusy(null);
+  };
+
+  const toggleRuntime = async () => {
+    if (busy) return;
+    setBusy("runtime");
+    if (runtimeRunning) await pauseRuntime();
+    else await resumeRuntime();
+    setBusy(null);
+  };
+
+  const resetSimulation = async () => {
+    if (busy) return;
+    setBusy("simulation-reset");
+    await resetQuantSimulation();
+    setScenarioRun(null);
     setBusy(null);
   };
 
@@ -259,6 +289,36 @@ export function QuantControls() {
         <p className="mt-2 text-[11px] leading-snug text-muted">
           {isReality ? c.realityDesc : c.simulationDesc}
         </p>
+      </div>
+
+      <div className="rounded-lg border border-line bg-base p-3">
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-faint">
+          {c.simulationControls}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void toggleRuntime()}
+            disabled={busy !== null}
+            className={`quant-ctrl-btn ${
+              runtimeRunning
+                ? "border-danger bg-danger/10 text-danger hover:bg-danger hover:text-white"
+                : "border-ok bg-ok/10 text-ok hover:bg-ok hover:text-black"
+            }`}
+          >
+            <FontAwesomeIcon icon={runtimeRunning ? faPause : faPlay} className="h-3 w-3" />
+            {runtimeRunning ? c.pauseAll : c.playAll}
+          </button>
+          <button
+            type="button"
+            onClick={() => void resetSimulation()}
+            disabled={busy !== null}
+            className="quant-ctrl-btn border-line bg-elevated text-ink hover:bg-base"
+          >
+            <FontAwesomeIcon icon={faRotateRight} className="h-3 w-3" />
+            {c.resetSimulation}
+          </button>
+        </div>
       </div>
 
       <div>

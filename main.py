@@ -513,6 +513,51 @@ async def resume_time() -> dict:
     return {"running": _engine().time.running}
 
 
+def _set_runtime_paused(paused: bool) -> None:
+    """Apply a shared World + Quant pause state for the operator controls.
+
+    World is clock-driven, but Quant also has independent market, inference,
+    alternative-data and risk loops. Pausing only the clock would leave Quant
+    visibly changing, so the shared control gates each loop explicitly.
+    """
+    if paused:
+        _engine().time.pause()
+    else:
+        _engine().time.resume()
+    for name in ("streamer", "predictor", "alt_provider", "sentinel"):
+        component = components.get(name)
+        action = getattr(component, "pause" if paused else "resume", None)
+        if callable(action):
+            action()
+
+
+@app.post(f"{settings.api_prefix}/runtime/pause")
+async def pause_runtime() -> dict:
+    """Pause the World clock and all dashboard-facing Quant update loops."""
+    _set_runtime_paused(True)
+    return {"running": False, "scope": ["world", "quant"]}
+
+
+@app.post(f"{settings.api_prefix}/runtime/resume")
+async def resume_runtime() -> dict:
+    """Resume the World clock and Quant update loops together."""
+    _set_runtime_paused(False)
+    return {"running": True, "scope": ["world", "quant"]}
+
+
+@app.post(f"{settings.api_prefix}/quant/simulation/reset")
+async def reset_quant_simulation() -> dict:
+    """Return Quant's interactive simulation controls to a clean baseline."""
+    _set_runtime_paused(True)
+    _streamer().reset_simulation()
+    predictor = components.get("predictor")
+    reset_predictor = getattr(predictor, "reset_simulation", None)
+    if callable(reset_predictor):
+        reset_predictor()
+    _sentinel().reset()
+    return {"status": "reset", "running": False, "scope": "quant_simulation"}
+
+
 # --- quant operating mode (REALITY vs SIMULATION) ----------------------------
 # Always route through SystemController so QuantControls (/mode) and the Main
 # Control Dashboard (/control/mode) cannot desync operating_mode vs quant_mode.

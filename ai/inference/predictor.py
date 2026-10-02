@@ -74,6 +74,7 @@ class Predictor:
         self._interval = interval_s
         self._features: dict[str, Any] = {}
         self._running = False
+        self._paused = False
         self._task: asyncio.Task[None] | None = None
         # World -> Quant microstructural coupling (decaying transient).
         # SOVEREIGNTY GUARANTEE: this coupling is only ever consumed while the
@@ -168,6 +169,17 @@ class Predictor:
                 await self._task
             except asyncio.CancelledError:
                 pass
+
+    def pause(self) -> None:
+        self._paused = True
+
+    def resume(self) -> None:
+        self._paused = False
+
+    def reset_simulation(self) -> None:
+        """Clear the temporary World coupling used by the interactive demo."""
+        self._impact = None
+        self._impact_left = 0
 
     # -- feature ingestion ----------------------------------------------------
     # These handlers mirror the EXACT feature schema the Phase A collector wrote
@@ -278,6 +290,8 @@ class Predictor:
     async def run(self) -> None:
         while self._running:
             await asyncio.sleep(self._interval)
+            if self._paused:
+                continue
             if not self._features:
                 continue
 

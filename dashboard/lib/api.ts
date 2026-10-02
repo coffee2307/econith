@@ -107,6 +107,13 @@ export const pauseTime = () => post("/time/pause");
 
 export const resumeTime = () => post("/time/resume");
 
+export const pauseRuntime = () => post<{ running: boolean }>("/runtime/pause");
+
+export const resumeRuntime = () => post<{ running: boolean }>("/runtime/resume");
+
+export const resetQuantSimulation = () =>
+  post<{ status: string; running: boolean }>("/quant/simulation/reset");
+
 export interface ScenarioResult {
   prompt: string;
   mutations: { country: string; field: string; value: number }[];

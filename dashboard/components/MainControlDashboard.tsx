@@ -24,11 +24,16 @@ import {
   faMicrochip,
   faLink,
   faBolt,
+  faPause,
+  faPlay,
 } from "@fortawesome/free-solid-svg-icons";
 import { useLocale } from "@/contexts/LocaleContext";
+import { useMetrics } from "@/components/MetricsProvider";
 import {
   getControlState,
   getLastApiError,
+  pauseRuntime,
+  resumeRuntime,
   setOperatingMode,
   setWorldSimulation,
   setWorldBridge,
@@ -110,6 +115,10 @@ const COPY = {
     heuristic: "theo quy tắc",
     live: "thực",
     mock: "minh họa",
+    stopAll: "Pause all",
+    startAll: "Resume all",
+    runtimeStopped: "World and Quant are paused.",
+    runtimeRunning: "World and Quant are updating together.",
   },
   vi: {
     title: "Chọn cách chạy thử",
@@ -150,15 +159,21 @@ const COPY = {
     heuristic: "heuristic",
     live: "live",
     mock: "mock",
+    stopAll: "Dừng tất cả",
+    startAll: "Chạy tất cả",
+    runtimeStopped: "World và Quant đang cùng tạm dừng.",
+    runtimeRunning: "World và Quant đang cùng hoạt động.",
   },
 } as const;
 
 export function MainControlDashboard() {
   const { locale } = useLocale();
+  const { snapshot } = useMetrics();
   const c = COPY[locale === "vi" ? "vi" : "en"];
   const [state, setState] = useState<SystemControlState | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+  const runtimeRunning = snapshot?.time?.running ?? false;
 
   const refresh = useCallback(async () => {
     const s = await getControlState();
@@ -189,6 +204,17 @@ export function MainControlDashboard() {
     [refresh],
   );
 
+  const toggleRuntime = useCallback(async () => {
+    setBusy("runtime");
+    setApiError(null);
+    const next = runtimeRunning ? await pauseRuntime() : await resumeRuntime();
+    if (!next) {
+      const err = getLastApiError();
+      setApiError(err ? `${err.status || "net"}: ${err.detail}` : "Request failed");
+    }
+    setBusy(null);
+  }, [runtimeRunning]);
+
   const activeMode = state?.operating_mode ?? "REALITY";
   const worldOn = state?.world_simulation_enabled ?? false;
   const bridgeOn = state?.world_to_quant_bridge ?? true;
@@ -217,11 +243,33 @@ export function MainControlDashboard() {
   return (
     <section className="rounded-xl border border-line bg-surface p-4">
       <header className="mb-4">
-        <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-ink">
-          <FontAwesomeIcon icon={faBolt} className="h-3.5 w-3.5 text-accent" />
-          {c.title}
-        </h2>
-        <p className="mt-0.5 text-[11px] text-muted">{c.subtitle}</p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-ink">
+              <FontAwesomeIcon icon={faBolt} className="h-3.5 w-3.5 text-accent" />
+              {c.title}
+            </h2>
+            <p className="mt-0.5 text-[11px] text-muted">{c.subtitle}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={`hidden text-[11px] sm:inline ${runtimeRunning ? "text-ok" : "text-warn"}`}>
+              {runtimeRunning ? c.runtimeRunning : c.runtimeStopped}
+            </span>
+            <button
+              type="button"
+              onClick={() => void toggleRuntime()}
+              disabled={busy === "runtime"}
+              className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold transition disabled:opacity-50 ${
+                runtimeRunning
+                  ? "border-danger/50 bg-danger/10 text-danger hover:bg-danger hover:text-white"
+                  : "border-ok/50 bg-ok/10 text-ok hover:bg-ok hover:text-black"
+              }`}
+            >
+              <FontAwesomeIcon icon={runtimeRunning ? faPause : faPlay} className="h-3 w-3" />
+              {runtimeRunning ? c.stopAll : c.startAll}
+            </button>
+          </div>
+        </div>
       </header>
 
       {/* ---- Execution mode state machine ---- */}

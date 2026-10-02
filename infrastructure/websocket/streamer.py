@@ -80,6 +80,7 @@ class BinanceWebSocketStreamer:
         self._running = False
         self._task: asyncio.Task[None] | None = None
         self._connected = False
+        self._paused = False
         self._last_event_ms: int | None = None
         self._live_overlay = 1.0
 
@@ -142,6 +143,20 @@ class BinanceWebSocketStreamer:
             except asyncio.CancelledError:
                 pass
 
+    def pause(self) -> None:
+        """Stop forwarding market frames while retaining a live connection."""
+        self._paused = True
+
+    def resume(self) -> None:
+        self._paused = False
+
+    def reset_simulation(self) -> None:
+        """Clear transient demo overlays without touching the live market feed."""
+        self._state.pending_shock_pct = 0.0
+        self._state.stale_frames = 0
+        self._state.vol_multiplier = 1.0
+        self._live_overlay = 1.0
+
     # -- anomaly injection (drives Sentinel demos) ----------------------------
     def inject_anomaly(self, kind: Literal["shock", "latency", "vol"] = "shock") -> None:
         """Queue a synthetic market anomaly for the next generation cycle."""
@@ -163,7 +178,7 @@ class BinanceWebSocketStreamer:
 
         while self._running:
             # Idle while the simulated clock is paused.
-            if not self._time.running:
+            if self._paused or not self._time.running:
                 await asyncio.sleep(0.05)
                 continue
 
@@ -235,6 +250,8 @@ class BinanceWebSocketStreamer:
                     async for raw in ws:
                         if not self._running:
                             break
+                        if self._paused:
+                            continue
                         await self._on_live_frame(raw)
             except asyncio.CancelledError:
                 raise

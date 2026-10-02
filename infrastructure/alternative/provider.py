@@ -54,6 +54,7 @@ class AlternativeDataProvider:
         self._oi_level: float = 1.0e9  # seed notional Open Interest
         self._last_oi: OpenInterestSample | None = None
         self._running = False
+        self._paused = False
         self._task: asyncio.Task[None] | None = None
 
         if force_mock is None:
@@ -83,6 +84,12 @@ class AlternativeDataProvider:
             except asyncio.CancelledError:
                 pass
 
+    def pause(self) -> None:
+        self._paused = True
+
+    def resume(self) -> None:
+        self._paused = False
+
     # -- handlers -------------------------------------------------------------
     async def _on_ticker(self, event: Event) -> None:
         self._last_price = float(event.payload.get("price", self._last_price))
@@ -106,6 +113,9 @@ class AlternativeDataProvider:
     # -- main loop ------------------------------------------------------------
     async def run(self) -> None:
         while self._running:
+            if self._paused:
+                await asyncio.sleep(self._interval)
+                continue
             if self._mock:
                 self._tick_mock()
             await self._publish()
