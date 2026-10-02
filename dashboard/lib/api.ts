@@ -75,8 +75,14 @@ async function post<T = unknown>(
 
 export type AnomalyKind = "shock" | "latency" | "vol";
 
+export interface AnomalyInjectionResult {
+  injected: AnomalyKind | null;
+  mode: QuantModeName;
+  error?: string;
+}
+
 export const sentinelInject = (kind: AnomalyKind) =>
-  post("/sentinel/inject", { kind });
+  post<AnomalyInjectionResult>("/sentinel/inject", { kind });
 
 export const sentinelReset = () => post("/sentinel/reset");
 
