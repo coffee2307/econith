@@ -13,7 +13,7 @@ import {
   TITAN_REGIONAL_CLUSTERS,
 } from "@/constants/titanWorld";
 
-type ImpactMetric = "risk" | "growth" | "inflation" | "credit";
+type ImpactMetric = "risk" | "growth" | "inflation" | "credit" | "exports";
 
 interface NetworkNode {
   code: string;
@@ -91,6 +91,7 @@ const COPY = {
       growth: "Tăng trưởng",
       inflation: "Lạm phát",
       credit: "Lãi suất & tín dụng",
+      exports: "Xuất khẩu",
     },
     drag: "Kéo để di chuyển · cuộn để thu phóng · bấm quốc gia để xem",
     nodes: "150 quốc gia",
@@ -125,6 +126,7 @@ const COPY = {
       growth: "Growth",
       inflation: "Inflation",
       credit: "Rates & credit",
+      exports: "Exports",
     },
     drag: "Drag to pan · scroll to zoom · click a country to inspect",
     nodes: "150 countries",
@@ -174,6 +176,8 @@ function readMetric(country: CountryMacro | undefined, key: string) {
   if (key === "inflation") return country.inflation ?? country.vectors?.monetary?.inflation_cpi ?? 0;
   if (key === "rate") return country.interest_rate ?? country.vectors?.monetary?.interest_rate ?? 0;
   if (key === "unemployment") return country.unemployment ?? country.vectors?.labor?.unemployment ?? 0;
+  if (key === "exports") return country.vectors?.fiscal?.export_index ?? 0;
+  if (key === "tradeBalance") return country.vectors?.fiscal?.trade_balance_pct ?? 0;
   return 0;
 }
 
@@ -188,10 +192,25 @@ function metricDelta(
   const rate = readMetric(current, "rate") - readMetric(baseline, "rate");
   const unemployment =
     readMetric(current, "unemployment") - readMetric(baseline, "unemployment");
+  // Export index and trade balance are the channels through which the World
+  // engine models tariff pressure and supply-chain diversion. Scale them to a
+  // fraction-like range so they can be read beside the macro deltas.
+  const exports =
+    (readMetric(current, "exports") - readMetric(baseline, "exports")) / 100;
+  const tradeBalance =
+    readMetric(current, "tradeBalance") - readMetric(baseline, "tradeBalance");
   if (metric === "growth") return growth;
   if (metric === "inflation") return -inflation;
   if (metric === "credit") return -rate;
-  return growth * 0.45 - inflation * 0.25 - rate * 0.18 - unemployment * 0.12;
+  if (metric === "exports") return exports;
+  return (
+    growth * 0.35 -
+    inflation * 0.22 -
+    rate * 0.15 -
+    unemployment * 0.1 +
+    exports * 0.13 +
+    tradeBalance * 0.05
+  );
 }
 
 function fmtPct(value: number) {
@@ -704,21 +723,21 @@ export function WorldNetworkView({
         }}
       />
 
-      <div className="pointer-events-none absolute left-3 top-3 flex flex-wrap gap-2">
+      <div className="pointer-events-none absolute left-3 top-3 flex w-[18rem] max-w-[calc(100%-1.5rem)] flex-wrap gap-2">
         <span className="rounded-full border border-line bg-surface/92 px-3 py-1 font-mono text-[10px] font-semibold text-ink shadow-sm backdrop-blur">
           {copy.nodes}
         </span>
         <span className="rounded-full border border-line bg-surface/92 px-3 py-1 font-mono text-[10px] font-semibold text-ink shadow-sm backdrop-blur">
           {copy.links}
         </span>
-        <span className={`rounded-full border px-3 py-1 font-mono text-[10px] font-semibold shadow-sm backdrop-blur ${running ? "border-ok/35 bg-ok/10 text-ok" : "border-line bg-surface/92 text-muted"}`}>
+        <span className={`basis-full rounded-full border px-3 py-1 font-mono text-[10px] font-semibold shadow-sm backdrop-blur ${running ? "border-ok/35 bg-ok/10 text-ok" : "border-line bg-surface/92 text-muted"}`}>
           <span className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full ${running ? "animate-pulse bg-ok" : "bg-faint"}`} />
           {running ? copy.running : copy.paused} · {copy.day} {simDay.toLocaleString()} · {activeNodeCount} {copy.activeNodes}
         </span>
       </div>
 
       {scenario ? (
-        <div className="pointer-events-none absolute left-3 top-14 max-w-[min(23rem,calc(100%-1.5rem))] rounded-xl border border-sky-200 bg-white/94 px-3 py-2 shadow-md backdrop-blur dark:border-sky-800 dark:bg-slate-950/94">
+        <div className="pointer-events-none absolute left-3 top-[5.25rem] max-w-[min(23rem,calc(100%-1.5rem))] rounded-xl border border-sky-200 bg-white/94 px-3 py-2 shadow-md backdrop-blur dark:border-sky-800 dark:bg-slate-950/94">
           <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-sky-700 dark:text-sky-300">{copy.scenario}</p>
           <p className="mt-0.5 text-xs font-bold text-ink">{scenario.code} · {scenario.label}</p>
           <p className="mt-1 font-mono text-[11px] text-muted">{scenario.before} → <strong className="text-sky-600 dark:text-sky-300">{scenario.after}</strong></p>
