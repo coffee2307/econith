@@ -72,9 +72,12 @@ SIM_START = date(2026, 1, 1)
 # engine and any caller that thinks in plain economic terms.
 LOGICAL_FIELDS: dict[str, tuple[str | None, str]] = {
     "interest_rate": ("monetary", "interest_rate"),
+    "reserve_requirement": ("monetary", "reserve_requirement"),
     "inflation": ("monetary", "inflation_cpi"),
     "tax": ("fiscal", "corporate_tax"),
     "corporate_tax": ("fiscal", "corporate_tax"),
+    "individual_tax": ("fiscal", "individual_tax"),
+    "vat": ("fiscal", "vat"),
     "unemployment": ("labor", "unemployment"),
     "gdp_growth": (None, "gdp_growth"),
     "defense": ("geopolitical", "defense_spending_pct"),
@@ -1721,6 +1724,21 @@ class WorldKernel:
             ok = field in type(model).model_fields and c.set_field(group, field, _clamp_field(field, float(value)))
         if not ok:
             return {"ok": False, "error": f"unknown field {group}.{field}"}
+        if group == "":
+            current = float(getattr(c, field))
+        else:
+            raw_current = c.get_field(group, field)
+            current = float(raw_current) if raw_current is not None else float(value)
+        propagation: list[str] = []
+        logical_field = self._logical_field_for_manual_edit(group, field)
+        if previous is not None and logical_field is not None:
+            delta = current - previous
+            if abs(delta) > 1e-9:
+                # Manual dashboard changes must travel through the same World
+                # channels as LLM scenarios. This makes the visible network a
+                # view of state changes, not a separate UI-only animation.
+                propagation.extend(self._spillover_from_mutation(code, logical_field, delta))
+                propagation.extend(self._trade_spillover_from_policy(code, logical_field, delta))
         text = f"policy set {group + '.' if group else ''}{field} = {value:.4g}"
         await self._emit_event({"country": c.name, "text": text,
                                 "level": "warn", "source": "policy"})
@@ -1730,9 +1748,32 @@ class WorldKernel:
             group=group,
             field=field,
             previous=previous if previous is not None else float(value),
-            current=float(value),
+            current=current,
         )
-        return {"ok": True, "code": code, "group": group, "field": field, "value": value}
+        return {
+            "ok": True,
+            "code": code,
+            "group": group,
+            "field": field,
+            "value": value,
+            "propagated_changes": len(propagation),
+        }
+
+    @staticmethod
+    def _logical_field_for_manual_edit(group: str, field: str) -> str | None:
+        """Translate a dashboard address to a named World propagation channel."""
+        by_address = {
+            ("monetary", "interest_rate"): "interest_rate",
+            ("monetary", "reserve_requirement"): "reserve_requirement",
+            ("monetary", "inflation_cpi"): "inflation",
+            ("fiscal", "corporate_tax"): "corporate_tax",
+            ("fiscal", "individual_tax"): "individual_tax",
+            ("fiscal", "vat"): "vat",
+            ("labor", "unemployment"): "unemployment",
+            ("geopolitical", "defense_spending_pct"): "defense",
+            ("", "gdp_growth"): "gdp_growth",
+        }
+        return by_address.get((group, field))
 
     async def _emit_policy_reaction_trace(
         self,
@@ -1940,28 +1981,17 @@ class WorldKernel:
             channels = [("gdp_growth", 0.35), ("unemployment", -0.25)]
         elif field == "unemployment":
             channels = [("unemployment", 0.30), ("gdp_growth", -0.25)]
-        elif field in ("tax", "defense"):
+        elif field in ("tax", "corporate_tax", "individual_tax", "vat", "defense"):
             channels = [("gdp_growth", -0.30), ("inflation", 0.15)]
+        elif field == "reserve_requirement":
+            channels = [("interest_rate", 0.18), ("gdp_growth", -0.24)]
         else:
             channels = [("gdp_growth", 0.25)]
 
-        total_gdp = sum(c.gdp for c in self._world.countries.values()) or 1.0
         for code, peer in self._world.countries.items():
             if code == origin:
                 continue
-            alliance = float(self._world.alliance(origin, code))
-            tariff = 0.5 * (
-                float(self._world.tariff(origin, code))
-                + float(self._world.tariff(code, origin))
-            )
-            gravity = ((origin_c.gdp * peer.gdp) ** 0.5) / total_gdp
-            weight = max(
-                0.06,
-                min(
-                    0.50,
-                    0.10 + 0.30 * (1.0 - alliance) + 0.25 * tariff + 0.50 * gravity,
-                ),
-            )
+            weight = self._link_weight(origin, code, origin_c, peer)
             for peer_field, scale in channels:
                 if peer_field not in LOGICAL_FIELDS:
                     continue
@@ -1979,6 +2009,80 @@ class WorldKernel:
                     cur = float(raw)
                     peer.set_field(group, real, _clamp_field(real, cur + peer_delta))
                 notes.append(f"spillover {code}.{peer_field} {peer_delta:+.5f}")
+        return notes
+
+    def _link_weight(
+        self,
+        origin: str,
+        code: str,
+        origin_c: CountryState,
+        peer: CountryState,
+    ) -> float:
+        """A bounded transmission weight from alliance, trade friction and size."""
+        total_gdp = sum(c.gdp for c in self._world.countries.values()) or 1.0
+        alliance = float(self._world.alliance(origin, code))
+        tariff = 0.5 * (
+            float(self._world.tariff(origin, code))
+            + float(self._world.tariff(code, origin))
+        )
+        gravity = ((origin_c.gdp * peer.gdp) ** 0.5) / total_gdp
+        return max(
+            0.06,
+            min(
+                0.50,
+                0.10 + 0.30 * (1.0 - alliance) + 0.25 * tariff + 0.50 * gravity,
+            ),
+        )
+
+    def _trade_spillover_from_policy(
+        self, origin: str, field: str, delta: float
+    ) -> list[str]:
+        """Apply the model's competitiveness channel for manual policy edits.
+
+        This is deliberately a small, bounded World rule: tighter credit or a
+        higher corporate tax reduces the origin's export capacity; partner
+        economies receive a damped substitution effect. It is a simulation
+        assumption used for scenario exploration, not a claim that every real
+        economy reacts by exactly this amount.
+        """
+        origin_c = self._world.countries.get(origin)
+        export_scales = {
+            "interest_rate": -10.0,
+            "reserve_requirement": -7.0,
+            "corporate_tax": -6.0,
+            "individual_tax": -2.5,
+            "vat": -3.5,
+        }
+        scale = export_scales.get(field)
+        if origin_c is None or scale is None:
+            return []
+
+        origin_delta = scale * delta
+        if abs(origin_delta) < 1e-9:
+            return []
+        origin_c.fiscal.export_index = _clamp_field(
+            "export_index", origin_c.fiscal.export_index + origin_delta
+        )
+        origin_c.fiscal.trade_balance_pct = _clamp_field(
+            "trade_balance_pct",
+            origin_c.fiscal.trade_balance_pct + origin_delta * 0.0005,
+        )
+
+        notes = [f"trade {origin}.export_index {origin_delta:+.5f}"]
+        for code, peer in self._world.countries.items():
+            if code == origin:
+                continue
+            # Substitution is weaker than the source hit and is capped by the
+            # same relation weight used by the macro spillover path.
+            peer_delta = -origin_delta * self._link_weight(origin, code, origin_c, peer) * 0.35
+            peer.fiscal.export_index = _clamp_field(
+                "export_index", peer.fiscal.export_index + peer_delta
+            )
+            peer.fiscal.trade_balance_pct = _clamp_field(
+                "trade_balance_pct",
+                peer.fiscal.trade_balance_pct + peer_delta * 0.00025,
+            )
+            notes.append(f"trade {code}.export_index {peer_delta:+.5f}")
         return notes
 
     async def publish_micro_shock(self, vec: MicrostructuralVolatilityVector) -> None:

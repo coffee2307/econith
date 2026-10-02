@@ -29,6 +29,7 @@ import { WorldRightPanel } from "@/components/world/WorldRightPanel";
 import { WorldNetworkView } from "@/components/world/WorldNetworkView";
 import { pauseTime, resumeTime, setTimeSpeed } from "@/lib/api";
 import type { CountryMacro } from "@/hooks/useMetricsStream";
+import type { WorldImpactScenario } from "@/contexts/WorldSimContext";
 import {
   MACRO_TABS,
   MACRO_FEATURES,
@@ -87,14 +88,7 @@ const DOWNBAR_DEFAULT = 144;
 const DOWNBAR_MIN = 80;
 const DOWNBAR_MAX = 480;
 const LAST_SCENARIO_STORAGE = "econith-last-world-scenario";
-type ImpactScenario = {
-  code: string;
-  label: string;
-  before: string;
-  after: string;
-  kind?: "feature" | "tariff";
-  pairKey?: string;
-};
+const WORLD_FIRST_VISIT_STORAGE = "econith-world-first-visit";
 const SIDEBAR_LEVERS = [
   "monetary.interest_rate",
   "monetary.reserve_requirement",
@@ -174,9 +168,6 @@ export default function EconithWorld() {
   const [rightW, setRightW] = useState(SIDEBAR_DEFAULT);
   const [downH, setDownH] = useState(DOWNBAR_DEFAULT);
   const [centerView, setCenterView] = useState<"globe" | "network">("globe");
-  const [impactBaseline, setImpactBaseline] = useState<Record<string, CountryMacro> | null>(null);
-  const [impactOrigin, setImpactOrigin] = useState<string | null>(null);
-  const [impactScenario, setImpactScenario] = useState<ImpactScenario | null>(null);
   const tariffBaselineRef = useRef<{
     pairKey: string;
     countries: Record<string, CountryMacro>;
@@ -245,16 +236,25 @@ export default function EconithWorld() {
   const multiplier = time?.multiplier ?? 1;
   const simDay = time?.sim_day ?? 0;
 
-  // Open the presentation surface in a controlled state. This uses the public
-  // clock API and leaves every World rule and research result unchanged.
+  // Stop only the first World visit in a browser tab. A route change must not
+  // stop the backend clock that the visitor explicitly started.
   useEffect(() => {
     if (initialPauseRequestedRef.current) return;
     initialPauseRequestedRef.current = true;
-    void pauseTime();
+    try {
+      if (sessionStorage.getItem(WORLD_FIRST_VISIT_STORAGE)) return;
+      sessionStorage.setItem(WORLD_FIRST_VISIT_STORAGE, "1");
+      void pauseTime();
+    } catch {
+      void pauseTime();
+    }
   }, []);
 
   // 150-node backend world (50 hubs + 100 proxies) — every nation is editable.
   const countries = sim.countries;
+  const impactBaseline = sim.impact.baseline;
+  const impactOrigin = sim.impact.origin;
+  const impactScenario = sim.impact.scenario;
   const simCodes = Object.keys(countries);
   const activeCode = selected;
   const activeCountry = countries[activeCode];
@@ -351,23 +351,22 @@ export default function EconithWorld() {
     if (!hasDrafts) return;
     // Capture a comparable baseline before sending any mutation. The network
     // then visualises real backend deltas as snapshots arrive after Apply.
-    setImpactBaseline(structuredClone(countries));
+    const baseline = structuredClone(countries);
     tariffBaselineRef.current = null;
-    setImpactOrigin(activeCode);
     setCenterView("network");
     const firstDraft = Object.entries(overrides)[0];
     if (firstDraft) {
       const [key, nextValue] = firstDraft;
       const feature = MACRO_FEATURES.find((item) => item.key === key);
       if (feature) {
-        const scenario = {
+        const scenario: WorldImpactScenario = {
           code: activeCode,
           label: featureLabel(feature.key),
           before: fmtVal(uiValue(activeCountry, feature, {}), feature),
           after: fmtVal(nextValue, feature),
           kind: "feature" as const,
         };
-        setImpactScenario(scenario);
+        sim.setImpact({ baseline, origin: activeCode, scenario });
         try {
           sessionStorage.setItem(LAST_SCENARIO_STORAGE, JSON.stringify(scenario));
         } catch {
@@ -401,7 +400,7 @@ export default function EconithWorld() {
       const currentRate = sim.tariffs?.[src]?.[dst] ?? 0;
       const reciprocal = session.directions.has(reverseDirection) || reverseRate > 0.05;
       session.directions.add(direction);
-      const scenario: ImpactScenario = {
+      const scenario: WorldImpactScenario = {
         code: reciprocal ? `${src} ↔ ${dst}` : `${src} → ${dst}`,
         label:
           locale === "vi"
@@ -421,9 +420,7 @@ export default function EconithWorld() {
         pairKey,
       };
 
-      setImpactBaseline(session.countries);
-      setImpactOrigin(src);
-      setImpactScenario(scenario);
+      sim.setImpact({ baseline: session.countries, origin: src, scenario });
       setCenterView("network");
       try {
         sessionStorage.setItem(LAST_SCENARIO_STORAGE, JSON.stringify(scenario));
