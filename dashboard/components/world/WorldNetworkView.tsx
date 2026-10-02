@@ -52,10 +52,11 @@ type VisualRegionKey =
 
 interface VisualRegion {
   key: VisualRegionKey;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+  centerX: number;
+  centerY: number;
+  radiusX: number;
+  radiusY: number;
+  accent: string;
   label: { vi: string; en: string };
 }
 
@@ -63,12 +64,12 @@ const WORLD_W = 1800;
 const WORLD_H = 1080;
 const EDGE_COUNT = 6000;
 const VISUAL_REGIONS: readonly VisualRegion[] = [
-  { key: "northAmerica", x: 35, y: 75, width: 535, height: 430, label: { vi: "BẮC MỸ & CARIBE", en: "NORTH AMERICA & CARIBBEAN" } },
-  { key: "europe", x: 600, y: 75, width: 535, height: 430, label: { vi: "CHÂU ÂU", en: "EUROPE" } },
-  { key: "asia", x: 1165, y: 75, width: 600, height: 430, label: { vi: "CHÂU Á & Á-ÂU", en: "ASIA & EURASIA" } },
-  { key: "southAmerica", x: 35, y: 545, width: 535, height: 440, label: { vi: "NAM MỸ", en: "SOUTH AMERICA" } },
-  { key: "africaMiddleEast", x: 600, y: 545, width: 535, height: 440, label: { vi: "CHÂU PHI & TRUNG ĐÔNG", en: "AFRICA & MIDDLE EAST" } },
-  { key: "oceania", x: 1165, y: 545, width: 600, height: 440, label: { vi: "CHÂU ĐẠI DƯƠNG", en: "OCEANIA" } },
+  { key: "northAmerica", centerX: 285, centerY: 285, radiusX: 235, radiusY: 185, accent: "#38bdf8", label: { vi: "BẮC MỸ & CARIBE", en: "NORTH AMERICA & CARIBBEAN" } },
+  { key: "europe", centerX: 765, centerY: 250, radiusX: 245, radiusY: 180, accent: "#8b5cf6", label: { vi: "CHÂU ÂU", en: "EUROPE" } },
+  { key: "asia", centerX: 1370, centerY: 350, radiusX: 335, radiusY: 245, accent: "#f59e0b", label: { vi: "CHÂU Á & Á-ÂU", en: "ASIA & EURASIA" } },
+  { key: "southAmerica", centerX: 330, centerY: 790, radiusX: 215, radiusY: 205, accent: "#10b981", label: { vi: "NAM MỸ", en: "SOUTH AMERICA" } },
+  { key: "africaMiddleEast", centerX: 815, centerY: 775, radiusX: 265, radiusY: 210, accent: "#f97316", label: { vi: "CHÂU PHI & TRUNG ĐÔNG", en: "AFRICA & MIDDLE EAST" } },
+  { key: "oceania", centerX: 1450, centerY: 815, radiusX: 275, radiusY: 175, accent: "#ec4899", label: { vi: "CHÂU ĐẠI DƯƠNG", en: "OCEANIA" } },
 ] as const;
 
 const EUROPE_FALLBACK = new Set(["BIH", "ALB", "MKD", "MLT", "CYP"]);
@@ -233,26 +234,19 @@ function makeGraph(
   });
 
   const placements = new Map<string, { x: number; y: number; radius: number }>();
+  const anchors = new Map<string, { x: number; y: number }>();
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
   VISUAL_REGIONS.forEach((visualRegion) => {
     const members = nodeMeta
       .filter((node) => node.visualRegion === visualRegion.key)
       .sort((a, b) => b.gdp - a.gdp || a.code.localeCompare(b.code));
-    const innerWidth = visualRegion.width - 48;
-    const innerHeight = visualRegion.height - 78;
-    const columns = Math.max(2, Math.ceil(Math.sqrt((members.length * innerWidth) / innerHeight)));
-    const rows = Math.max(1, Math.ceil(members.length / columns));
-    const cellWidth = innerWidth / columns;
-    const cellHeight = innerHeight / rows;
     members.forEach((node, index) => {
-      const column = index % columns;
-      const row = Math.floor(index / columns);
-      const jitterX = (hash01(`${node.code}:x`) - 0.5) * Math.min(10, cellWidth * 0.12);
-      const jitterY = (hash01(`${node.code}:y`) - 0.5) * Math.min(8, cellHeight * 0.1);
-      placements.set(node.code, {
-        x: visualRegion.x + 24 + cellWidth * (column + 0.5) + jitterX,
-        y: visualRegion.y + 58 + cellHeight * (row + 0.5) + jitterY,
-        radius: Math.min(node.radius, cellWidth * 0.31, cellHeight * 0.31),
-      });
+      const spread = Math.sqrt((index + 0.35) / Math.max(1, members.length));
+      const angle = index * goldenAngle + hash01(`${node.code}:cluster`) * 0.7;
+      const x = visualRegion.centerX + Math.cos(angle) * visualRegion.radiusX * 0.72 * spread;
+      const y = visualRegion.centerY + Math.sin(angle) * visualRegion.radiusY * 0.72 * spread;
+      placements.set(node.code, { x, y, radius: node.radius });
+      anchors.set(node.code, { x, y });
     });
   });
 
@@ -260,6 +254,57 @@ function makeGraph(
     const placement = placements.get(node.code) ?? { x: WORLD_W / 2, y: WORLD_H / 2, radius: node.radius };
     return { ...node, ...placement };
   });
+
+  // Preserve the free, organic network shape while keeping each continental
+  // cloud readable. A weak pull keeps nodes near their regional anchor and a
+  // deterministic collision pass prevents circles from covering each other.
+  for (let iteration = 0; iteration < 140; iteration += 1) {
+    VISUAL_REGIONS.forEach((visualRegion) => {
+      const members = nodes.filter((node) => node.visualRegion === visualRegion.key);
+      members.forEach((node) => {
+        const anchor = anchors.get(node.code);
+        if (anchor) {
+          node.x += (anchor.x - node.x) * 0.018;
+          node.y += (anchor.y - node.y) * 0.018;
+        }
+      });
+      for (let index = 0; index < members.length; index += 1) {
+        const node = members[index];
+        for (let otherIndex = index + 1; otherIndex < members.length; otherIndex += 1) {
+          const other = members[otherIndex];
+          let dx = other.x - node.x;
+          let dy = other.y - node.y;
+          let distance = Math.hypot(dx, dy);
+          const minimum = node.radius + other.radius + 7;
+          if (distance >= minimum) continue;
+          if (distance < 0.001) {
+            const angle = hash01(`${node.code}:${other.code}`) * Math.PI * 2;
+            dx = Math.cos(angle);
+            dy = Math.sin(angle);
+            distance = 1;
+          }
+          const push = (minimum - distance) * 0.52;
+          const ux = dx / distance;
+          const uy = dy / distance;
+          node.x -= ux * push;
+          node.y -= uy * push;
+          other.x += ux * push;
+          other.y += uy * push;
+        }
+      }
+      members.forEach((node) => {
+        const safeX = Math.max(40, visualRegion.radiusX - node.radius - 18);
+        const safeY = Math.max(40, visualRegion.radiusY - node.radius - 18);
+        const dx = node.x - visualRegion.centerX;
+        const dy = node.y - visualRegion.centerY;
+        const ellipseDistance = Math.sqrt((dx * dx) / (safeX * safeX) + (dy * dy) / (safeY * safeY));
+        if (ellipseDistance > 1) {
+          node.x = visualRegion.centerX + dx / ellipseDistance;
+          node.y = visualRegion.centerY + dy / ellipseDistance;
+        }
+      });
+    });
+  }
 
   const maxGdp = Math.max(...gdps);
   const candidates: NetworkEdge[] = [];
@@ -424,18 +469,47 @@ export function WorldNetworkView({
     const dark = document.documentElement.classList.contains("dark");
 
     VISUAL_REGIONS.forEach((region) => {
+      staticCtx.save();
       staticCtx.beginPath();
-      staticCtx.roundRect(region.x, region.y, region.width, region.height, 26);
-      staticCtx.fillStyle = dark ? "rgba(15,23,42,0.90)" : "rgba(255,255,255,0.94)";
+      staticCtx.ellipse(
+        region.centerX,
+        region.centerY,
+        region.radiusX,
+        region.radiusY,
+        -0.04,
+        0,
+        Math.PI * 2,
+      );
+      staticCtx.globalAlpha = dark ? 0.11 : 0.065;
+      staticCtx.fillStyle = region.accent;
       staticCtx.fill();
-      staticCtx.strokeStyle = dark ? "rgba(71,85,105,0.65)" : "rgba(148,163,184,0.45)";
-      staticCtx.lineWidth = 1.4;
+      staticCtx.globalAlpha = dark ? 0.42 : 0.28;
+      staticCtx.strokeStyle = region.accent;
+      staticCtx.lineWidth = 1.6;
+      staticCtx.setLineDash([7, 10]);
       staticCtx.stroke();
-      staticCtx.fillStyle = dark ? "rgba(148,163,184,0.90)" : "rgba(71,85,105,0.92)";
-      staticCtx.font = "700 17px ui-sans-serif, system-ui, sans-serif";
+      staticCtx.setLineDash([]);
+      staticCtx.globalAlpha = 1;
+      staticCtx.beginPath();
+      staticCtx.arc(
+        region.centerX - region.radiusX + 18,
+        region.centerY - region.radiusY + 20,
+        5,
+        0,
+        Math.PI * 2,
+      );
+      staticCtx.fillStyle = region.accent;
+      staticCtx.fill();
+      staticCtx.fillStyle = dark ? "rgba(203,213,225,0.92)" : "rgba(51,65,85,0.92)";
+      staticCtx.font = "700 16px ui-sans-serif, system-ui, sans-serif";
       staticCtx.textAlign = "left";
       staticCtx.textBaseline = "middle";
-      staticCtx.fillText(region.label[locale], region.x + 22, region.y + 27);
+      staticCtx.fillText(
+        region.label[locale],
+        region.centerX - region.radiusX + 31,
+        region.centerY - region.radiusY + 20,
+      );
+      staticCtx.restore();
     });
 
     // All 6,000 relationships remain visible, but they are rasterised once as
