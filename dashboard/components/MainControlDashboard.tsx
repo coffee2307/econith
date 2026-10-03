@@ -217,7 +217,12 @@ export function MainControlDashboard() {
 
   const activeMode = state?.operating_mode ?? "REALITY";
   const worldOn = state?.world_simulation_enabled ?? false;
-  const bridgeOn = state?.world_to_quant_bridge ?? true;
+  // `world_to_quant_bridge` is the operator's remembered preference.  It may
+  // remain true after returning to Reality, but it does not mean that World is
+  // actually feeding Quant.  Show the effective gate so the control surface
+  // agrees with the backend and cannot mislead the operator.
+  const bridgeOn = state?.coupling_effective ?? false;
+  const bridgeAvailable = activeMode === "SIMULATION" && worldOn;
   const brainLabel = (raw?: string) => {
     if (!raw) return "—";
     if (raw === "trained" || raw.startsWith("trained")) return c.trained;
@@ -336,8 +341,8 @@ export function MainControlDashboard() {
           label={c.bridge}
           desc={bridgeOn ? c.bridgeOn : c.bridgeOff}
           on={bridgeOn}
-          busy={busy === "world-bridge"}
-          onToggle={() => run("world-bridge", () => setWorldBridge(!bridgeOn))}
+          busy={busy === "world-bridge" || !bridgeAvailable}
+          onToggle={() => run("world-bridge", () => setWorldBridge(!state?.world_to_quant_bridge))}
         />
       </div>
 
