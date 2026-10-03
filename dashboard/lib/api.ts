@@ -107,6 +107,9 @@ export const pauseTime = () => post("/time/pause");
 
 export const resumeTime = () => post("/time/resume");
 
+export const resetWorldSimulation = () =>
+  post<{ status: string; running: boolean; sim_day: number; countries: number }>("/world/reset");
+
 export const pauseRuntime = () => post<{ running: boolean }>("/runtime/pause");
 
 export const resumeRuntime = () => post<{ running: boolean }>("/runtime/resume");

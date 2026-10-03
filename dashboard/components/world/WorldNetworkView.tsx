@@ -31,6 +31,11 @@ interface NetworkEdge {
   weight: number;
 }
 
+interface ActiveEdge extends NetworkEdge {
+  impact: number;
+  strength: number;
+}
+
 interface Transform {
   x: number;
   y: number;
@@ -396,6 +401,7 @@ export function WorldNetworkView({
   const [graph, setGraph] = useState(() => makeGraph(countries, alliances, tariffs));
   const previousMetricsRef = useRef<Map<string, [number, number, number, number]>>(new Map());
   const activityRef = useRef<Map<string, NodeActivity>>(new Map());
+  const drawRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (graphLockedRef.current || Object.keys(countries).length === 0) return;
@@ -418,6 +424,47 @@ export function WorldNetworkView({
   // Export changes spread more gradually than a direct rate change. Keep those
   // smaller, real deltas visible instead of classifying every recipient as grey.
   const impactThreshold = metric === "exports" ? 0.004 : 0.035;
+  // The complete relationship map stays visible as a quiet background. This
+  // bounded list is the only part repainted as a coloured, moving impact.
+  const activeEdges = useMemo<ActiveEdge[]>(() => {
+    if (!baseline) return [];
+    return graph.edges
+      .map((edge) => {
+        const sourceImpact = impacts[edge.source] ?? 0;
+        const targetImpact = impacts[edge.target] ?? 0;
+        const strength = Math.max(Math.abs(sourceImpact), Math.abs(targetImpact));
+        return { ...edge, impact: (sourceImpact + targetImpact) / 2, strength };
+      })
+      .filter((edge) => edge.strength >= 0.075)
+      .sort((a, b) => b.strength * b.weight - a.strength * a.weight)
+      .slice(0, 180);
+  }, [baseline, graph.edges, impacts]);
+  const ambientEdges = useMemo(
+    () => graph.edges.filter((_, index) => index % 79 === 0).slice(0, 76),
+    [graph.edges],
+  );
+  const visualStateRef = useRef({
+    activeEdges,
+    ambientEdges,
+    baseline: Boolean(baseline),
+    impacts,
+    impactThreshold,
+    origin,
+    selected,
+    running,
+  });
+  useEffect(() => {
+    visualStateRef.current = {
+      activeEdges,
+      ambientEdges,
+      baseline: Boolean(baseline),
+      impacts,
+      impactThreshold,
+      origin,
+      selected,
+      running,
+    };
+  }, [activeEdges, ambientEdges, baseline, impactThreshold, impacts, origin, running, selected]);
 
   useEffect(() => {
     const previous = previousMetricsRef.current;
@@ -534,21 +581,18 @@ export function WorldNetworkView({
       staticCtx.restore();
     });
 
-    // All 6,000 relationships remain visible, but they are rasterised once as
-    // a quiet context layer. Only links carrying a recent backend state change
-    // are animated in the live layer below.
+    // All 6,000 relationships are rasterised once as a neutral context layer.
+    // Impact colour belongs to the small dynamic layer below; otherwise every
+    // metrics snapshot would redraw all 6,000 lines and freeze the canvas.
     graph.edges.forEach((edge) => {
       const a = graph.nodes[edge.source];
       const b = graph.nodes[edge.target];
-      const impact = (impacts[edge.source] + impacts[edge.target]) / 2;
       staticCtx.beginPath();
       staticCtx.moveTo(a.x, a.y);
       staticCtx.lineTo(b.x, b.y);
-      staticCtx.strokeStyle = baseline
-        ? rgbaForImpact(impact, 0.018 + edge.weight * 0.025, impactThreshold)
-        : dark
-          ? `rgba(148,163,184,${0.012 + edge.weight * 0.022})`
-          : `rgba(71,85,105,${0.009 + edge.weight * 0.018})`;
+      staticCtx.strokeStyle = dark
+        ? `rgba(148,163,184,${0.012 + edge.weight * 0.022})`
+        : `rgba(71,85,105,${0.009 + edge.weight * 0.018})`;
       staticCtx.lineWidth = 0.48 + edge.weight * 0.24;
       staticCtx.stroke();
     });
@@ -568,57 +612,51 @@ export function WorldNetworkView({
       ctx.scale(transform.scale, transform.scale);
       ctx.drawImage(staticLayer, 0, 0);
 
-      let flowCount = 0;
-      graph.edges.forEach((edge, edgeIndex) => {
+      const live = visualStateRef.current;
+      // Draw only the strongest links as live overlays. Their dash offset
+      // advances continuously, which reads as a steady current rather than
+      // the old flash-and-reset particle effect.
+      const streamEdges = live.baseline ? live.activeEdges : live.ambientEdges;
+      streamEdges.forEach((edge, edgeIndex) => {
         const a = graph.nodes[edge.source];
         const b = graph.nodes[edge.target];
-        const impact = (impacts[edge.source] + impacts[edge.target]) / 2;
-        const compared = baseline
-          ? Math.max(Math.abs(impacts[edge.source]), Math.abs(impacts[edge.target]))
-          : 0;
-        // Keep policy-impact links at a fixed intensity. The previous activity
-        // fade was reset by every backend tick, which made the network flash.
-        if (compared >= 0.08 && edgeIndex % 11 === 0) {
+        const isActive = "strength" in edge;
+        const impact = isActive ? edge.impact : 0;
+        const strength = isActive ? edge.strength : 0;
+        if (isActive) {
           ctx.beginPath();
           ctx.moveTo(a.x, a.y);
           ctx.lineTo(b.x, b.y);
-          ctx.strokeStyle = rgbaForImpact(impact, 0.19 + compared * 0.18, impactThreshold);
-          ctx.lineWidth = 0.72 + compared * 0.9;
+          ctx.strokeStyle = rgbaForImpact(impact, 0.18 + strength * 0.22, live.impactThreshold);
+          ctx.lineWidth = 0.72 + strength * 0.95;
           ctx.stroke();
         }
-
-        // A constant moving dash represents the continuously advancing World.
-        // Only the dash offset changes, making the flow smooth rather than
-        // repeatedly brightening and fading like individual particles.
-        if (running && flowCount < 300 && edgeIndex % 19 === 0) {
-          flowCount += 1;
-          const direction = edge.source === nodeByCode.get(origin ?? "")?.index ? 1 : -1;
-          const phase = now * 0.010 * (0.9 + edge.weight * 0.35) * direction + edgeIndex * 1.7;
-          const streamColor = baseline && compared >= 0.08
-            ? rgbaForImpact(impact, 0.48, impactThreshold)
-            : "rgba(14,165,233,0.30)";
-          ctx.save();
-          ctx.beginPath();
-          ctx.moveTo(a.x, a.y);
-          ctx.lineTo(b.x, b.y);
-          ctx.setLineDash([7 + edge.weight * 4, 18 - edge.weight * 3]);
-          ctx.lineDashOffset = -phase;
-          ctx.strokeStyle = streamColor;
-          ctx.lineWidth = baseline && compared >= 0.08 ? 1.45 : 0.8;
-          ctx.lineCap = "round";
-          ctx.stroke();
-          ctx.restore();
-        }
+        if (!live.running) return;
+        const direction = edge.source === nodeByCode.get(live.origin ?? "")?.index ? 1 : -1;
+        const phase = now * 0.009 * (0.9 + edge.weight * 0.35) * direction + edgeIndex * 1.7;
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.setLineDash([8 + edge.weight * 4, 20 - edge.weight * 3]);
+        ctx.lineDashOffset = -phase;
+        ctx.strokeStyle = isActive
+          ? rgbaForImpact(impact, 0.46, live.impactThreshold)
+          : "rgba(14,165,233,0.26)";
+        ctx.lineWidth = isActive ? 1.35 : 0.72;
+        ctx.lineCap = "round";
+        ctx.stroke();
+        ctx.restore();
       });
 
       graph.nodes.forEach((node, index) => {
-        const impact = impacts[index];
-        const isSelected = node.code === selected;
-        const isOrigin = node.code === origin;
+        const impact = live.impacts[index];
+        const isSelected = node.code === live.selected;
+        const isOrigin = node.code === live.origin;
         ctx.beginPath();
         ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
-        ctx.fillStyle = baseline
-          ? rgbaForImpact(impact, 0.94, impactThreshold)
+        ctx.fillStyle = live.baseline
+          ? rgbaForImpact(impact, 0.94, live.impactThreshold)
           : "rgba(71,85,105,0.94)";
         if (isOrigin) ctx.fillStyle = "rgba(14,165,233,0.98)";
         ctx.fill();
@@ -632,11 +670,21 @@ export function WorldNetworkView({
         ctx.fillText(node.code, node.x, node.y + 0.5);
       });
       ctx.restore();
-      if (running) animationFrame = window.requestAnimationFrame(draw);
+      if (visualStateRef.current.running) animationFrame = window.requestAnimationFrame(draw);
     };
+    drawRef.current = () => draw(performance.now());
     draw(performance.now());
-    return () => window.cancelAnimationFrame(animationFrame);
-  }, [baseline, graph, impactThreshold, impacts, locale, nodeByCode, origin, running, selected, size, transform]);
+    return () => {
+      drawRef.current = null;
+      window.cancelAnimationFrame(animationFrame);
+    };
+  }, [graph, locale, nodeByCode, running, size, transform]);
+
+  // A paused graph still needs one repaint when the user switches metric or
+  // selects a nation. The running canvas reads the latest state via refs.
+  useEffect(() => {
+    if (!running) drawRef.current?.();
+  }, [activeEdges, impacts, origin, running, selected]);
 
   const findNode = useCallback(
     (clientX: number, clientY: number) => {

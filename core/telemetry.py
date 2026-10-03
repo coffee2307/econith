@@ -236,6 +236,30 @@ class MetricsHub:
             "market": event.payload.get("market"),
         }
 
+    def reset_world(self, payload: dict[str, Any]) -> None:
+        """Replace live World telemetry with a clean baseline immediately."""
+        self._world = {
+            "sim_day": 0,
+            "scale": payload.get("scale"),
+            "global": payload.get("global"),
+            "countries": payload.get("countries"),
+            "tariffs": payload.get("tariffs"),
+            "alliances": payload.get("alliances"),
+            "agent_population": payload.get("agent_population"),
+            "hierarchy_telemetry": None,
+            "governor_llm": None,
+            "dialogue": None,
+            "micro_impact": None,
+            "market": payload.get("market"),
+        }
+        self._world_events.clear()
+        self._world_agents.clear()
+        self._dialogue_turns.clear()
+        self._agent_last_ts.clear()
+        self._headline_last_ts.clear()
+        self._headline_last = ""
+        self._headline_last_stem = ""
+
     async def _on_sentinel_status(self, event: Event) -> None:
         self._sentinel = dict(event.payload)
 

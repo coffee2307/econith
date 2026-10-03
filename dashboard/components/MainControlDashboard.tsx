@@ -23,7 +23,6 @@ import {
   faRobot,
   faMicrochip,
   faLink,
-  faBolt,
   faPause,
   faPlay,
 } from "@fortawesome/free-solid-svg-icons";
@@ -250,11 +249,12 @@ export function MainControlDashboard() {
       <header className="mb-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-ink">
-              <FontAwesomeIcon icon={faBolt} className="h-3.5 w-3.5 text-accent" />
-              {c.title}
+            <h2 className="bg-gradient-to-r from-[#003b7a] via-[#0878d1] to-[#1bc8ef] bg-clip-text text-3xl font-black tracking-[0.08em] text-transparent sm:text-4xl">
+              ECONITH
             </h2>
-            <p className="mt-0.5 text-[11px] text-muted">{c.subtitle}</p>
+            <p className="mt-0.5 text-[10px] font-semibold tracking-[0.16em] text-accent sm:text-[11px]">
+              {locale === "vi" ? "MÔ PHỎNG KINH TẾ · PHÂN TÍCH THỊ TRƯỜNG" : "ECONOMIC SIMULATION · MARKET ANALYTICS"}
+            </p>
           </div>
           <div className="flex items-center gap-2">
             <span className={`hidden text-[11px] sm:inline ${runtimeRunning ? "text-ok" : "text-warn"}`}>

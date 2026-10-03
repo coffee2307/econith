@@ -314,6 +314,11 @@ class TimeEngine:
     def pause(self) -> None:
         self._paused = True
 
+    def reset(self, *, paused: bool = True) -> None:
+        """Return the simulation clock to day zero without restarting its task."""
+        self._sim_day = 0
+        self._paused = paused
+
     def resume(self) -> None:
         self._paused = False
 

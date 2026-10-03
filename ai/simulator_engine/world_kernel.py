@@ -671,6 +671,26 @@ class WorldKernel:
             len(n), feats, len(self._models), self._broker.micro.n_clusters,
         )
 
+    def reset(self) -> None:
+        """Reset all World countries, agents and pending events to day zero.
+
+        The instance deliberately stays registered on the EventBus, so a live
+        dashboard keeps receiving updates immediately after an operator reset.
+        """
+        task = self._governor_llm_task
+        if task is not None and not task.done():
+            task.cancel()
+        self.__init__(
+            self._bus,
+            models=self._models,
+            event_probability=self._event_p,
+            max_events_per_tick=self._max_events,
+            governor_llm_pool=self._governor_llm_pool,
+            governor_llm_base_url=self._governor_llm_base_url,
+            governor_llm_model=self._governor_llm_model,
+            governor_llm_cadence_ticks=self._governor_llm_cadence,
+        )
+
     async def _on_world_directive(self, event: Event) -> None:
         """Core AI scenario pressure — scales outbound micro shock modestly."""
         p = event.payload

@@ -86,6 +86,12 @@ class WorldBridge:
             },
         }
 
+    def reset(self) -> dict[str, Any]:
+        """Restore both World read-models to their baseline state."""
+        self._kernel.reset()
+        self._graph.reset()
+        return self._kernel.state_dict()
+
     # -- read models ----------------------------------------------------------
     def sovereign_snapshot(self) -> dict[str, Any]:
         """The advanced multi-agent graph read-model."""

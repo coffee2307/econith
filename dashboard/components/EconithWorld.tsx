@@ -20,6 +20,7 @@ import {
   faChartLine,
   faEarthAsia,
   faDiagramProject,
+  faArrowRotateLeft,
 } from "@fortawesome/free-solid-svg-icons";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useLocale } from "@/contexts/LocaleContext";
@@ -27,7 +28,7 @@ import { useMetrics } from "@/components/MetricsProvider";
 import { useWorldSim } from "@/contexts/WorldSimContext";
 import { WorldRightPanel } from "@/components/world/WorldRightPanel";
 import { WorldNetworkView } from "@/components/world/WorldNetworkView";
-import { pauseTime, resumeTime, setTimeSpeed } from "@/lib/api";
+import { pauseTime, resetWorldSimulation, resumeTime, setTimeSpeed } from "@/lib/api";
 import type { CountryMacro } from "@/hooks/useMetricsStream";
 import type { WorldImpactScenario } from "@/contexts/WorldSimContext";
 import {
@@ -168,6 +169,7 @@ export default function EconithWorld() {
   const [rightW, setRightW] = useState(SIDEBAR_DEFAULT);
   const [downH, setDownH] = useState(DOWNBAR_DEFAULT);
   const [centerView, setCenterView] = useState<"globe" | "network">("globe");
+  const [resettingWorld, setResettingWorld] = useState(false);
   const tariffBaselineRef = useRef<{
     pairKey: string;
     countries: Record<string, CountryMacro>;
@@ -436,6 +438,29 @@ export default function EconithWorld() {
     setOverrides({});
   }, []);
 
+  const resetWorld = useCallback(async () => {
+    if (resettingWorld) return;
+    setResettingWorld(true);
+    try {
+      const result = await resetWorldSimulation();
+      if (!result) return;
+      setOverrides({});
+      tariffBaselineRef.current = null;
+      sim.resetAllOverrides();
+      sim.setImpact({ baseline: null, origin: null, scenario: null });
+      setSelected("USA");
+      setCenterView("globe");
+      setPopup(null);
+      try {
+        sessionStorage.removeItem(LAST_SCENARIO_STORAGE);
+      } catch {
+        /* storage may be unavailable */
+      }
+    } finally {
+      setResettingWorld(false);
+    }
+  }, [resettingWorld, sim]);
+
   const selectCountry = useCallback(
     (code: string) => {
       if (!isSimNation(code)) return;
@@ -514,6 +539,16 @@ export default function EconithWorld() {
               className="flex h-6 w-6 items-center justify-center rounded-lg bg-surface text-ink hover:bg-elevated"
             >
               <FontAwesomeIcon icon={running ? faPause : faPlay} className="h-3 w-3" />
+            </button>
+            <button
+              type="button"
+              onClick={() => void resetWorld()}
+              disabled={resettingWorld}
+              title={locale === "vi" ? "Đặt lại World về ngày 0" : "Reset World to day 0"}
+              aria-label={locale === "vi" ? "Đặt lại World về ngày 0" : "Reset World to day 0"}
+              className="flex h-6 w-6 items-center justify-center rounded-lg bg-surface text-muted hover:bg-elevated hover:text-world disabled:cursor-wait disabled:opacity-50"
+            >
+              <FontAwesomeIcon icon={faArrowRotateLeft} className={resettingWorld ? "h-3 w-3 animate-spin" : "h-3 w-3"} />
             </button>
             {SPEEDS.map((s) => (
               <button

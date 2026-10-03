@@ -44,6 +44,7 @@ export interface WorldSim {
   editFeature: (code: string, feature: MacroFeature, uiValue: number) => void;
   imposeTariff: (src: string, dst: string, rate: number) => void;
   resetOverrides: (code: string) => void;
+  resetAllOverrides: () => void;
   isOverridden: (code: string, featureKey: string) => boolean;
   tierOf: (code: string) => "hub" | "proxy" | null;
   ensure: (code: string) => void;
@@ -264,6 +265,10 @@ export function WorldSimProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const resetAllOverrides = useCallback(() => {
+    setDraftOverrides({});
+  }, []);
+
   const isOverridden = useCallback(
     (code: string, featureKey: string) =>
       Boolean(draftOverrides[code] && featureKey in draftOverrides[code]),
@@ -290,6 +295,7 @@ export function WorldSimProvider({ children }: { children: React.ReactNode }) {
       editFeature,
       imposeTariff,
       resetOverrides,
+      resetAllOverrides,
       isOverridden,
       tierOf,
       ensure,
@@ -305,6 +311,7 @@ export function WorldSimProvider({ children }: { children: React.ReactNode }) {
       editFeature,
       imposeTariff,
       resetOverrides,
+      resetAllOverrides,
       isOverridden,
       tierOf,
       ensure,

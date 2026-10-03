@@ -561,6 +561,16 @@ class SovereignWorldGraph:
         pipeline.register(TickPhase.EMIT_SIGNALS, self._phase_emit, priority=50)
         logger.info("SovereignWorldGraph wired into 5-phase tick pipeline")
 
+    def reset(self) -> None:
+        """Restore the graph to its original baseline without losing handlers."""
+        fresh = default_world(self._bus)
+        self.nodes = fresh.nodes
+        self.trade_matrix = fresh.trade_matrix
+        self.chronology = fresh.chronology
+        self._pending_mutations = []
+        self._tick_proposals = []
+        self._tick_facts = []
+
     async def _phase_snapshot(self, ctx: TickContext) -> None:
         self._tick_proposals = []
         self._tick_facts = []

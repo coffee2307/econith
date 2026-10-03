@@ -513,6 +513,28 @@ async def resume_time() -> dict:
     return {"running": _engine().time.running}
 
 
+@app.post(f"{settings.api_prefix}/world/reset")
+async def reset_world() -> dict:
+    """Reset the economic simulation and leave it paused at day zero."""
+    engine = _engine()
+    engine.time.pause()
+    state = _world_bridge().reset()
+    engine.time.reset(paused=True)
+    _hub().reset_world(state)
+    await engine.bus.publish(
+        "system.log",
+        level="info",
+        source="world",
+        message="World đã được đặt lại về ngày 0 và trạng thái nền.",
+    )
+    return {
+        "status": "reset",
+        "running": False,
+        "sim_day": 0,
+        "countries": len(state.get("countries") or {}),
+    }
+
+
 def _set_runtime_paused(paused: bool) -> None:
     """Apply a shared World + Quant pause state for the operator controls.
 
