@@ -36,6 +36,10 @@ interface ActiveEdge extends NetworkEdge {
   strength: number;
 }
 
+function isActiveEdge(edge: NetworkEdge | ActiveEdge): edge is ActiveEdge {
+  return "strength" in edge;
+}
+
 interface Transform {
   x: number;
   y: number;
@@ -620,7 +624,7 @@ export function WorldNetworkView({
       streamEdges.forEach((edge, edgeIndex) => {
         const a = graph.nodes[edge.source];
         const b = graph.nodes[edge.target];
-        const isActive = "strength" in edge;
+        const isActive = isActiveEdge(edge);
         const impact = isActive ? edge.impact : 0;
         const strength = isActive ? edge.strength : 0;
         if (isActive) {
