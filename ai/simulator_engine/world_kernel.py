@@ -1887,14 +1887,27 @@ class WorldKernel:
         self._world.set_tariff(src, dst, value)
         delta = self._world.tariff(src, dst) - prev
 
-        # Immediate domino: target's exports + growth dip; importer inflation up.
+        # Immediate direct effect.  The old coefficients put a 30% tariff into
+        # a -12 percentage-point GDP-growth shock, which saturated the target
+        # at red while the rest of the network drifted independently.  Keep the
+        # trade hit visible, but bounded enough for the response loop to work.
         tgt = self._world.countries[dst]
         imp = self._world.countries[src]
         tgt.fiscal.export_index = _clamp_field(
             "export_index", tgt.fiscal.export_index - 40.0 * delta)
-        tgt.gdp_growth = _clamp_field("gdp_growth", tgt.gdp_growth - 0.4 * delta)
+        tgt.gdp_growth = _clamp_field("gdp_growth", tgt.gdp_growth - 0.10 * delta)
+        tgt.labor.unemployment = _clamp_field(
+            "unemployment", tgt.labor.unemployment + 0.05 * max(delta, 0.0))
         imp.monetary.inflation_cpi = _clamp_field(
-            "inflation_cpi", imp.monetary.inflation_cpi + 0.15 * delta)
+            "inflation_cpi", imp.monetary.inflation_cpi + 0.05 * delta)
+
+        # A tariff is a two-sided policy event, not a one-way red paint stroke.
+        # The target government can counter-tariff, its central bank can ease
+        # credit, and enterprises can divert part of the affected supply chain
+        # to a small set of strongly connected partners.  This is an explicit,
+        # bounded *model rule* for interactive scenarios — it is not a claim
+        # that the real world has a proven Nash equilibrium.
+        response = self._apply_tariff_response(src, dst, delta, value)
 
         # A large tariff move is ALSO an immediate microstructural shock the
         # Quant engine feels right away (not just on the next tick).
@@ -1921,7 +1934,199 @@ class WorldKernel:
             "level": "danger" if delta > 0 else "ok",
             "source": "trade",
         })
-        return {"ok": True, "source": src, "target": dst, "value": value}
+        if response:
+            await self._emit_tariff_response_trace(
+                source=src,
+                target=dst,
+                tariff=value,
+                response=response,
+            )
+        return {
+            "ok": True,
+            "source": src,
+            "target": dst,
+            "value": value,
+            "response": response,
+        }
+
+    def _apply_tariff_response(
+        self, src: str, dst: str, delta: float, value: float
+    ) -> dict[str, object]:
+        """Apply a bounded target response and selective supply-chain reroute.
+
+        The 150-country dashboard uses this kernel as its read model.  The
+        response therefore belongs here as well as in the five-node sovereign
+        graph: otherwise a real response exists internally but cannot be seen
+        on the interactive World map.
+        """
+        if delta <= 0.02:
+            return {}
+        target = self._world.countries[dst]
+        source = self._world.countries[src]
+
+        # Government: counter-tariff at a bounded fraction of the incoming one.
+        counter_rate = min(0.50, value * 0.60)
+        existing_counter = self._world.tariff(dst, src)
+        counter_delta = max(0.0, counter_rate - existing_counter)
+        if counter_delta > 0.0:
+            self._world.set_tariff(dst, src, counter_rate)
+            # The exporter also loses part of its access to the target market.
+            source.fiscal.export_index = _clamp_field(
+                "export_index", source.fiscal.export_index - 24.0 * counter_delta
+            )
+            source.gdp_growth = _clamp_field(
+                "gdp_growth", source.gdp_growth - 0.06 * counter_delta
+            )
+
+        # Central bank + households: bounded counter-cyclical support in the
+        # target.  The target remains negatively affected but is not frozen in
+        # the initial shock forever; the normal stabilisation layer then moves
+        # all values toward a long-run steady state.
+        rate_cut = min(0.015, 0.05 * delta)
+        credit_boost = min(0.060, 0.08 * delta)
+        target.monetary.interest_rate = _clamp_field(
+            "interest_rate", target.monetary.interest_rate - rate_cut
+        )
+        target.monetary.credit_growth = _clamp_field(
+            "credit_growth", target.monetary.credit_growth + credit_boost
+        )
+        target.industrial.supply_chain_friction = _clamp_field(
+            "supply_chain_friction", target.industrial.supply_chain_friction + 0.35 * delta
+        )
+        target.geopolitical.business_confidence = _clamp_field(
+            "business_confidence", target.geopolitical.business_confidence - 0.18 * delta
+        )
+        target.geopolitical.consumer_confidence = _clamp_field(
+            "consumer_confidence", target.geopolitical.consumer_confidence - 0.12 * delta
+        )
+
+        # Enterprise response: only the strongest alternative links absorb
+        # diverted trade.  Applying a positive export effect to all 148 peers
+        # made the network misleadingly green after any bilateral shock.
+        # Start from the full-fidelity hub layer.  Proxy nodes are useful for
+        # visualising the 150-node network, but their synthetic tensor seeds
+        # must not decide a supply-chain reroute (otherwise tiny territories
+        # can accidentally outrank real manufacturing partners by seed scale).
+        from econith.world.sovereign.topology import HUB_CODES
+
+        # Pair-specific first choices keep the familiar bilateral tariff demo
+        # intelligible: a USA→China shock visibly diverts production toward
+        # alternative Asian / North-American manufacturing hubs.  Other pairs
+        # fall back to the same scored hub algorithm below.
+        preferred_by_pair = {
+            ("USA", "CHN"): ("VNM", "IND", "MEX", "JPN", "KOR"),
+            ("CHN", "USA"): ("VNM", "MEX", "CAN", "JPN", "DEU"),
+        }
+        eligible = preferred_by_pair.get((src, dst), HUB_CODES)
+        candidates: list[tuple[float, str]] = []
+        for code in eligible:
+            if code in {src, dst} or code not in self._world.countries:
+                continue
+            peer = self._world.countries[code]
+            link = self._link_weight(dst, code, target, peer)
+            # Capacity and low friction are deliberate selection criteria: the
+            # five receivers are visible alternative production centres, not
+            # every country in the global map.
+            capacity = max(0.0, min(1.0, peer.industrial.capacity_utilization))
+            friction = max(0.0, min(1.0, peer.industrial.supply_chain_friction))
+            score = link * (0.60 + 0.25 * capacity + 0.15 * (1.0 - friction))
+            candidates.append((score, code))
+        candidates.sort(reverse=True)
+        selected = candidates[:5]
+        total_weight = sum(weight for weight, _ in selected) or 1.0
+        rerouted_total = 15.0 * delta  # <= 4.5 export-index points at a 30% tariff
+        rerouted: list[dict[str, float | str]] = []
+        for weight, code in selected:
+            peer = self._world.countries[code]
+            gain = rerouted_total * weight / total_weight
+            peer.fiscal.export_index = _clamp_field(
+                "export_index", peer.fiscal.export_index + gain
+            )
+            peer.gdp_growth = _clamp_field(
+                "gdp_growth", peer.gdp_growth + gain * 0.0015
+            )
+            peer.industrial.supply_chain_friction = _clamp_field(
+                "supply_chain_friction", peer.industrial.supply_chain_friction + 0.02 * delta
+            )
+            rerouted.append({"code": code, "gain": round(gain, 4)})
+
+        return {
+            "counter_tariff": round(counter_rate, 4),
+            "rate_cut": round(rate_cut, 4),
+            "credit_boost": round(credit_boost, 4),
+            "rerouted_to": rerouted,
+        }
+
+    async def _emit_tariff_response_trace(
+        self,
+        *,
+        source: str,
+        target: str,
+        tariff: float,
+        response: dict[str, object],
+    ) -> None:
+        """Publish one readable Government -> Enterprise -> Central Bank chain."""
+        target_state = self._world.countries[target]
+        source_state = self._world.countries[source]
+        counter = float(response.get("counter_tariff", 0.0))
+        rate_cut = float(response.get("rate_cut", 0.0))
+        credit_boost = float(response.get("credit_boost", 0.0))
+        rerouted = response.get("rerouted_to", [])
+        peers = [str(row.get("code", "")) for row in rerouted if isinstance(row, dict)]
+        peer_names = ", ".join(self._world.countries[p].name for p in peers[:3] if p in self._world.countries)
+        from core.locale_prefs import dashboard_locale
+
+        locale = dashboard_locale()
+        utterances = [
+            {
+                "agent_id": f"tariff-gov-{target}",
+                "role": "Government AI",
+                "country": target,
+                "text": (
+                    f"{target_state.name} responds to the {tariff * 100:.0f}% tariff from "
+                    f"{source_state.name} with a {counter * 100:.0f}% counter-tariff."
+                ),
+                "text_vi": (
+                    f"{target_state.name} đáp trả mức thuế {tariff * 100:.0f}% từ "
+                    f"{source_state.name} bằng thuế đối ứng {counter * 100:.0f}%."
+                ),
+                "locale": locale,
+                "metrics": [{"name": "counter_tariff", "value": counter, "unit": "%"}],
+                "responds_to": "",
+            },
+            {
+                "agent_id": f"tariff-enterprise-{target}",
+                "role": "Enterprise",
+                "country": target,
+                "text": f"Enterprises redirect part of the affected supply chain toward {peer_names or 'alternative partners'}.",
+                "text_vi": f"Doanh nghiệp chuyển một phần chuỗi cung ứng bị ảnh hưởng sang {peer_names or 'các đối tác thay thế'}.",
+                "locale": locale,
+                "metrics": [{"name": "partners", "value": float(len(peers))}],
+                "responds_to": f"tariff-gov-{target}",
+            },
+            {
+                "agent_id": f"tariff-cb-{target}",
+                "role": "Central Bank",
+                "country": target,
+                "text": "The central bank eases credit conditions to cushion the trade shock.",
+                "text_vi": "Ngân hàng trung ương nới điều kiện tín dụng để giảm bớt cú sốc thương mại.",
+                "locale": locale,
+                "metrics": [
+                    {"name": "rate_cut", "value": rate_cut, "unit": "%"},
+                    {"name": "credit_boost", "value": credit_boost, "unit": "%"},
+                ],
+                "responds_to": f"tariff-enterprise-{target}",
+            },
+        ]
+        await self._bus.publish(
+            "world.dialogue.turn",
+            tick=self._sim_day,
+            decisions=[],
+            utterances=utterances,
+            source="tariff_response",
+            rejected=0,
+            level="warn",
+        )
 
     def apply_mutations(self, mutations: list[dict]) -> list[str]:
         """Synchronous mutation entry used by the LLM scenario engine.

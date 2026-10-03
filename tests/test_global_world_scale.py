@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from ai.simulator_engine.macro_vectors import default_world
+from ai.simulator_engine.sovereign_graph import default_world as default_sovereign_world
 from ai.simulator_engine.world_kernel import WorldKernel
 from core.event_bus import Event, EventBus
 from core.system_controller import get_system_controller
@@ -96,6 +97,36 @@ def test_invalid_mutations_do_not_change_state() -> None:
     assert not asyncio.run(kernel.set_tariff("USA", "CHN", float("inf")))["ok"]
     assert kernel.world.to_dict() == before
     assert kernel.country_population_dict("INVALID") is None
+
+
+def test_tariff_scenario_has_counter_response_and_selective_reroute() -> None:
+    kernel = WorldKernel(EventBus(), event_probability=0.0)
+    china = kernel.world.countries["CHN"]
+    usa = kernel.world.countries["USA"]
+    china_rate_before = china.monetary.interest_rate
+    china_credit_before = china.monetary.credit_growth
+    usa_exports_before = usa.fiscal.export_index
+
+    result = asyncio.run(kernel.set_tariff("USA", "CHN", 0.30))
+
+    assert result["ok"] is True
+    assert kernel.world.tariff("CHN", "USA") == pytest.approx(0.18)
+    assert china.monetary.interest_rate < china_rate_before
+    assert china.monetary.credit_growth > china_credit_before
+    assert usa.fiscal.export_index < usa_exports_before
+    rerouted = result["response"]["rerouted_to"]
+    assert 1 <= len(rerouted) <= 5
+    assert all(row["code"] not in {"USA", "CHN"} for row in rerouted)
+
+
+def test_sovereign_government_proposes_an_absolute_counter_tariff() -> None:
+    graph = default_sovereign_world(EventBus())
+    graph.trade_matrix.set_tariff("USA", "CHN", 0.30)
+    proposals = graph.node("CHN").deliberate(graph, None)  # type: ignore[arg-type]
+    response = next(proposal for proposal in proposals if proposal.tariff_edge == ("CHN", "USA"))
+
+    assert response.tariff_rate == pytest.approx(0.18)
+    assert response.delta < 0.0  # macro export shock; intentionally separate from tariff_rate
 
 
 def test_bridge_does_not_queue_rejected_mutations() -> None:

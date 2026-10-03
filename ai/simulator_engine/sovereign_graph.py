@@ -138,6 +138,11 @@ class PolicyProposal:
     reason: str
     #: optional (source, target) tariff edge mutation
     tariff_edge: tuple[str, str] | None = None
+    #: Absolute tariff to set on ``tariff_edge``.  This must be separate from
+    #: ``delta`` because a government can both change a macro field and set a
+    #: tariff in the same proposal.  Reusing the macro delta here previously
+    #: made counter-tariffs negative and therefore clamp back to zero.
+    tariff_rate: float | None = None
     narrative: str = ""  # English source
     narrative_vi: str = ""  # Vietnamese for UI
 
@@ -240,17 +245,23 @@ class GovernmentAgent(SovereignAgent):
         if incoming > 0.1:
             retaliation = _clamp(incoming * 0.6, 0.0, 0.5)
             pct = retaliation * 100
-            proposals.append(PolicyProposal(
-                role=self.role, code=state.code, field="export_index",
-                delta=-2.0 * incoming, reason="tariff_shock",
-                tariff_edge=(state.code, rival) if rival else None,
-                **_narratives(
-                    f"{state.name} government retaliates against {rival} "
-                    f"with a {pct:.0f}% counter-tariff",
-                    f"Chính phủ {state.name} trả đũa {rival} bằng thuế quan "
-                    f"đối ứng {pct:.0f}%",
-                ),
-            ))
+            existing = world.trade_matrix.tariff(state.code, rival) if rival else 0.0
+            # A best response is placed only when it changes the current
+            # position.  Without this guard the same counter-tariff was
+            # proposed and narrated on every tick.
+            if retaliation > existing + 1e-4:
+                proposals.append(PolicyProposal(
+                    role=self.role, code=state.code, field="export_index",
+                    delta=-2.0 * incoming, reason="tariff_shock",
+                    tariff_edge=(state.code, rival) if rival else None,
+                    tariff_rate=retaliation,
+                    **_narratives(
+                        f"{state.name} government retaliates against {rival} "
+                        f"with a {pct:.0f}% counter-tariff",
+                        f"Chính phủ {state.name} trả đũa {rival} bằng thuế quan "
+                        f"đối ứng {pct:.0f}%",
+                    ),
+                ))
         # Counter-cyclical fiscal loosening when growth stalls.
         # Only fires once: when growth first drops below 1% AND the government
         # hasn't already cut taxes below 10% (prevents infinite stimulus loop).
@@ -601,7 +612,12 @@ class SovereignWorldGraph:
                 continue
             if prop.tariff_edge:
                 src, tgt = prop.tariff_edge
-                self.trade_matrix.set_tariff(src, tgt, self.trade_matrix.tariff(src, tgt) + prop.delta)
+                rate = (
+                    prop.tariff_rate
+                    if prop.tariff_rate is not None
+                    else self.trade_matrix.tariff(src, tgt) + prop.delta
+                )
+                self.trade_matrix.set_tariff(src, tgt, rate)
             if prop.field not in ("__tariff__",):
                 target.state.apply(prop.field, prop.delta)
             if prop.narrative and prop.narrative not in seen_en:
@@ -627,6 +643,36 @@ class SovereignWorldGraph:
             trade=self.trade_matrix.snapshot(),
             chronology=self.chronology.snapshot(),
         )
+        # The World activity log is not a Quant input: publish country-labelled
+        # agent decisions in both modes so a user can see a counter-response
+        # even when REALITY correctly keeps World away from Quant.
+        actor_by_role = {
+            AgentRole.GOVERNMENT: ("Government AI", "government"),
+            AgentRole.CENTRAL_BANK: ("Central Bank", "government"),
+            AgentRole.ENTERPRISE: ("Enterprise", "corporate"),
+            AgentRole.PUBLIC: ("Household", "society"),
+        }
+        emitted: set[tuple[str, str, str]] = set()
+        for prop in self._tick_proposals:
+            if not prop.narrative:
+                continue
+            actor, source = actor_by_role[prop.role]
+            key = (actor, prop.code, prop.narrative)
+            if key in emitted:
+                continue
+            emitted.add(key)
+            await self._bus.publish(
+                "world.agent.narrative",
+                sim_day=ctx.sim_day,
+                actor=actor,
+                country=prop.code,
+                text=prop.narrative,
+                text_vi=prop.narrative_vi or prop.narrative,
+                level="warn" if prop.reason in {"tariff_shock", "margin_crash"} else "info",
+                source=source,
+                locale="en",
+            )
+
         # PRODUCER-SIDE AIR-GAP: ``world.micro_impact`` is the synthetic coupling
         # vector that biases the Quant brain. It is emitted ONLY when World->Quant
         # coupling is enabled (SIMULATION). In REALITY the feed is shut down at the
@@ -640,17 +686,6 @@ class SovereignWorldGraph:
                     text_en, text_vi = fact[0], fact[1] if len(fact) > 1 else fact[0]
                 else:
                     text_en, text_vi = fact, fact
-                await self._bus.publish(
-                    "world.agent.narrative",
-                    sim_day=ctx.sim_day,
-                    actor="Sovereign",
-                    country="",
-                    text=text_en,
-                    text_vi=text_vi,
-                    level="warn",
-                    source="sovereign",
-                    locale="en",
-                )
                 await self._bus.publish(
                     "world.micro_impact", sim_day=ctx.sim_day, fact=text_en
                 )
