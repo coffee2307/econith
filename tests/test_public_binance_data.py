@@ -111,3 +111,18 @@ def test_daily_capture_with_24h_spacing():
     )
     assert out["timeframe"] == "1d"
     assert len(out["market"]["BTCUSDT"]) == 24
+
+
+def test_4h_capture_with_aligned_closed_candles():
+    def four_hour(endpoint, params):
+        if endpoint == "exchangeInfo":
+            return feed(endpoint, params)
+        base = 1_000_000_000_000
+        return [[base+i*14_400_000, "100","103","99","102","10",
+                 base+(i+1)*14_400_000-1] for i in range(24)]
+    out = capture_spot_hourly(
+        ["BTCUSDT"], limit=24, interval="4h",
+        asof_ms=1_000_000_000_000+24*14_400_000, get=four_hour
+    )
+    assert len(out["market"]["BTCUSDT"]) == 24
+    assert out["timeframe"] == "4h"
