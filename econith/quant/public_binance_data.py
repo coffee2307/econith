@@ -67,9 +67,9 @@ def capture_spot_hourly(symbols: list[str], *, limit: int = 300,
         raise ValueError("select 1-8 unique symbols")
     if not 20 <= limit <= 1000:
         raise ValueError("limit must be in 20..1000")
-    if interval not in ("1h", "1d"):
-        raise ValueError("supported intervals: 1h, 1d")
-    timeframe_ms = 3_600_000 if interval == "1h" else 86_400_000
+    if interval not in ("1h", "4h", "1d"):
+        raise ValueError("supported intervals: 1h, 4h, 1d")
+    timeframe_ms = {"1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000}[interval]
     asof = int(time.time() * 1000) if asof_ms is None else int(asof_ms)
     snapshots: dict[str, list] = {}
     rulebook: dict[str, dict] = {}
@@ -127,7 +127,7 @@ def write_snapshot(result: dict, out_dir: Path) -> dict:
 def load_snapshot(out_dir: Path) -> dict:
     """Verify and load immutable snapshot files before replay."""
     manifest = json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))
-    if manifest.get("source") != "binance_spot_public" or manifest.get("timeframe") not in ("1h", "1d"):
+    if manifest.get("source") != "binance_spot_public" or manifest.get("timeframe") not in ("1h", "4h", "1d"):
         raise ValueError("unsupported snapshot provenance")
     if set(manifest.get("sha256", {})) != {"market.json", "rules.json"}:
         raise ValueError("incomplete snapshot manifest")
@@ -150,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Download public Spot 1h data, never place orders")
     parser.add_argument("--symbols", nargs="+", default=["BTCUSDT", "ETHUSDT"])
     parser.add_argument("--limit", type=int, default=300)
-    parser.add_argument("--interval", choices=("1h", "1d"), default="1h")
+    parser.add_argument("--interval", choices=("1h", "4h", "1d"), default="1h")
     parser.add_argument("--out-dir", type=Path, required=True)
     args = parser.parse_args(argv)
     snapshot = capture_spot_hourly(args.symbols, limit=args.limit, interval=args.interval)
