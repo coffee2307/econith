@@ -91,3 +91,23 @@ def test_paper_cli_verified_snapshot_integration(tmp_path):
     assert report['initial_cash'] == 10000.0
     assert len(report['equity_curve']) == 24
     assert all(x['execution_mode']=='SIMULATION' for x in report['fills'])
+
+
+def test_daily_capture_with_24h_spacing():
+    def daily(endpoint, params):
+        if endpoint == "exchangeInfo":
+            return feed(endpoint, params)
+        rows = []
+        base = 1000000000000
+        for i in range(24):
+            start = base + i * 86_400_000
+            rows.append([start, "100", "105", "95", "101", "100",
+                         start + 86_400_000 - 1])
+        return rows
+    out = capture_spot_hourly(
+        ["BTCUSDT"], limit=24, interval="1d",
+        asof_ms=1000000000000 + 24 * 86_400_000,
+        get=daily
+    )
+    assert out["timeframe"] == "1d"
+    assert len(out["market"]["BTCUSDT"]) == 24
