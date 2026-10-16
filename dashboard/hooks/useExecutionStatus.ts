@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { API_BASE } from "@/lib/api";
 
-export type ExecutionRouting = "LIVE" | "SYNTHETIC" | "DEGRADED" | "OFFLINE";
+export type ExecutionRouting = "LIVE" | "SYNTHETIC" | "DEGRADED" | "BLOCKED" | "OFFLINE";
 
 export interface ExecutionStatus {
   quant_mode: string;

@@ -60,6 +60,7 @@ const EXEC_TONE: Record<ExecutionRouting, BadgeTone> = {
   LIVE: "ok",
   SYNTHETIC: "accent",
   DEGRADED: "warn",
+  BLOCKED: "danger",
   OFFLINE: "danger",
 };
 const LAST_SCENARIO_STORAGE = "econith-last-world-scenario";
@@ -188,7 +189,9 @@ export function QuantMissionControl() {
             <StatusBadge
               label={t("quant.badges.exec")}
               value={
-                execution.execution_env === "demo" && execution.execution_routing === "LIVE"
+                execution.execution_routing === "BLOCKED"
+                  ? (locale === "vi" ? "KHÓA GIAO DỊCH THẬT" : "MAINNET BLOCKED")
+                  : execution.execution_env === "demo" && execution.execution_routing === "LIVE"
                   ? t("quant.badges.testnet")
                   : execution.execution_env === "live" && execution.execution_routing === "LIVE"
                     ? t("quant.badges.live")

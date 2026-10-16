@@ -78,23 +78,132 @@ def test_label_holdout_suffix_hf(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert "forward_return_1m" in pd.read_parquet(holdout).columns
 
 
-def test_deploy_gate_accepts_swing_forward_col(tmp_path: Path) -> None:
-    from training.deploy_gate import run_holdout_backtest
-
-    df = pd.DataFrame(
+def _holdout_frame():
+    return pd.DataFrame(
         {
             "symbol": ["BTCUSDT"] * 80,
-            "ts_ms": list(range(80)),
+            "ts_ms": [1_700_000_000_000 + i * 3_600_000 for i in range(80)],
             "price": [100.0 + i * 0.1 for i in range(80)],
-            "forward_return_1h": [0.001 if i % 2 == 0 else -0.001 for i in range(80)],
+            "forward_return_1h": [
+                0.001 if i % 2 == 0 else -0.001 for i in range(80)
+            ],
         }
     )
+
+
+def test_deploy_gate_rejects_forward_label_as_signal(tmp_path: Path) -> None:
+    from training.deploy_gate import run_holdout_backtest
+
+    df = _holdout_frame()
+    path = tmp_path / "quant_holdout.parquet"
+    df.to_parquet(path, index=False)
+    with pytest.raises(ValueError, match="refusing look-ahead backtest"):
+        run_holdout_backtest(path)
+
+
+def test_deploy_gate_accepts_timestamped_oos_predictions(tmp_path: Path) -> None:
+    from training.deploy_gate import run_holdout_backtest
+
+    df = _holdout_frame()
+    df["oos_prediction_1h"] = [
+        0.002 if i % 3 == 0 else -0.002 for i in range(len(df))
+    ]
+    df["prediction_asof_ms"] = df["ts_ms"] - 1000
+    df["prediction_model_id"] = "frozen-example-v1"
     path = tmp_path / "quant_holdout.parquet"
     df.to_parquet(path, index=False)
     metrics = run_holdout_backtest(path)
-    assert metrics["signal_col"] == "forward_return_1h"
-    assert metrics["rows"] >= 1
+    assert metrics["signal_col"] == "oos_prediction_1h"
+    assert metrics["realized_col"] == "forward_return_1h"
+    assert metrics["rows"] == 80
+    assert metrics["prediction_model_id"] == ["frozen-example-v1"]
+    assert metrics["periods_per_year"] == 8760
 
+
+def test_deploy_gate_rejects_future_predictions(tmp_path: Path) -> None:
+    from training.deploy_gate import run_holdout_backtest
+
+    df = _holdout_frame()
+    df["oos_prediction_1h"] = [0.002] * len(df)
+    df["prediction_asof_ms"] = df["ts_ms"] + 1
+    df["prediction_model_id"] = "leaky"
+    path = tmp_path / "future_holdout.parquet"
+    df.to_parquet(path, index=False)
+    with pytest.raises(ValueError, match="in the future"):
+        run_holdout_backtest(path)
+
+
+def test_deploy_gate_rejects_copied_oracle(tmp_path: Path) -> None:
+    from training.deploy_gate import run_holdout_backtest
+
+    df = _holdout_frame()
+    df["oos_prediction_1h"] = df["forward_return_1h"]
+    df["prediction_asof_ms"] = df["ts_ms"]
+    df["prediction_model_id"] = "oracle"
+    path = tmp_path / "oracle_holdout.parquet"
+    df.to_parquet(path, index=False)
+    with pytest.raises(ValueError, match="reproduces realized"):
+        run_holdout_backtest(path)
+
+
+def test_deploy_gate_rejects_overlapping_horizon(tmp_path: Path) -> None:
+    from training.deploy_gate import run_holdout_backtest
+
+    df = _holdout_frame()
+    df["ts_ms"] = [1_700_000_000_000 + i * 60_000 for i in range(len(df))]
+    df["oos_prediction_1h"] = [0.002] * len(df)
+    df["prediction_asof_ms"] = df["ts_ms"]
+    df["prediction_model_id"] = "frozen-example-v1"
+    path = tmp_path / "overlapping.parquet"
+    df.to_parquet(path, index=False)
+    with pytest.raises(ValueError, match="overlapping"):
+        run_holdout_backtest(path)
+
+
+def test_deploy_gate_rejects_unaligned_multiasset_results(tmp_path: Path) -> None:
+    from training.deploy_gate import run_holdout_backtest
+
+    df = _holdout_frame()
+    df.loc[40:, "symbol"] = "ETHUSDT"
+    df["oos_prediction_1h"] = [0.002] * len(df)
+    df["prediction_asof_ms"] = df["ts_ms"]
+    df["prediction_model_id"] = "frozen-example-v1"
+    path = tmp_path / "multiasset.parquet"
+    df.to_parquet(path, index=False)
+    with pytest.raises(ValueError, match="multi-asset"):
+        run_holdout_backtest(path)
+
+
+def test_deploy_gate_requires_oos_provenance() -> None:
+    from training.deploy_gate import evaluate_gate
+
+    ok, reason = evaluate_gate(
+        {"rows": 5000, "annualized_sharpe": 99, "max_drawdown": 0}
+    )
+    assert not ok
+    assert "out-of-sample" in reason
+
+
+def test_deploy_gate_rejects_unverified_external_reports(tmp_path: Path) -> None:
+    from training.deploy_gate import gate_or_raise
+
+    path = tmp_path / "report.json"
+    path.write_text('{"annualized_sharpe": 100}', encoding="utf-8")
+    with pytest.raises(SystemExit, match="standalone backtest reports"):
+        gate_or_raise(
+            holdout=None, metrics_report=path, min_sharpe=0.25,
+            max_drawdown=0.30, min_rows=500, skip=False
+        )
+
+
+def test_deploy_gate_disallows_emergency_skip() -> None:
+    from training.deploy_gate import gate_or_raise
+
+    with pytest.raises(SystemExit, match="disabled"):
+        gate_or_raise(
+            holdout=None, metrics_report=None, min_sharpe=0.25,
+            max_drawdown=0.30, min_rows=500, skip=True
+        )
 
 def test_resolve_realized_col_klines_swing() -> None:
     from training.train_ppo import _resolve_realized_col
@@ -123,3 +232,46 @@ def test_resolve_realized_col_hf_scalp() -> None:
     )
     assert _resolve_realized_col(df, "scalper", "hf") == "forward_return_1m"
     assert _resolve_realized_col(df, "trend", "hf") == "forward_return_5m"
+
+
+def test_causal_oos_baseline_never_reads_future_prices() -> None:
+    from training.oos_baseline import generate_causal_baseline
+
+    df = pd.DataFrame(
+        {
+            "symbol": ["BTCUSDT"] * 20,
+            "ts_ms": [1_700_000_000_000 + i * 3_600_000 for i in range(20)],
+            "price": [100.0 + i for i in range(20)],
+            "forward_return_1h": [0.01] * 20,
+        }
+    )
+    a = generate_causal_baseline(df, lookback=3)
+    changed = df.copy()
+    changed.loc[19, "price"] = 100_000.0
+    changed.loc[19, "forward_return_1h"] = -99.0
+    b = generate_causal_baseline(changed, lookback=3)
+    assert a["oos_prediction_1h"].equals(b["oos_prediction_1h"])
+    assert a["oos_prediction_1h"].iloc[:4].eq(0.0).all()
+    assert a["prediction_asof_ms"].le(a["ts_ms"]).all()
+    assert (a["prediction_model_id"] == "rule-lagged-momentum-v1-lookback3").all()
+
+
+def test_causal_oos_baseline_keeps_assets_isolated() -> None:
+    from training.oos_baseline import generate_causal_baseline
+
+    btc = pd.DataFrame(
+        {
+            "symbol": ["BTCUSDT"] * 8,
+            "ts_ms": [1_700_000_000_000 + i * 3_600_000 for i in range(8)],
+            "price": [100.0 + i for i in range(8)],
+            "forward_return_1h": [0.001] * 8,
+        }
+    )
+    eth = btc.copy()
+    eth["symbol"] = "ETHUSDT"
+    eth["price"] = [200.0 - i for i in range(8)]
+    out = generate_causal_baseline(pd.concat([btc, eth], ignore_index=True), lookback=2)
+    btc_sig = out.loc[out["symbol"] == "BTCUSDT", "oos_prediction_1h"]
+    eth_sig = out.loc[out["symbol"] == "ETHUSDT", "oos_prediction_1h"]
+    assert btc_sig.iloc[3] > 0
+    assert eth_sig.iloc[3] < 0
