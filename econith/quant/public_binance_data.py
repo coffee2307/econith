@@ -119,6 +119,29 @@ def write_snapshot(result: dict, out_dir: Path) -> dict:
     return manifest
 
 
+
+def load_snapshot(out_dir: Path) -> dict:
+    """Verify and load immutable snapshot files before replay."""
+    manifest = json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))
+    if manifest.get("source") != "binance_spot_public" or manifest.get("timeframe") != "1h":
+        raise ValueError("unsupported snapshot provenance")
+    if set(manifest.get("sha256", {})) != {"market.json", "rules.json"}:
+        raise ValueError("incomplete snapshot manifest")
+    contents = {}
+    for filename in ("market.json", "rules.json"):
+        binary = (out_dir / filename).read_bytes()
+        if hashlib.sha256(binary).hexdigest() != manifest["sha256"][filename]:
+            raise ValueError(f"snapshot checksum mismatch: {filename}")
+        contents[filename] = json.loads(binary.decode("utf-8"))
+    if set(contents["market.json"]) != set(contents["rules.json"]):
+        raise ValueError("market/rules symbol mismatch")
+    if sorted(contents["market.json"]) != manifest.get("symbols"):
+        raise ValueError("manifest symbol mismatch")
+    return {"market": contents["market.json"], "rules": contents["rules.json"],
+            "asof_ms": int(manifest["asof_ms"])}
+
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Download public Spot 1h data, never place orders")
     parser.add_argument("--symbols", nargs="+", default=["BTCUSDT", "ETHUSDT"])
