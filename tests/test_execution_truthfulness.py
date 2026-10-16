@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
