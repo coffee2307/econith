@@ -189,3 +189,81 @@ def test_reality_rejects_uncalibrated_heuristic_edge(monkeypatch) -> None:
     assert events[0][0] == "order.rejected"
     assert events[0][1]["reason"] == "unverified_predictive_edge"
     bridge._ccxt.execute.assert_not_called()
+
+
+def test_reality_unavailable_exchange_rejects_not_synthetic(monkeypatch) -> None:
+    """Connectivity faults must never fabricate fills in a capital-domain state."""
+    import quant.ccxt_bridge as bridge_mod
+    from core.mode import QuantMode
+    from quant.ccxt_bridge import CCXTBinanceBridge
+    from quant.payloads import ExecutionPayload, OrderSide, OrderType
+
+    monkeypatch.setattr(bridge_mod, "current_mode", lambda: QuantMode.REALITY)
+    topics = []
+    class Bus:
+        async def publish(self, topic, **payload):
+            topics.append((topic, payload))
+
+    bridge = CCXTBinanceBridge(
+        Bus(), execution_env="demo", credentialed=False
+    )
+    order = ExecutionPayload(
+        symbol="BTCUSDT", desk="trend", mode="REALITY",
+        side=OrderSide.LONG_OPEN, order_type=OrderType.MARKET, quantity=.01
+    )
+    fill = asyncio.run(bridge.execute(order))
+    assert fill.is_filled is False
+    assert fill.filled_quantity == 0
+    assert fill.mode == "REALITY"
+    assert not any(t == "quant.fill" for t, _ in topics)
+    assert any(t == "order.update" for t, _ in topics)
+    assert bridge.execution_status()["execution_routing"] == "DEGRADED"
+
+
+def test_mainnet_blocked_even_with_credentials_and_mock_connection(monkeypatch) -> None:
+    import quant.ccxt_bridge as bridge_mod
+    from core.mode import QuantMode
+    from quant.ccxt_bridge import CCXTBinanceBridge
+    from quant.payloads import ExecutionPayload, OrderSide, OrderType
+
+    monkeypatch.setattr(bridge_mod, "current_mode", lambda: QuantMode.REALITY)
+    class Bus:
+        async def publish(self, topic, **payload):
+            pass
+
+    bridge = CCXTBinanceBridge(
+        Bus(), execution_env="live", api_key="dummy", api_secret="dummy",
+        credentialed=True
+    )
+    assert bridge.execution_status()["execution_routing"] == "BLOCKED"
+    bridge._exchange = object()  # Even a fabricated authenticated session cannot unlock.
+    bridge._live = True
+    assert bridge.is_live is False
+    order = ExecutionPayload(
+        symbol="BTCUSDT", desk="trend", mode="REALITY",
+        side=OrderSide.LONG_OPEN, order_type=OrderType.MARKET, quantity=.01
+    )
+    report = asyncio.run(bridge.execute(order))
+    assert report.is_filled is False
+    assert report.detail == "research_only_mainnet_disabled"
+
+
+def test_simulation_mode_remains_explicit_synthetic(monkeypatch) -> None:
+    import quant.ccxt_bridge as bridge_mod
+    from core.mode import QuantMode
+    from quant.ccxt_bridge import CCXTBinanceBridge
+    from quant.payloads import ExecutionPayload, OrderSide, OrderType
+
+    monkeypatch.setattr(bridge_mod, "current_mode", lambda: QuantMode.SIMULATION)
+    records = []
+    class Bus:
+        async def publish(self, topic, **payload):
+            records.append((topic, payload))
+    bridge = CCXTBinanceBridge(Bus(), execution_env="demo", credentialed=False)
+    order = ExecutionPayload(
+        symbol="BTCUSDT", desk="trend", mode="SIMULATION",
+        side=OrderSide.LONG_OPEN, order_type=OrderType.MARKET, quantity=.01
+    )
+    report = asyncio.run(bridge.execute(order))
+    assert report.is_filled is True and report.mode == "SIMULATION"
+    assert any(t == "quant.fill" for t, _ in records)
