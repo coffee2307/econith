@@ -13,9 +13,9 @@ from typing import Any
 logger = logging.getLogger("econith.training.deploy_gate")
 
 # Conservative defaults — override via CLI flags on deploy.py.
-DEFAULT_MIN_SHARPE = -0.5  # allow mild negative on tiny smoke sets
-DEFAULT_MAX_DRAWDOWN = 0.45
-DEFAULT_MIN_ROWS = 50
+DEFAULT_MIN_SHARPE = 0.25
+DEFAULT_MAX_DRAWDOWN = 0.30
+DEFAULT_MIN_ROWS = 500
 
 
 def load_metrics_report(path: Path) -> dict[str, Any]:
@@ -48,7 +48,14 @@ def _primary_forward_col(df) -> str:
 
 
 def run_holdout_backtest(holdout_parquet: Path) -> dict[str, Any]:
-    """Vectorised holdout backtest using signed forward-return as signal."""
+    """Backtest only precomputed, timestamped out-of-sample predictions.
+
+    The holdout *label* is used to score outcomes, NEVER to create positions.
+    Refuse raw labeled holdouts: they contain no evidence of predictive skill.
+    Prediction provenance is an operator assertion; an independent data/model
+    audit is still required before interpreting any performance as real.
+    """
+    import numpy as np
     import pandas as pd
 
     from training.evaluation.backtest import BacktestConfig, BacktestEngine
@@ -58,21 +65,58 @@ def run_holdout_backtest(holdout_parquet: Path) -> dict[str, Any]:
 
     df = pd.read_parquet(holdout_parquet)
     fwd_col = _primary_forward_col(df)
+    horizon = fwd_col.removeprefix("forward_return_")
+    prediction_col = f"oos_prediction_{horizon}"
+    required = {prediction_col, "ts_ms", "prediction_asof_ms", "prediction_model_id"}
+    missing = sorted(required.difference(df.columns))
+    if missing:
+        raise ValueError(
+            "refusing look-ahead backtest: missing genuine out-of-sample "
+            f"prediction fields {missing}. Train on earlier data, write a "
+            f"timestamped {prediction_col} from the frozen model, then evaluate."
+        )
+    if df.empty:
+        raise ValueError("holdout is empty")
+
+    for symbol, group in df.groupby("symbol" if "symbol" in df.columns else
+                                     pd.Series("UNKNOWN", index=df.index)):
+        timestamps = pd.to_numeric(group["ts_ms"], errors="coerce")
+        asof = pd.to_numeric(group["prediction_asof_ms"], errors="coerce")
+        if (timestamps.isna().any() or asof.isna().any()
+                or (timestamps < 0).any() or (asof < 0).any()
+                or (asof > timestamps).any()):
+            raise ValueError(f"{symbol}: prediction timestamp is missing or in the future")
+        if not timestamps.is_monotonic_increasing or timestamps.duplicated().any():
+            raise ValueError(f"{symbol}: holdout timestamps must be increasing and unique")
+
+    actual = pd.to_numeric(df[fwd_col], errors="coerce").to_numpy(dtype="float64")
+    preds = pd.to_numeric(df[prediction_col], errors="coerce").to_numpy(dtype="float64")
+    if not np.isfinite(actual).all() or not np.isfinite(preds).all():
+        raise ValueError("nonfinite label or prediction in holdout")
+    model_ids = df["prediction_model_id"].astype("string")
+    if model_ids.isna().any() or model_ids.str.strip().eq("").any():
+        raise ValueError("prediction_model_id must identify a frozen out-of-sample model")
+    # Reject two common variants of the old oracle: copying future returns or
+    # their signs into the prediction column. This is not a complete audit.
+    if np.array_equal(preds, actual) or np.array_equal(preds, np.sign(actual)):
+        raise ValueError("prediction column reproduces realized future labels")
 
     def signal_fn(frame):
-        # Simple teacher signal: lean with realized forward return sign.
-        import numpy as np
+        forecast = frame[prediction_col].to_numpy(dtype="float64")
+        return np.sign(forecast)
 
-        fwd = pd.to_numeric(frame[fwd_col], errors="coerce").fillna(0.0)
-        return np.sign(fwd.to_numpy(dtype="float64"))
-
-    engine = BacktestEngine(BacktestConfig(return_column=fwd_col))
-    result = engine.run_frame(df, signal_fn)
+    result = BacktestEngine(BacktestConfig(return_column=fwd_col)).run_frame(
+        df, signal_fn
+    )
     metrics = result.metrics.to_dict()
-    metrics["rows"] = int(result.rows)
-    metrics["signal_col"] = fwd_col
+    metrics.update(
+        rows=int(result.rows),
+        signal_col=prediction_col,
+        realized_col=fwd_col,
+        evaluation_protocol="chronological_holdout_oos",
+        prediction_model_id=sorted(model_ids.unique().tolist()),
+    )
     return metrics
-
 
 def evaluate_gate(
     metrics: dict[str, Any],
@@ -81,7 +125,13 @@ def evaluate_gate(
     max_drawdown: float = DEFAULT_MAX_DRAWDOWN,
     min_rows: int = DEFAULT_MIN_ROWS,
 ) -> tuple[bool, str]:
-    rows = int(metrics.get("rows") or metrics.get("num_trades") or 0)
+    if metrics.get("evaluation_protocol") != "chronological_holdout_oos":
+        return False, "missing chronological out-of-sample evaluation protocol"
+    if not str(metrics.get("signal_col", "")).startswith("oos_prediction_"):
+        return False, "missing out-of-sample prediction signal"
+    if not metrics.get("prediction_model_id"):
+        return False, "missing frozen model provenance"
+    rows = int(metrics.get("rows") or 0)
     sharpe = float(metrics.get("annualized_sharpe") or 0.0)
     dd = abs(float(metrics.get("max_drawdown") or 0.0))
     if rows < min_rows:
@@ -103,8 +153,9 @@ def gate_or_raise(
     skip: bool,
 ) -> dict[str, Any]:
     if skip:
-        logger.warning("backtest gate SKIPPED (--skip-backtest)")
-        return {"skipped": True, "passed": True}
+        raise SystemExit(
+            "deployment refused: --skip-backtest is disabled for model activation"
+        )
 
     if metrics_report is not None:
         metrics = load_metrics_report(metrics_report)
