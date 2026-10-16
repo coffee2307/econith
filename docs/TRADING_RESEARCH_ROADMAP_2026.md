@@ -27,6 +27,25 @@ model hashes and immutable dataset snapshots. `--skip-backtest` is rejected.
 Default promotion criteria are minimum Sharpe 0.25, max drawdown 30% and 500 rows;
 these are provisional safety floors, **not** proof of positive expectancy.
 
+## Reproducible causal baseline (research only)
+For a **single symbol** holdout with strictly spaced, non-overlapping candles
+and matching `forward_return_<horizon>` labels, build a prediction file using
+only prices at least one bar old:
+
+```bash
+python -m training.oos_baseline --input datasets/processed/quant_holdout.parquet --output datasets/processed/quant_holdout_baseline_oos.parquet --lookback 12
+```
+
+This baseline writes `oos_prediction_<horizon>`, `prediction_asof_ms` and
+`prediction_model_id`. It intentionally **does not** learn a model, does not
+use the future return labels for features, and does not establish profitability.
+The first `lookback + 1` bars emit zero exposure. Evaluate one asset/horizon
+at a time; the legacy multiasset evaluator is blocked pending time-aligned
+portfolio accounting. Deployment remains blocked for heuristically estimated
+live alpha, missing live marks and unverified model provenance. If the price
+bar's close is not available by the preceding timestamp or venue data is stale,
+the baseline timing assumptions must be revised.
+
 ## Phase A — trustworthy datasets (before new models)
 1. Ingest public spot OHLCV and trades via supported exchange adapters/CCXT.
    Save venue, symbol, quote currency, market type, candle-open/close times,
