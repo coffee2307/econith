@@ -66,3 +66,28 @@ def test_malformed_candle_is_not_silently_discarded():
     with pytest.raises(ValueError, match='malformed'):
         capture_spot_hourly(['BTCUSDT'],limit=24,
                             asof_ms=1000000000000+24*3600000,get=malformed)
+
+
+def test_manifest_tampering_is_rejected(tmp_path):
+    from econith.quant.public_binance_data import load_snapshot
+    capture = capture_spot_hourly(['BTCUSDT'], limit=24,
+                    asof_ms=1000000000000+24*3600000, get=feed)
+    write_snapshot(capture, tmp_path)
+    result = load_snapshot(tmp_path)
+    assert result['asof_ms'] == capture['asof_ms']
+    (tmp_path/'market.json').write_text('{}')
+    with pytest.raises(ValueError, match='checksum'):
+        load_snapshot(tmp_path)
+
+
+def test_paper_cli_verified_snapshot_integration(tmp_path):
+    from econith.quant.paper_v1 import main
+    capture = capture_spot_hourly(['BTCUSDT'], limit=24,
+                    asof_ms=1000000000000+24*3600000, get=feed)
+    write_snapshot(capture, tmp_path)
+    report_file = tmp_path/'output.json'
+    assert main(['--snapshot-dir',str(tmp_path),'--output',str(report_file)]) == 0
+    report = json.loads(report_file.read_text())
+    assert report['initial_cash'] == 10000.0
+    assert len(report['equity_curve']) == 24
+    assert all(x['execution_mode']=='SIMULATION' for x in report['fills'])
