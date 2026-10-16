@@ -77,10 +77,12 @@ def capture_spot_hourly(symbols: list[str], *, limit: int = 300,
         raw = get("klines", {"symbol": symbol, "interval": "1h", "limit": limit})
         if not isinstance(raw, list):
             raise ValueError(f"{symbol}: malformed response")
-        closed = [row for row in raw if isinstance(row, list) and len(row) >= 7
-                  and int(row[6]) < asof]
-        # Don't drop non-empty gaps/invalid rows silently; validation catches them.
+        if any(not isinstance(row, list) or len(row) < 7 for row in raw):
+            raise ValueError(f"{symbol}: malformed candle record")
+        closed = [row for row in raw if int(row[6]) < asof]
         validated_candles(closed, timeframe_ms=3600000, asof_ms=asof)
+        if asof - int(closed[-1][6]) > 3 * 3600000:
+            raise ValueError(f"{symbol}: stale market data")
         snapshots[symbol] = closed
 
     shared = set.intersection(*(set(int(r[0]) for r in rs) for rs in snapshots.values()))
