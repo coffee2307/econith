@@ -69,7 +69,7 @@ API or UI is claimed.
 
 1. `econith/quant/public_binance_data.py`: public unauthenticated
    `exchangeInfo` + `klines`, strict Spot status/rules, 1h closed-candle
-   checks, gap/stale rejection, aligned asset universe, SHA-256 manifest.
+   checks, gap/stale rejection, aligned asset universe, SHA-256 manifest and automatic checksum verification on replay.
 2. `econith/quant/paper_v1.py`: offline multiasset cash-based replay,
    strictly previous-candle momentum signals, next-open simulated fills
    with both-side fees, spread and slippage, no shorting/leverage, exchange
@@ -77,7 +77,7 @@ API or UI is claimed.
    drawdown halt; no real exchange calls.
 3. Tests: `tests/test_paper_v1.py`,
    `tests/test_public_binance_data.py`,
-   `tests/test_paper_binance_sample.py`: **17 passed** under an isolated
+   `tests/test_paper_binance_sample.py`: **19 passed** under an isolated
    Python/pytest test run on 2026-10-16.
 4. Git blob hashes compared against tested local files, confirming
    the exact files proposed in the PR were the files tested. This
