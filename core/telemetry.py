@@ -266,12 +266,12 @@ class MetricsHub:
     async def _on_execution_status(self, event: Event) -> None:
         self._execution = dict(event.payload)
         routing = str(event.payload.get("execution_routing") or "")
-        if routing == "DEGRADED":
-            detail = str(event.payload.get("detail") or "exchange unreachable")
+        if routing in ("DEGRADED", "BLOCKED"):
+            detail = str(event.payload.get("detail") or "exchange execution unavailable")
             self._push_quant_event(
                 level="warn",
                 source="ccxt",
-                message=f"Execution DEGRADED — {detail}",
+                message=f"Execution {routing} — {detail}",
                 ts=event.ts,
             )
 
