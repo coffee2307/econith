@@ -78,6 +78,23 @@ def run_holdout_backtest(holdout_parquet: Path) -> dict[str, Any]:
     if df.empty:
         raise ValueError("holdout is empty")
 
+    if "symbol" in df.columns and df["symbol"].nunique(dropna=False) > 1:
+        raise ValueError(
+            "multi-asset deployment backtest is disabled until portfolio returns "
+            "are aligned by timestamp instead of concatenated per symbol"
+        )
+
+    # The current evaluator interprets one forward label as one holding-period
+    # return. Overlapping labels (e.g. 1h outcomes on 1m bars) are not independent
+    # tradable increments; annualizing all labels as minutes would inflate Sharpe.
+    horizon_ms = {
+        "1m": 60_000, "5m": 300_000, "15m": 900_000,
+        "1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000,
+    }.get(horizon)
+    if horizon_ms is None:
+        raise ValueError(f"unsupported horizon for deployment evaluation: {horizon}")
+
+    bar_intervals: list[float] = []
     for symbol, group in df.groupby("symbol" if "symbol" in df.columns else
                                      pd.Series("UNKNOWN", index=df.index)):
         timestamps = pd.to_numeric(group["ts_ms"], errors="coerce")
@@ -88,6 +105,15 @@ def run_holdout_backtest(holdout_parquet: Path) -> dict[str, Any]:
             raise ValueError(f"{symbol}: prediction timestamp is missing or in the future")
         if not timestamps.is_monotonic_increasing or timestamps.duplicated().any():
             raise ValueError(f"{symbol}: holdout timestamps must be increasing and unique")
+        if len(timestamps) > 1:
+            bar_intervals.extend(timestamps.diff().iloc[1:].tolist())
+
+    if not bar_intervals:
+        raise ValueError("insufficient timestamps to evaluate holding periods")
+    bar_ms = float(np.median(bar_intervals))
+    if bar_ms < horizon_ms:
+        raise ValueError("overlapping forward-return labels would inflate performance")
+    periods_per_year = max(1, round(365 * 86_400_000 / bar_ms))
 
     actual = pd.to_numeric(df[fwd_col], errors="coerce").to_numpy(dtype="float64")
     preds = pd.to_numeric(df[prediction_col], errors="coerce").to_numpy(dtype="float64")
@@ -105,7 +131,9 @@ def run_holdout_backtest(holdout_parquet: Path) -> dict[str, Any]:
         forecast = frame[prediction_col].to_numpy(dtype="float64")
         return np.sign(forecast)
 
-    result = BacktestEngine(BacktestConfig(return_column=fwd_col)).run_frame(
+    result = BacktestEngine(BacktestConfig(
+        return_column=fwd_col, periods_per_year=periods_per_year
+    )).run_frame(
         df, signal_fn
     )
     metrics = result.metrics.to_dict()
@@ -113,6 +141,7 @@ def run_holdout_backtest(holdout_parquet: Path) -> dict[str, Any]:
         rows=int(result.rows),
         signal_col=prediction_col,
         realized_col=fwd_col,
+        periods_per_year=periods_per_year,
         evaluation_protocol="chronological_holdout_oos",
         prediction_model_id=sorted(model_ids.unique().tolist()),
     )
