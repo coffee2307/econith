@@ -177,7 +177,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--backtest-report",
         default="",
-        help="optional precomputed metrics JSON (skips running holdout)",
+        help="deprecated: unsupported for activation without independent provenance",
     )
     p.add_argument("--min-sharpe", type=float, default=0.25)
     p.add_argument("--max-drawdown", type=float, default=0.30)
