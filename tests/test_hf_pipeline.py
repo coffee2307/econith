@@ -184,6 +184,18 @@ def test_deploy_gate_requires_oos_provenance() -> None:
     assert "out-of-sample" in reason
 
 
+def test_deploy_gate_rejects_unverified_external_reports(tmp_path: Path) -> None:
+    from training.deploy_gate import gate_or_raise
+
+    path = tmp_path / "report.json"
+    path.write_text('{"annualized_sharpe": 100}', encoding="utf-8")
+    with pytest.raises(SystemExit, match="standalone backtest reports"):
+        gate_or_raise(
+            holdout=None, metrics_report=path, min_sharpe=0.25,
+            max_drawdown=0.30, min_rows=500, skip=False
+        )
+
+
 def test_deploy_gate_disallows_emergency_skip() -> None:
     from training.deploy_gate import gate_or_raise
 
