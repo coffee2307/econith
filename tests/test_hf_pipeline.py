@@ -78,23 +78,91 @@ def test_label_holdout_suffix_hf(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert "forward_return_1m" in pd.read_parquet(holdout).columns
 
 
-def test_deploy_gate_accepts_swing_forward_col(tmp_path: Path) -> None:
-    from training.deploy_gate import run_holdout_backtest
-
-    df = pd.DataFrame(
+def _holdout_frame():
+    return pd.DataFrame(
         {
             "symbol": ["BTCUSDT"] * 80,
-            "ts_ms": list(range(80)),
+            "ts_ms": [1_700_000_000_000 + i * 3_600_000 for i in range(80)],
             "price": [100.0 + i * 0.1 for i in range(80)],
-            "forward_return_1h": [0.001 if i % 2 == 0 else -0.001 for i in range(80)],
+            "forward_return_1h": [
+                0.001 if i % 2 == 0 else -0.001 for i in range(80)
+            ],
         }
     )
+
+
+def test_deploy_gate_rejects_forward_label_as_signal(tmp_path: Path) -> None:
+    from training.deploy_gate import run_holdout_backtest
+
+    df = _holdout_frame()
+    path = tmp_path / "quant_holdout.parquet"
+    df.to_parquet(path, index=False)
+    with pytest.raises(ValueError, match="refusing look-ahead backtest"):
+        run_holdout_backtest(path)
+
+
+def test_deploy_gate_accepts_timestamped_oos_predictions(tmp_path: Path) -> None:
+    from training.deploy_gate import run_holdout_backtest
+
+    df = _holdout_frame()
+    df["oos_prediction_1h"] = [
+        0.002 if i % 3 == 0 else -0.002 for i in range(len(df))
+    ]
+    df["prediction_asof_ms"] = df["ts_ms"] - 1000
+    df["prediction_model_id"] = "frozen-example-v1"
     path = tmp_path / "quant_holdout.parquet"
     df.to_parquet(path, index=False)
     metrics = run_holdout_backtest(path)
-    assert metrics["signal_col"] == "forward_return_1h"
-    assert metrics["rows"] >= 1
+    assert metrics["signal_col"] == "oos_prediction_1h"
+    assert metrics["realized_col"] == "forward_return_1h"
+    assert metrics["rows"] == 80
+    assert metrics["prediction_model_id"] == ["frozen-example-v1"]
 
+
+def test_deploy_gate_rejects_future_predictions(tmp_path: Path) -> None:
+    from training.deploy_gate import run_holdout_backtest
+
+    df = _holdout_frame()
+    df["oos_prediction_1h"] = [0.002] * len(df)
+    df["prediction_asof_ms"] = df["ts_ms"] + 1
+    df["prediction_model_id"] = "leaky"
+    path = tmp_path / "future_holdout.parquet"
+    df.to_parquet(path, index=False)
+    with pytest.raises(ValueError, match="in the future"):
+        run_holdout_backtest(path)
+
+
+def test_deploy_gate_rejects_copied_oracle(tmp_path: Path) -> None:
+    from training.deploy_gate import run_holdout_backtest
+
+    df = _holdout_frame()
+    df["oos_prediction_1h"] = df["forward_return_1h"]
+    df["prediction_asof_ms"] = df["ts_ms"]
+    df["prediction_model_id"] = "oracle"
+    path = tmp_path / "oracle_holdout.parquet"
+    df.to_parquet(path, index=False)
+    with pytest.raises(ValueError, match="reproduces realized"):
+        run_holdout_backtest(path)
+
+
+def test_deploy_gate_requires_oos_provenance() -> None:
+    from training.deploy_gate import evaluate_gate
+
+    ok, reason = evaluate_gate(
+        {"rows": 5000, "annualized_sharpe": 99, "max_drawdown": 0}
+    )
+    assert not ok
+    assert "out-of-sample" in reason
+
+
+def test_deploy_gate_disallows_emergency_skip() -> None:
+    from training.deploy_gate import gate_or_raise
+
+    with pytest.raises(SystemExit, match="disabled"):
+        gate_or_raise(
+            holdout=None, metrics_report=None, min_sharpe=0.25,
+            max_drawdown=0.30, min_rows=500, skip=True
+        )
 
 def test_resolve_realized_col_klines_swing() -> None:
     from training.train_ppo import _resolve_realized_col
