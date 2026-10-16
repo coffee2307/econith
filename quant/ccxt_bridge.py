@@ -328,8 +328,8 @@ class CCXTBinanceBridge:
             routing = "BLOCKED"
             detail = "research-only: capital-bearing exchange execution is disabled"
         elif self.is_live:
-            routing = "DEMO"
-            detail = "authenticated sandbox/testnet session active"
+            routing = "LIVE"
+            detail = "authenticated sandbox/testnet session active — NO MAINNET CAPITAL"
         else:
             routing = "DEGRADED"
             detail = "REALITY without an authenticated exchange; orders are rejected"
