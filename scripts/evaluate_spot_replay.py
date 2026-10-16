@@ -62,7 +62,7 @@ def _passive_hold(bars: dict, rules: dict[str, SymbolRules],
 
 def evaluate(snapshot_dir: Path, *, config: PaperConfig | None = None) -> dict:
     snapshot = load_snapshot(snapshot_dir)
-    ms = 86_400_000 if snapshot["timeframe"] == "1d" else 3_600_000
+    ms = {"1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000}[snapshot["timeframe"]]
     cfg = config or PaperConfig(timeframe_ms=ms)
     if cfg.timeframe_ms != ms:
         raise ValueError("config timeframe does not match snapshot")
