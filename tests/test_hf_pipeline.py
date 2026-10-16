@@ -220,3 +220,46 @@ def test_resolve_realized_col_hf_scalp() -> None:
     )
     assert _resolve_realized_col(df, "scalper", "hf") == "forward_return_1m"
     assert _resolve_realized_col(df, "trend", "hf") == "forward_return_5m"
+
+
+def test_causal_oos_baseline_never_reads_future_prices() -> None:
+    from training.oos_baseline import generate_causal_baseline
+
+    df = pd.DataFrame(
+        {
+            "symbol": ["BTCUSDT"] * 20,
+            "ts_ms": [1_700_000_000_000 + i * 3_600_000 for i in range(20)],
+            "price": [100.0 + i for i in range(20)],
+            "forward_return_1h": [0.01] * 20,
+        }
+    )
+    a = generate_causal_baseline(df, lookback=3)
+    changed = df.copy()
+    changed.loc[19, "price"] = 100_000.0
+    changed.loc[19, "forward_return_1h"] = -99.0
+    b = generate_causal_baseline(changed, lookback=3)
+    assert a["oos_prediction_1h"].equals(b["oos_prediction_1h"])
+    assert a["oos_prediction_1h"].iloc[:4].eq(0.0).all()
+    assert a["prediction_asof_ms"].le(a["ts_ms"]).all()
+    assert (a["prediction_model_id"] == "rule-lagged-momentum-v1-lookback3").all()
+
+
+def test_causal_oos_baseline_keeps_assets_isolated() -> None:
+    from training.oos_baseline import generate_causal_baseline
+
+    btc = pd.DataFrame(
+        {
+            "symbol": ["BTCUSDT"] * 8,
+            "ts_ms": [1_700_000_000_000 + i * 3_600_000 for i in range(8)],
+            "price": [100.0 + i for i in range(8)],
+            "forward_return_1h": [0.001] * 8,
+        }
+    )
+    eth = btc.copy()
+    eth["symbol"] = "ETHUSDT"
+    eth["price"] = [200.0 - i for i in range(8)]
+    out = generate_causal_baseline(pd.concat([btc, eth], ignore_index=True), lookback=2)
+    btc_sig = out.loc[out["symbol"] == "BTCUSDT", "oos_prediction_1h"]
+    eth_sig = out.loc[out["symbol"] == "ETHUSDT", "oos_prediction_1h"]
+    assert btc_sig.iloc[3] > 0
+    assert eth_sig.iloc[3] < 0
