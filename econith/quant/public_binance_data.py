@@ -60,12 +60,16 @@ def _rules(exchange_info: dict, symbol: str) -> dict:
 
 
 def capture_spot_hourly(symbols: list[str], *, limit: int = 300,
-                        asof_ms: int | None = None, get=public_get) -> dict:
-    """Capture contiguous fully-closed 1h candles with a shared UTC clock."""
+                        asof_ms: int | None = None, get=public_get,
+                        interval: str = "1h") -> dict:
+    """Capture contiguous fully-closed 1h or 1d spot candles in UTC."""
     if not symbols or len(symbols) > 8 or len(set(symbols)) != len(symbols):
         raise ValueError("select 1-8 unique symbols")
     if not 20 <= limit <= 1000:
         raise ValueError("limit must be in 20..1000")
+    if interval not in ("1h", "1d"):
+        raise ValueError("supported intervals: 1h, 1d")
+    timeframe_ms = 3_600_000 if interval == "1h" else 86_400_000
     asof = int(time.time() * 1000) if asof_ms is None else int(asof_ms)
     snapshots: dict[str, list] = {}
     rulebook: dict[str, dict] = {}
@@ -74,14 +78,14 @@ def capture_spot_hourly(symbols: list[str], *, limit: int = 300,
             raise ValueError(f"invalid symbol: {symbol!r}")
         info = get("exchangeInfo", {"symbol": symbol})
         rulebook[symbol] = _rules(info, symbol)
-        raw = get("klines", {"symbol": symbol, "interval": "1h", "limit": limit})
+        raw = get("klines", {"symbol": symbol, "interval": interval, "limit": limit})
         if not isinstance(raw, list):
             raise ValueError(f"{symbol}: malformed response")
         if any(not isinstance(row, list) or len(row) < 7 for row in raw):
             raise ValueError(f"{symbol}: malformed candle record")
         closed = [row for row in raw if int(row[6]) < asof]
-        validated_candles(closed, timeframe_ms=3600000, asof_ms=asof)
-        if asof - int(closed[-1][6]) > 3 * 3600000:
+        validated_candles(closed, timeframe_ms=timeframe_ms, asof_ms=asof)
+        if asof - int(closed[-1][6]) > 3 * timeframe_ms:
             raise ValueError(f"{symbol}: stale market data")
         snapshots[symbol] = closed
 
@@ -91,9 +95,9 @@ def capture_spot_hourly(symbols: list[str], *, limit: int = 300,
     aligned = {}
     for symbol, rows in snapshots.items():
         aligned[symbol] = [row for row in rows if int(row[0]) in shared]
-        validated_candles(aligned[symbol], timeframe_ms=3600000, asof_ms=asof)
+        validated_candles(aligned[symbol], timeframe_ms=timeframe_ms, asof_ms=asof)
     return {"source": "binance_spot_public", "asof_ms": asof,
-            "symbols": sorted(symbols), "timeframe": "1h", "market": aligned,
+            "symbols": sorted(symbols), "timeframe": interval, "market": aligned,
             "rules": rulebook}
 
 
@@ -123,7 +127,7 @@ def write_snapshot(result: dict, out_dir: Path) -> dict:
 def load_snapshot(out_dir: Path) -> dict:
     """Verify and load immutable snapshot files before replay."""
     manifest = json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))
-    if manifest.get("source") != "binance_spot_public" or manifest.get("timeframe") != "1h":
+    if manifest.get("source") != "binance_spot_public" or manifest.get("timeframe") not in ("1h", "1d"):
         raise ValueError("unsupported snapshot provenance")
     if set(manifest.get("sha256", {})) != {"market.json", "rules.json"}:
         raise ValueError("incomplete snapshot manifest")
@@ -138,7 +142,7 @@ def load_snapshot(out_dir: Path) -> dict:
     if sorted(contents["market.json"]) != manifest.get("symbols"):
         raise ValueError("manifest symbol mismatch")
     return {"market": contents["market.json"], "rules": contents["rules.json"],
-            "asof_ms": int(manifest["asof_ms"])}
+            "asof_ms": int(manifest["asof_ms"]), "timeframe": manifest["timeframe"]}
 
 
 
@@ -146,9 +150,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Download public Spot 1h data, never place orders")
     parser.add_argument("--symbols", nargs="+", default=["BTCUSDT", "ETHUSDT"])
     parser.add_argument("--limit", type=int, default=300)
+    parser.add_argument("--interval", choices=("1h", "1d"), default="1h")
     parser.add_argument("--out-dir", type=Path, required=True)
     args = parser.parse_args(argv)
-    snapshot = capture_spot_hourly(args.symbols, limit=args.limit)
+    snapshot = capture_spot_hourly(args.symbols, limit=args.limit, interval=args.interval)
     manifest = write_snapshot(snapshot, args.out_dir)
     print(json.dumps(manifest, indent=2))
     return 0
