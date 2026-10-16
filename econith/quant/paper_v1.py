@@ -242,15 +242,26 @@ def replay_spot(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="ECONITH offline spot paper REPLAY (never live trading)")
-    parser.add_argument("--input", type=Path, required=True, help="JSON map symbol -> Binance kline rows")
-    parser.add_argument("--rules", type=Path, required=True, help="JSON map symbol -> step_size/min_notional")
-    parser.add_argument("--asof-ms", type=int, required=True, help="UTC knowledge cut-off in milliseconds")
+    parser.add_argument("--snapshot-dir", type=Path, help="SHA-256 verified public capture directory")
+    parser.add_argument("--input", type=Path, help="unverified raw JSON map symbol -> Binance klines")
+    parser.add_argument("--rules", type=Path, help="raw JSON map symbol -> step/min_notional")
+    parser.add_argument("--asof-ms", type=int, help="UTC knowledge cutoff (raw input mode)")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
-    raw = json.loads(args.input.read_text(encoding="utf-8"))
-    market = {s: validated_candles(rows, timeframe_ms=3600000, asof_ms=args.asof_ms)
+    if args.snapshot_dir is not None:
+        if args.input is not None or args.rules is not None or args.asof_ms is not None:
+            parser.error("snapshot-dir cannot be combined with raw input arguments")
+        from econith.quant.public_binance_data import load_snapshot
+        snapshot = load_snapshot(args.snapshot_dir)
+        raw, rule_data, asof_ms = snapshot["market"], snapshot["rules"], snapshot["asof_ms"]
+    else:
+        if args.input is None or args.rules is None or args.asof_ms is None:
+            parser.error("use --snapshot-dir, or all of --input --rules --asof-ms")
+        raw = json.loads(args.input.read_text(encoding="utf-8"))
+        rule_data = json.loads(args.rules.read_text(encoding="utf-8"))
+        asof_ms = args.asof_ms
+    market = {s: validated_candles(rows, timeframe_ms=3600000, asof_ms=asof_ms)
               for s, rows in raw.items()}
-    rule_data = json.loads(args.rules.read_text(encoding="utf-8"))
     rules = {s: SymbolRules(**item) for s, item in rule_data.items()}
     report = replay_spot(market, rules)
     args.output.parent.mkdir(parents=True, exist_ok=True)
