@@ -254,7 +254,7 @@ def main(argv: list[str] | None = None) -> int:
         from econith.quant.public_binance_data import load_snapshot
         snapshot = load_snapshot(args.snapshot_dir)
         raw, rule_data, asof_ms = snapshot["market"], snapshot["rules"], snapshot["asof_ms"]
-        timeframe_ms = 86_400_000 if snapshot["timeframe"] == "1d" else 3_600_000
+        timeframe_ms = {"1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000}[snapshot["timeframe"]]
     else:
         if args.input is None or args.rules is None or args.asof_ms is None:
             parser.error("use --snapshot-dir, or all of --input --rules --asof-ms")
