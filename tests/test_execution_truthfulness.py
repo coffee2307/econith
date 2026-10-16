@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
@@ -138,3 +139,53 @@ def test_fill_report_rejected_factory() -> None:
     entry = report.to_ledger_entry()
     assert entry["filledVolume"] == 0.0
     assert entry["status"] == "REJECTED"
+
+
+def test_reality_rejects_missing_mark_before_exchange(monkeypatch) -> None:
+    import bridges.quant_bridge as qb
+    from core.mode import QuantMode
+
+    monkeypatch.setattr(qb, "current_mode", lambda: QuantMode.REALITY)
+    events = []
+
+    class Bus:
+        async def publish(self, topic, **payload):
+            events.append((topic, payload))
+
+    bridge = qb.QuantExecutionBridge.__new__(qb.QuantExecutionBridge)
+    bridge._bus = Bus()
+    bridge._build_payload = lambda _: SimpleNamespace(
+        symbol="BTCUSDT", side=SimpleNamespace(value="LONG_OPEN"), quantity=0.01
+    )
+    bridge._evaluate_pretrade = lambda *_: None
+    bridge._ccxt = MagicMock()
+    asyncio.run(bridge._on_intent(SimpleNamespace(payload={})))
+    assert events[0][0] == "order.rejected"
+    assert events[0][1]["reason"] == "missing_live_mark"
+    bridge._ccxt.execute.assert_not_called()
+
+
+def test_reality_rejects_uncalibrated_heuristic_edge(monkeypatch) -> None:
+    import bridges.quant_bridge as qb
+    from core.mode import QuantMode
+
+    monkeypatch.setattr(qb, "current_mode", lambda: QuantMode.REALITY)
+    events = []
+
+    class Bus:
+        async def publish(self, topic, **payload):
+            events.append((topic, payload))
+
+    bridge = qb.QuantExecutionBridge.__new__(qb.QuantExecutionBridge)
+    bridge._bus = Bus()
+    bridge._build_payload = lambda _: SimpleNamespace(
+        symbol="BTCUSDT", side=SimpleNamespace(value="LONG_OPEN"), quantity=0.01
+    )
+    bridge._evaluate_pretrade = lambda *_: SimpleNamespace(
+        edge_source="estimated", as_dict=lambda: {"approved": True}
+    )
+    bridge._ccxt = MagicMock()
+    asyncio.run(bridge._on_intent(SimpleNamespace(payload={})))
+    assert events[0][0] == "order.rejected"
+    assert events[0][1]["reason"] == "unverified_predictive_edge"
+    bridge._ccxt.execute.assert_not_called()
