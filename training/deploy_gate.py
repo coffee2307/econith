@@ -187,7 +187,10 @@ def gate_or_raise(
         )
 
     if metrics_report is not None:
-        metrics = load_metrics_report(metrics_report)
+        raise SystemExit(
+            "deployment refused: standalone backtest reports lack verified "
+            "forecast/data lineage; supply a timestamped OOS holdout instead"
+        )
     elif holdout is not None:
         metrics = run_holdout_backtest(holdout)
     else:
