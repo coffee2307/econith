@@ -117,6 +117,7 @@ def test_deploy_gate_accepts_timestamped_oos_predictions(tmp_path: Path) -> None
     assert metrics["realized_col"] == "forward_return_1h"
     assert metrics["rows"] == 80
     assert metrics["prediction_model_id"] == ["frozen-example-v1"]
+    assert metrics["periods_per_year"] == 8760
 
 
 def test_deploy_gate_rejects_future_predictions(tmp_path: Path) -> None:
@@ -142,6 +143,34 @@ def test_deploy_gate_rejects_copied_oracle(tmp_path: Path) -> None:
     path = tmp_path / "oracle_holdout.parquet"
     df.to_parquet(path, index=False)
     with pytest.raises(ValueError, match="reproduces realized"):
+        run_holdout_backtest(path)
+
+
+def test_deploy_gate_rejects_overlapping_horizon(tmp_path: Path) -> None:
+    from training.deploy_gate import run_holdout_backtest
+
+    df = _holdout_frame()
+    df["ts_ms"] = [1_700_000_000_000 + i * 60_000 for i in range(len(df))]
+    df["oos_prediction_1h"] = [0.002] * len(df)
+    df["prediction_asof_ms"] = df["ts_ms"]
+    df["prediction_model_id"] = "frozen-example-v1"
+    path = tmp_path / "overlapping.parquet"
+    df.to_parquet(path, index=False)
+    with pytest.raises(ValueError, match="overlapping"):
+        run_holdout_backtest(path)
+
+
+def test_deploy_gate_rejects_unaligned_multiasset_results(tmp_path: Path) -> None:
+    from training.deploy_gate import run_holdout_backtest
+
+    df = _holdout_frame()
+    df.loc[40:, "symbol"] = "ETHUSDT"
+    df["oos_prediction_1h"] = [0.002] * len(df)
+    df["prediction_asof_ms"] = df["ts_ms"]
+    df["prediction_model_id"] = "frozen-example-v1"
+    path = tmp_path / "multiasset.parquet"
+    df.to_parquet(path, index=False)
+    with pytest.raises(ValueError, match="multi-asset"):
         run_holdout_backtest(path)
 
 
