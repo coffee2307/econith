@@ -59,7 +59,7 @@ API or UI is claimed.
 | 3 - Execution and risk | IN PROGRESS | Simulated fee/spread/slip, entry caps, drawdown halt; no restart-safe order lifecycle, partial fills, daily-loss engine |
 | 4 - Reward and evolution | NOT DONE | Do NOT award reproduction credit from unrealized PnL or synthetic path |
 | 5 - Multi-agent architecture | NOT DONE | Existing components not yet integrated as audited, isolated agent contracts |
-| 6 - Scientific backtesting | IN PROGRESS | Causal replay unit tests; multi-year walk-forward/uncertainty/selection-bias analysis missing |
+| 6 - Scientific backtesting | IN PROGRESS | Cash/hold/cost-stress comparative evaluator added; external Binance exploratory results expose 1h loss; walk-forward and uncertainty analysis missing |
 | 7 - One-click dashboard | NOT DONE | Existing dashboard not connected to new paper CLI |
 | 8 - Infra and state | PARTIAL EXISTING | Docker/Postgres/Redis exist; paper event journal and crash recovery unverified |
 | 9 - CI and QA | BLOCKED | 17/17 isolated tests passed; repository-wide tests and Actions missing |
@@ -77,7 +77,7 @@ API or UI is claimed.
    drawdown halt; no real exchange calls.
 3. Tests: `tests/test_paper_v1.py`,
    `tests/test_public_binance_data.py`,
-   `tests/test_paper_binance_sample.py`: **19 passed** under an isolated
+   `tests/test_paper_binance_sample.py`: **20 no-fixture checks passed** by executing loaded source in an authorized Python REPL (including 3 evaluator checks), with full pytest/CI NOT verified. Earlier isolated suite reported 19 passed under an isolated
    Python/pytest test run on 2026-10-16.
 4. Git blob hashes compared against tested local files, confirming
    the exact files proposed in the PR were the files tested. This
@@ -122,3 +122,24 @@ Stop/Emergency Stop, then run acceptance tests and controlled paper soak.
 Never enable live trading automatically.
 
 **Release state:** NOT READY FOR DEMO TRADING.
+
+## 2026-10-16 continuation — evidence and security
+
+- Branch adds `scripts/evaluate_spot_replay.py` with cost sensitivity,
+  equal-weight passive buy-and-hold and cash comparators, independently
+  restarted historical windows; outputs fail-closed readiness status.
+- `public_binance_data.py` now supports 1h and 1d captures, up to 1000 bars.
+- Live mainnet execution in `quant/ccxt_bridge.py` hard-blocked during
+  research. Disconnected `REALITY` returns REJECTED instead of synthetic fill.
+  Additional behavior tests added, but full backend integration not run.
+- Static syntax + **20 in-memory tests passed** for new standalone
+  replay/capture/evaluation code (17 non-file tests plus 3 evaluation tests).
+  The tests involving `tmp_path` are not included in the 20 checks.
+- Initial Binance BTC/ETH/SOL test: 999 daily bars +15.24% on entire sample
+  (but drawdown stop triggers), 999 hourly bars -9.19% with ~435 simulated
+  fills, final 300 hours -5.44%, 3x costs -10.80%.
+  These are independent numerical approximations, not full ENGINE results.
+- All findings and replication steps documented in
+  `docs/PRELIMINARY_CRYPTO_BACKTEST_20261016.md`.
+- CI still fails with zero jobs, including pre-existing main runs.
+- Status remains **NOT READY FOR HIGH-EFFICIENCY TRADING OR LIVE CAPITAL**.
