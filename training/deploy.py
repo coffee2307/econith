@@ -179,13 +179,13 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="optional precomputed metrics JSON (skips running holdout)",
     )
-    p.add_argument("--min-sharpe", type=float, default=-0.5)
-    p.add_argument("--max-drawdown", type=float, default=0.45)
-    p.add_argument("--min-rows", type=int, default=50)
+    p.add_argument("--min-sharpe", type=float, default=0.25)
+    p.add_argument("--max-drawdown", type=float, default=0.30)
+    p.add_argument("--min-rows", type=int, default=500)
     p.add_argument(
         "--skip-backtest",
         action="store_true",
-        help="EMERGENCY ONLY: promote without backtest gate",
+        help="deprecated: always refused (unsafe to bypass out-of-sample validation)",
     )
     return p
 
