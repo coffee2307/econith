@@ -11,10 +11,10 @@ live-exchange paper session, not a profitable-strategy claim and not
   access and availability depend on jurisdiction/network).
 - No API key, order API, Futures, Margin or leverage is used.
 
-## 1. Capture fully closed Binance Spot 1-hour data
+## 1. Capture fully closed Binance Spot 1-hour or 1-day data
 
 ```powershell
-python -m econith.quant.public_binance_data --symbols BTCUSDT ETHUSDT --limit 300 --out-dir datasets/paper_spot_1h
+python -m econith.quant.public_binance_data --symbols BTCUSDT ETHUSDT --interval 1h --limit 300 --out-dir datasets/paper_spot_1h
 ```
 
 The collector calls public `exchangeInfo` and `klines`, parses lot size and
@@ -74,7 +74,7 @@ python -m pytest tests/test_paper_v1.py tests/test_public_binance_data.py tests/
 
 Verified independently against the exact Git blob hash of
 `econith/quant/paper_v1.py` and `tests/test_paper_v1.py` for this PR.
-19 tests passed in an isolated Python environment; this is **not** a
+20 in-memory no-fixture checks passed on an authorized Python device; full pytest/CI is still pending; this is **not** a
 claim of full repository test coverage. The historical Binance-format
 fixture is eight BTCUSDT hourly candles retrieved read-only on 2026-10-16.
 They prove parsing and deterministic execution wiring, not statistical edge.
@@ -97,3 +97,42 @@ References: [Freqtrade lookahead analysis](https://www.freqtrade.io/en/stable/lo
 [Qlib](https://github.com/microsoft/qlib).
 
 No real trading may be enabled as a side effect of these research commands.
+
+
+## Longer-horizon costs and baseline comparison
+
+Do not equate a profitable short sample with a usable trading bot.
+The current collector also supports `--interval 1d --limit 1000`
+for approximately 2.7 years of daily candles. Before trying new model
+complexity, compare the fixed-rule strategy to cash and passive Spot
+holdings, then run fee/spread/slippage scenarios:
+
+```powershell
+python -m econith.quant.public_binance_data --symbols BTCUSDT ETHUSDT SOLUSDT --interval 1d --limit 1000 --out-dir datasets/research_1d
+python -m scripts.evaluate_spot_replay --snapshot-dir datasets/research_1d --output datasets/research_1d/analysis.json
+```
+
+The evaluator does not label a short study as demonstrated OOS alpha or
+`READY FOR TRADING`; outputs the explicit
+`NOT_READY_FOR_PROFITABILITY_OR_LIVE_EXECUTION` status.
+
+**Preliminary empirical findings (separately calculated):**
+- 999 daily BTC/ETH/SOL candles (2024-01-21 through 2026-10-15),
+  base-cost momentum: approximately **+15.24%**, but the drawdown
+  breaker halted the strategy early.
+- 999 hourly candles (2026-09-05 through 2026-10-16),
+  base-cost momentum: approximately **-9.19%**, with 435 synthetic fills.
+- Costs increased 3× worsened the independently restarted final 300-hour
+  return from about **-5.44%** to **-10.80%**.
+These are **not** certified full-engine, out-of-sample or live results.
+See `docs/PRELIMINARY_CRYPTO_BACKTEST_20261016.md`.
+
+## Mainnet execution block
+
+The legacy CCXT connector previously fell back to fabricated synthetic fills
+while labelled `REALITY` when the exchange connection was unavailable.
+On this research branch, `REALITY` without authenticated **demo** connectivity
+rejects orders; only explicit `SIMULATION` can create synthetic fills.
+Capital-bearing mainnet connectivity is hard-disabled independently of
+credentials. This is a research-stage safety barrier, not evidence of
+operational readiness.
