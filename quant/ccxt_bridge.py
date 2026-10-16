@@ -199,6 +199,13 @@ class CCXTBinanceBridge:
         synthetic fills.
         """
         self._live = False
+        # Mainnet execution is explicitly disabled during research and paper
+        # certification, even when operator credentials were configured.
+        # This is a hard safety gate, not merely a setting/environment flag.
+        if self._execution_env == "live":
+            logger.error("Mainnet execution prohibited in research-only ECONITH")
+            await self._publish_execution_status()
+            return
         # Arm the air-gap guard on every boot so a later mode switch is caught.
         self._arm_mode_guard()
 
@@ -306,23 +313,26 @@ class CCXTBinanceBridge:
     @property
     def is_live(self) -> bool:
         """True only when a live, markets-loaded CCXT session is active."""
-        return self._live and self._exchange is not None
+        return (
+            self._live and self._exchange is not None
+            and self._execution_env != "live"
+        )
 
     def execution_status(self) -> dict[str, object]:
         """Structured read-model so the health API / cockpit can surface degradation."""
         mode = current_mode().value
-        if self.is_live:
-            routing = "LIVE"
-            detail = "authenticated exchange session active"
-        elif mode == "SIMULATION":
+        if mode == "SIMULATION":
             routing = "SYNTHETIC"
             detail = "SIMULATION mode — fills are synthetic by design"
-        elif not self._credentialed:
-            routing = "SYNTHETIC"
-            detail = "no real Binance credentials configured"
+        elif self._execution_env == "live":
+            routing = "BLOCKED"
+            detail = "research-only: capital-bearing exchange execution is disabled"
+        elif self.is_live:
+            routing = "DEMO"
+            detail = "authenticated sandbox/testnet session active"
         else:
             routing = "DEGRADED"
-            detail = "REALITY mode but exchange unreachable — fills degraded to synthetic"
+            detail = "REALITY without an authenticated exchange; orders are rejected"
         return {
             "quant_mode": mode,
             "execution_routing": routing,
@@ -337,7 +347,7 @@ class CCXTBinanceBridge:
         """Push routing state into MetricsHub / EventLog (DEGRADED surfaces as warn)."""
         status = self.execution_status()
         await self._bus.publish("execution.status", **status)
-        if status.get("execution_routing") == "DEGRADED":
+        if status.get("execution_routing") in ("DEGRADED", "BLOCKED"):
             await self._bus.publish(
                 "system.log",
                 level="warn",
@@ -354,13 +364,22 @@ class CCXTBinanceBridge:
     async def execute(self, payload: ExecutionPayload) -> FillReport:
         """Route an execution payload through the mode-appropriate path.
 
-        Routes live ONLY when in REALITY mode with a fully-authenticated session
-        (``is_live``); otherwise (SIMULATION, or a REALITY bridge that degraded
-        on a network fault at startup) it produces a deterministic synthetic
-        fill. A live order that raises mid-session becomes REJECTED/UNKNOWN —
-        never a synthetic fill that would corrupt equity reconciliation.
+        REALITY routes only to authenticated demo/testnet; mainnet is
+        prohibited. In REALITY without a valid demo connection, fail closed
+        with REJECTED, never a synthetic fill. Synthetic fills are restricted
+        to explicit SIMULATION mode. Unknown exchange outcomes are never
+        converted into invented fills.
         """
-        if current_mode() is QuantMode.REALITY and self.is_live:
+        if current_mode() is QuantMode.REALITY and not self.is_live:
+            report = FillReport.rejected(
+                payload,
+                reason=(
+                    "research_only_mainnet_disabled"
+                    if self._execution_env == "live"
+                    else "authenticated_demo_session_required"
+                ),
+            )
+        elif current_mode() is QuantMode.REALITY and self.is_live:
             try:
                 report = await self._execute_reality(payload)
             except Exception as exc:  # noqa: BLE001 - never break the exec loop
