@@ -254,16 +254,18 @@ def main(argv: list[str] | None = None) -> int:
         from econith.quant.public_binance_data import load_snapshot
         snapshot = load_snapshot(args.snapshot_dir)
         raw, rule_data, asof_ms = snapshot["market"], snapshot["rules"], snapshot["asof_ms"]
+        timeframe_ms = 86_400_000 if snapshot["timeframe"] == "1d" else 3_600_000
     else:
         if args.input is None or args.rules is None or args.asof_ms is None:
             parser.error("use --snapshot-dir, or all of --input --rules --asof-ms")
         raw = json.loads(args.input.read_text(encoding="utf-8"))
         rule_data = json.loads(args.rules.read_text(encoding="utf-8"))
         asof_ms = args.asof_ms
-    market = {s: validated_candles(rows, timeframe_ms=3600000, asof_ms=asof_ms)
+        timeframe_ms = 3_600_000
+    market = {s: validated_candles(rows, timeframe_ms=timeframe_ms, asof_ms=asof_ms)
               for s, rows in raw.items()}
     rules = {s: SymbolRules(**item) for s, item in rule_data.items()}
-    report = replay_spot(market, rules)
+    report = replay_spot(market, rules, PaperConfig(timeframe_ms=timeframe_ms))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
     print(f"SIMULATION ONLY: final equity {report.final_equity:.2f}; "
