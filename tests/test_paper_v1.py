@@ -91,3 +91,24 @@ def test_misaligned_assets_rejected():
     b = series(base=1700000001000)
     with pytest.raises(ValueError, match="align"):
         replay_spot({"A": a, "B": b}, {"A": SymbolRules("0.1",5), "B": SymbolRules("0.1",5)}, cfg())
+
+
+def test_symbol_rules_require_valid_minimums():
+    with pytest.raises(ValueError, match='rules'):
+        SymbolRules('0.001', -2)
+    with pytest.raises(ValueError, match='rules'):
+        SymbolRules('0', 5)
+
+
+def test_drawdown_halts_new_buys_and_exits_next_open():
+    a = series()
+    c = a[18]
+    a[18] = Candle(c.open_ms, c.close_ms, c.open, c.high,
+                   0.5, 1.0, c.volume)
+    report = replay_spot({'BTCUSDT': a}, {'BTCUSDT': SymbolRules('0.00001',5)},
+                         cfg(max_drawdown=0.05))
+    assert report.halted is True
+    assert any(f.side == 'SELL' and f.timestamp_ms == a[19].open_ms
+               for f in report.fills)
+    assert not any(f.side == 'BUY' and f.timestamp_ms >= a[19].open_ms
+                   for f in report.fills)
