@@ -97,6 +97,22 @@ class QuantExecutionBridge:
         # Expected Net Profit = Expected Gross - Fees - Slippage/Impact - Spread.
         # A non-positive expectancy (or a risk-budget breach) drops the order.
         gate = self._evaluate_pretrade(event.payload, payload)
+        # Never interpret an uncalibrated heuristic edge or absent market mark
+        # as permission to send capital-bearing orders. The current integration
+        # supplies only edge_source="estimated"; therefore REALITY remains
+        # intentionally disabled until genuine OOS model forecasts are wired.
+        if current_mode() is QuantMode.REALITY and (
+            gate is None or gate.edge_source != "model"
+        ):
+            await self._bus.publish(
+                "order.rejected",
+                symbol=payload.symbol,
+                side=payload.side.value,
+                quantity=payload.quantity,
+                reason="missing_live_mark" if gate is None else "unverified_predictive_edge",
+                gate={} if gate is None else gate.as_dict(),
+            )
+            return
         if gate is not None and not gate.approved:
             await self._bus.publish(
                 "order.rejected",
@@ -208,8 +224,8 @@ class QuantExecutionBridge:
     def _evaluate_pretrade(self, intent: dict, payload: ExecutionPayload):
         """Score a candidate order against the net-profit protocol.
 
-        Returns ``None`` (no opinion — fail-open) when there is no live mark to
-        price the order, so the gate never blocks purely for lack of a quote.
+        Returns ``None`` when no mark is available. This can be tolerated by
+        synthetic execution but is ALWAYS rejected in REALITY.
         """
         mark = self._marks.get(payload.symbol)
         if not mark or mark <= 0.0:
