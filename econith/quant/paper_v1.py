@@ -36,6 +36,10 @@ class SymbolRules:
     step_size: str
     min_notional: float
 
+    def __post_init__(self) -> None:
+        if Decimal(self.step_size) <= 0 or not math.isfinite(self.min_notional) or self.min_notional <= 0:
+            raise ValueError("invalid exchange symbol rules")
+
     def floor_qty(self, amount: float) -> float:
         if not math.isfinite(amount) or amount < 0:
             raise ValueError("invalid quantity")
