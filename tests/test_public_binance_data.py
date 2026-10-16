@@ -51,3 +51,18 @@ def test_missing_bar_rejected():
         return x[:12]+x[13:] if endpoint=='klines' else x
     with pytest.raises(ValueError, match='missing'):
         capture_spot_hourly(['BTCUSDT'],limit=24,asof_ms=1000000000000+24*3600000,get=gap)
+
+
+def test_stale_snapshot_rejected():
+    with pytest.raises(ValueError, match='stale'):
+        capture_spot_hourly(['BTCUSDT'],limit=24,
+                            asof_ms=1000000000000+30*3600000,get=feed)
+
+
+def test_malformed_candle_is_not_silently_discarded():
+    def malformed(endpoint, params):
+        values = feed(endpoint, params)
+        return values[:10]+[[]]+values[11:] if endpoint == 'klines' else values
+    with pytest.raises(ValueError, match='malformed'):
+        capture_spot_hourly(['BTCUSDT'],limit=24,
+                            asof_ms=1000000000000+24*3600000,get=malformed)
