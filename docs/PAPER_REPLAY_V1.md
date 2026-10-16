@@ -24,19 +24,23 @@ assets on a common UTC timeline, excludes still-open candles, and writes:
 - `rules.json`: observed Spot quantity step and minimum notional
 - `manifest.json`: source, UTC as-of timestamp, symbol set and SHA-256 hashes
 
-Check hashes against `manifest.json` before treating files as trustworthy;
-the standalone replay CLI does not yet verify hashes automatically. Preserve
+The preferred `--snapshot-dir` replay CLI checks SHA-256 hashes, source,
+symbol consistency and time cutoff before reading any snapshot. Preserve
 the original files immutable and make a separate directory for each snapshot.
 Captures are **historical extracts**, not WebSocket streams. Max 1000 hourly
 candles per symbol/call. This does not handle backfill pagination/delistings.
 
 ## 2. Replay spot orders without a trading API
 
-Take `asof_ms` **exactly** from the created `manifest.json`.
+Replay using the automatically verified SHA-256 manifest. This is the
+preferred path; it rejects any tampered raw data or mismatched symbols.
 
 ```powershell
-python -m econith.quant.paper_v1 --input datasets/paper_spot_1h/market.json --rules datasets/paper_spot_1h/rules.json --asof-ms <MANIFEST_ASOF_MS> --output datasets/paper_spot_1h/report.json
+python -m econith.quant.paper_v1 --snapshot-dir datasets/paper_spot_1h --output datasets/paper_spot_1h/report.json
 ```
+
+The legacy manual `--input` / `--rules` / `--asof-ms` flags remain available
+for controlled experiments, but do not perform manifest verification.
 
 `report.json` contains the unified portfolio equity curve, cash, positions,
 simulation fills, rejection reasons, realized transaction fees included in
@@ -70,7 +74,7 @@ python -m pytest tests/test_paper_v1.py tests/test_public_binance_data.py tests/
 
 Verified independently against the exact Git blob hash of
 `econith/quant/paper_v1.py` and `tests/test_paper_v1.py` for this PR.
-13 tests passed in an isolated Python environment; this is **not** a
+19 tests passed in an isolated Python environment; this is **not** a
 claim of full repository test coverage. The historical Binance-format
 fixture is eight BTCUSDT hourly candles retrieved read-only on 2026-10-16.
 They prove parsing and deterministic execution wiring, not statistical edge.
