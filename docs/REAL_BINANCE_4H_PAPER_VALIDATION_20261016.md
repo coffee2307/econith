@@ -104,6 +104,36 @@ The actual code was loaded from GitHub directly into Python memory,
 and 999-bar live-data replays executed without touching the filesystem.
 CI remains blocked with zero jobs; no full repository testing passed.
 
+
+## Predeclared universe robustness (same locked test)
+
+The *same* frozen three-candidate tournament was independently rerun on
+alternative pre-defined symbol groups (each starts with fresh 1,000 USDT):
+
+| Universe | Train selection | Test base return | Test 3x return | Verdict |
+|---|---|---:|---:|---|
+| BTC + ETH | momentum_48_200bps | -1.07804% | -2.80913% | REJECTED |
+| ETH + SOL | momentum_48_200bps | +0.25087% | -2.02028% | REJECTED |
+| BTC alone | CASH | Not traded | Not traded | No candidate passed train gate |
+
+Changes to the traded asset universe do **not** rescue the model under cost
+stress. The results were obtained from the same already-inspected historical
+window; they are robustness diagnostics, not independent OOS proof.
+
+## Test evidence in this continuation
+
+- The **latest fetched GitHub source** for paper replay, data collector,
+  ledger audit, capital sweep and tournament was loaded into Python on
+  the connected Windows device. 29 zero-fixture source-level regression
+  tests passed (0 failed). Separately, the parametric 10/100/1000-USDT
+  ledger cases passed.
+- The full pytest suite (including tmp_path fixtures), GitHub Actions CI,
+  Next.js build and FastAPI/CCXT E2E were NOT run successfully.
+- Real 999-bar Binance market data was passed into the actual Python
+  `sweep_capitals` and `tournament` functions. All six simulation cash
+  and PnL ledgers reconciled. This is **not a real exchange/demo order
+  submission** and should never be reported as such.
+
 ## Next release gates
 
 1. Repair GitHub Actions and rerun full Python/TypeScript tests.
