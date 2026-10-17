@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Mapping, Iterator
 
 from core.mode import QuantMode
-from quant.offline_admission import stable_client_order_id
+from quant.offline_admission import fingerprint, stable_client_order_id
 
 _NAMESPACE = re.compile(r"^[A-Za-z0-9_-]{1,24}$")
 
@@ -65,6 +65,15 @@ class OfflineSignalOutbox:
                     status TEXT NOT NULL CHECK (status IN ('STAGED','QUEUED','ACKED')),
                     created_at_ms INTEGER NOT NULL,
                     updated_at_ms INTEGER NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS offline_frozen_route_plans (
+                    signal_id TEXT PRIMARY KEY,
+                    signal_fingerprint TEXT NOT NULL,
+                    snapshot_json TEXT NOT NULL,
+                    snapshot_fingerprint TEXT NOT NULL,
+                    created_at_ms INTEGER NOT NULL
                 )
             """)
 
@@ -124,6 +133,102 @@ class OfflineSignalOutbox:
                 if conn.in_transaction:
                     conn.execute("ROLLBACK")
                 raise
+
+
+    def freeze_route_plan(
+        self,
+        signal_id: str,
+        route_payload: Mapping[str, Any],
+        intents: list[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        """Persist the COMPLETE immutable simulation plan before any leg is sent.
+
+        A replay must read this snapshot, never re-size from live marks or
+        in-memory exposure. Concurrent first writers serialize in SQLite;
+        changed business data cannot replace an existing plan.
+        """
+        if not isinstance(intents, list) or not 1 <= len(intents) <= 32:
+            raise ValueError("frozen plan requires 1-32 routed legs")
+        if not isinstance(route_payload, Mapping):
+            raise ValueError("route metadata must be a mapping")
+        self._parts(signal_id)
+        for index, leg in enumerate(intents):
+            if not isinstance(leg, Mapping):
+                raise ValueError("invalid routed leg")
+            if (
+                leg.get("signal_id") != signal_id
+                or leg.get("leg_index") != index
+                or leg.get("leg_count") != len(intents)
+                or leg.get("intent_id") != derive_leg_intent_id(
+                    signal_id, index, leg.get("symbol")
+                )
+                or leg.get("side") not in ("BUY", "SELL")
+                or not isinstance(leg.get("reduce_only"), bool)
+            ):
+                raise ValueError("frozen leg identity or semantics mismatch")
+        snapshot = {"route": dict(route_payload), "intents": [dict(x) for x in intents]}
+        serialized = self._encode(snapshot)
+        stored_snapshot = json.loads(serialized)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                namespace, sequence = self._parts(signal_id)
+                origin = conn.execute(
+                    "SELECT * FROM offline_signal_outbox WHERE namespace=? AND sequence=?",
+                    (namespace, sequence),
+                ).fetchone()
+                if origin is None or origin["status"] == "ACKED":
+                    raise ValueError("missing or already acknowledged outbox source")
+                source_fp = fingerprint(self._decode(origin).payload)
+                existing = conn.execute(
+                    "SELECT * FROM offline_frozen_route_plans WHERE signal_id=?",
+                    (signal_id,),
+                ).fetchone()
+                if existing is not None:
+                    if (
+                        existing["signal_fingerprint"] != source_fp
+                        or existing["snapshot_json"] != serialized
+                        or existing["snapshot_fingerprint"] != fingerprint(stored_snapshot)
+                    ):
+                        raise ValueError("immutable frozen route plan conflict")
+                else:
+                    conn.execute(
+                        """INSERT INTO offline_frozen_route_plans
+                           (signal_id,signal_fingerprint,snapshot_json,
+                            snapshot_fingerprint,created_at_ms)
+                           VALUES (?,?,?,?,?)""",
+                        (
+                            signal_id, source_fp, serialized,
+                            fingerprint(stored_snapshot), time.time_ns() // 1_000_000,
+                        ),
+                    )
+                conn.execute("COMMIT")
+            except Exception:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                raise
+        return stored_snapshot
+
+    def frozen_route_plan(self, signal_id: str) -> dict[str, Any] | None:
+        """Load a verified stored plan without recomputing market-dependent legs."""
+        origin = self.get(signal_id)
+        if origin is None:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM offline_frozen_route_plans WHERE signal_id=?",
+                (signal_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        snapshot = json.loads(row["snapshot_json"])
+        if (
+            row["signal_fingerprint"] != fingerprint(origin.payload)
+            or row["snapshot_fingerprint"] != fingerprint(snapshot)
+            or self._encode(snapshot) != row["snapshot_json"]
+        ):
+            raise ValueError("frozen route plan integrity mismatch")
+        return snapshot
 
     def mark_queued(self, signal_id: str) -> None:
         """Queued does NOT mean consumed; this cannot retire a replay."""
