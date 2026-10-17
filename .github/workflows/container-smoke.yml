@@ -72,6 +72,40 @@ jobs:
           else:
               raise SystemExit(f"backend startup or health assertion failed: {last_error}")
           PY
+      - name: Verify denied control command is audited and state DB is writable
+        run: |
+          python - <<'PY'
+          import urllib.error
+          import urllib.request
+          req = urllib.request.Request(
+              "http://127.0.0.1:8000/api/v1/mode",
+              data=b'{}',
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          try:
+              urllib.request.urlopen(req, timeout=8)
+          except urllib.error.HTTPError as exc:
+              assert exc.code == 401, f"unsafe unexpected control response {exc.code}"
+          else:
+              raise SystemExit("auth gate incorrectly accepted anonymous mutation")
+          print("UNAUTHORIZED_MUTATION_REJECTED")
+          PY
+          docker compose -f docker-compose.yml exec -T backend_core python - <<'PY'
+          import json
+          import sqlite3
+          from pathlib import Path
+
+          audit = Path("/app/logs/econith_audit.log")
+          state = Path("/app/runtime-state/econith.sqlite")
+          assert audit.is_file() and state.is_file(), (audit, state)
+          entries = [json.loads(line) for line in audit.read_text(encoding="utf-8").splitlines()]
+          assert any(row.get("decision") == "DENY" and row.get("path") == "/api/v1/mode"
+                     for row in entries), "missing durable denial audit event"
+          with sqlite3.connect(state) as connection:
+              assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+          print("DURABLE_AUDIT_AND_SQLITE_RECORDER_PASS")
+          PY
       - name: Collect sanitized container diagnostics on failure
         if: failure()
         run: docker compose -f docker-compose.yml ps && docker compose -f docker-compose.yml logs --tail=80 backend_core
