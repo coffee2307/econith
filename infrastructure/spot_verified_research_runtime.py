@@ -24,6 +24,9 @@ from ci.phase1_offline_real_capture_chain import run as verify_chain
 from infrastructure.spot_ingress_capture import OfflineSpotCaptureJournal
 from infrastructure.spot_capture_replay import OfflineSpotCaptureReplayer
 from infrastructure.preprocessing.pipeline import MarketDataPipeline
+from infrastructure.market_derived_research_receipts import (
+    OfflineDerivedResearchReceiptLedger,
+)
 
 
 class VerifiedResearchRuntimeError(RuntimeError):
@@ -45,6 +48,7 @@ class ResearchReplayStatus:
     observed_tickers: int
     observed_volume_deltas: int
     observed_orderbook_imbalance: int
+    durable_derived_research_receipts: int
     original_bytes_read_only: bool
     local_receiver_authenticated: bool
     historical_replay_only: bool
@@ -123,11 +127,23 @@ async def start_verified_research_runtime(
     pipeline = MarketDataPipeline(bus)
     pipeline.register()
     stats = {"md.ticker":0, "indicator.volume_delta":0,"indicator.obi":0}
+    derived_ledger = OfflineDerivedResearchReceiptLedger(
+        output_dir / "derived_consumer_receipts.sqlite",
+        mode_provider=lambda: QuantMode.SIMULATION,
+    )
     all_observed = asyncio.Event()
 
     async def observed(event: Event) -> None:
         if event.payload.get("source") != "verified_closed_session_replay":
             raise VerifiedResearchRuntimeError("derived signal lacks approved replay provenance")
+        derived_ledger.accept(
+            topic=event.topic,
+            session_id=event.payload["verified_session_id"],
+            ordinal=event.payload["verified_source_ordinal"],
+            source_record_id=event.payload["verified_source_record_id"],
+            source_available_at_ms=event.payload["verified_source_available_at_ms"],
+            projection=event.payload,
+        )
         stats[event.topic] += 1
         if (
             stats["md.ticker"] == len(replay.trades)
@@ -142,13 +158,17 @@ async def start_verified_research_runtime(
     try:
         # No external consumer is registered. Only research projection
         # handlers observe this historical batch; execution is never started.
-        for record in replay.trades:
+        for ordinal, record in enumerate(replay.trades, start=1):
             await publisher.publish_raw_confirmed(
                 "md.aggTrade", frame=record.payload,
                 source="verified_closed_session_replay",
                 available_at_ms=record.received_at_ms,
                 historical_replay=True,
                 session_id=session_id,
+                verified_session_id=session_id,
+                verified_source_record_id=f"{session_id}:aggTrade:{record.capture_id}",
+                verified_source_ordinal=ordinal,
+                verified_source_available_at_ms=record.received_at_ms,
             )
         book = replay.book
         # A synchronized full book is rendered into *legacy consumer schema*
@@ -166,6 +186,10 @@ async def start_verified_research_runtime(
             available_at_ms=book.available_at_ms,
             historical_replay=True,
             session_id=session_id,
+            verified_session_id=session_id,
+            verified_source_record_id=f"{session_id}:book:{book.last_update_id}",
+            verified_source_ordinal=1,
+            verified_source_available_at_ms=book.available_at_ms,
         )
         await asyncio.wait_for(all_observed.wait(), timeout=15.0)
         if (
@@ -177,6 +201,19 @@ async def start_verified_research_runtime(
         # Verify in-memory raw/derived handlers actually completed, not merely
         # that the queue contained the expected number of derived events.
         await bus.wait_verified_idle(timeout_s=15.0)
+        wanted_receipts = {
+            "md.ticker":len(replay.trades),
+            "indicator.volume_delta":len(replay.trades),
+            "indicator.obi":1,
+        }
+        durable_receipts = {
+            topic:derived_ledger.verified_count(session_id, topic)
+            for topic in wanted_receipts
+        }
+        if durable_receipts != wanted_receipts:
+            raise VerifiedResearchRuntimeError(
+                "derived consumer observation lacks durable source-bound ACK"
+            )
         # A direct legacy publisher is forbidden after activation, irrespective
         # of any claimed 'verified' source flag in the event body.
         try:
@@ -207,6 +244,7 @@ async def start_verified_research_runtime(
             observed_tickers=stats["md.ticker"],
             observed_volume_deltas=stats["indicator.volume_delta"],
             observed_orderbook_imbalance=stats["indicator.obi"],
+            durable_derived_research_receipts=sum(durable_receipts.values()),
             original_bytes_read_only=True,
             local_receiver_authenticated=True,
             historical_replay_only=True,
