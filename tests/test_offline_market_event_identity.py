@@ -79,9 +79,9 @@ def test_reused_source_identity_with_different_market_payload_fails_closed(tmp_p
 
 def test_parallel_first_writers_assign_one_durable_signal(tmp_path):
     db = tmp_path / "concurrent.sqlite"
+    box = OfflineSignalOutbox(db, namespace="research")
 
     def write(index):
-        box = OfflineSignalOutbox(db, namespace="research")
         return box.stage_for_event(
             SOURCE_ID, MARKET_EVENT, {"action": "LONG" if index % 2 else "SHORT"},
             mode=QuantMode.SIMULATION,
