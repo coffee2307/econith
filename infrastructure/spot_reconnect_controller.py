@@ -84,6 +84,29 @@ class OfflineSpotReconnectController:
         self.clock_ms = clock_ms or (lambda: time.time_ns() // 1_000_000)
         with journal._connect() as conn:
             conn.execute("""
+                CREATE TABLE IF NOT EXISTS offline_spot_reconnect_controllers (
+                    controller_id TEXT PRIMARY KEY,
+                    symbol TEXT NOT NULL
+                )
+            """)
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                conn.execute("""
+                    INSERT OR IGNORE INTO offline_spot_reconnect_controllers
+                    (controller_id,symbol) VALUES (?,?)
+                """, (self.controller_id, self.symbol))
+                owned = conn.execute("""
+                    SELECT symbol FROM offline_spot_reconnect_controllers
+                    WHERE controller_id=?
+                """, (self.controller_id,)).fetchone()
+                if owned["symbol"] != self.symbol:
+                    raise ReconnectError("controller ID already bound to another symbol")
+                conn.execute("COMMIT")
+            except Exception:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                raise
+            conn.execute("""
                 CREATE TABLE IF NOT EXISTS offline_spot_reconnect_attempts (
                     attempt_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     controller_id TEXT NOT NULL,
@@ -241,8 +264,22 @@ class OfflineSpotReconnectController:
                     raise ReconnectError("attempt missing or already finalized")
                 if now < row["started_at_ms"]:
                     raise ReconnectError("non-monotonic attempt finalization")
+                if row["symbol"] != self.symbol:
+                    raise ReconnectError("attempt belongs to another instrument")
                 if status == "SUCCESS" and result.session_id != row["session_id"]:
                     raise ReconnectError("capture result belongs to another session")
+                if status == "SUCCESS":
+                    source = conn.execute("""
+                        SELECT * FROM offline_spot_capture_sessions
+                        WHERE session_id=?
+                    """, (row["session_id"],)).fetchone()
+                    if (
+                        source is None
+                        or source["opened_at_ms"] < row["started_at_ms"]
+                        or source["closed_at_ms"] > now
+                        or result.last_received_at_ms > now
+                    ):
+                        raise ReconnectError("captured session clock outside attempt interval")
                 conn.execute("""
                     UPDATE offline_spot_reconnect_attempts
                     SET finished_at_ms=?, status=?, failure_code=?,
@@ -296,6 +333,8 @@ class OfflineSpotReconnectController:
                     ORDER BY sequence
                 """, (self.controller_id,)).fetchall()
                 for row in rows:
+                    if row["symbol"] != self.symbol:
+                        raise ReconnectError("incomplete attempt belongs to another instrument")
                     if now < row["started_at_ms"]:
                         raise ReconnectError("recovery clock precedes attempt start")
                     conn.execute("""
@@ -328,6 +367,8 @@ class OfflineSpotReconnectController:
                 """, (self.controller_id,)).fetchone()
                 if prev is not None and prev["status"] == "STARTED":
                     raise ReconnectError("unreconciled in-flight attempt")
+                if prev is not None and prev["symbol"] != self.symbol:
+                    raise ReconnectError("controller history belongs to another symbol")
                 if prev is not None and now < prev["finished_at_ms"]:
                     raise ReconnectError("reconnect clock regressed")
                 sequence = 1 if prev is None else prev["sequence"] + 1
