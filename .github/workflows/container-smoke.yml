@@ -189,6 +189,90 @@ jobs:
           assert any(row.get("decision") == "DENY" for row in entries)
           print("RESTART_PERSISTENCE_TWO_JOURNALS_AND_AUDIT_PASS")
           PY
+      - name: PostgreSQL full logical backup and isolated restore drill
+        run: |
+          # Entirely disposable CI postgres; no secrets from GitHub or an actual DB.
+          # Restore into a NEW database rather than overwrite the source.
+          docker compose -f docker-compose.yml exec -T postgres psql \
+            -X -v ON_ERROR_STOP=1 -U econith -d econith <<'SQL'
+          CREATE TABLE IF NOT EXISTS public.phase05_restore_probe (
+            id INTEGER PRIMARY KEY,
+            payload TEXT NOT NULL
+          );
+          INSERT INTO public.phase05_restore_probe (id, payload)
+          VALUES (17, 'synthetic-restore-marker')
+          ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload;
+          SQL
+          dump_file="${RUNNER_TEMP}/econith-disposable-postgres.dump"
+          # -Fc is PostgreSQL's restorable custom format (all DB tables/schema).
+          docker compose -f docker-compose.yml exec -T postgres pg_dump \
+            -U econith -d econith --format=custom --no-owner --no-acl \
+            > "$dump_file"
+          test -s "$dump_file"
+          docker compose -f docker-compose.yml exec -T postgres createdb \
+            -U econith econith_phase05_restored
+          docker compose -f docker-compose.yml exec -T postgres pg_restore \
+            -U econith -d econith_phase05_restored \
+            --no-owner --no-acl --exit-on-error < "$dump_file"
+          restored="$(docker compose -f docker-compose.yml exec -T postgres \
+            psql -X -A -t -v ON_ERROR_STOP=1 -U econith \
+            -d econith_phase05_restored \
+            -c "SELECT payload FROM public.phase05_restore_probe WHERE id=17")"
+          test "$restored" = "synthetic-restore-marker"
+          # Source table is still present; the restore never replaced production data.
+          source_value="$(docker compose -f docker-compose.yml exec -T postgres \
+            psql -X -A -t -v ON_ERROR_STOP=1 -U econith \
+            -d econith \
+            -c "SELECT payload FROM public.phase05_restore_probe WHERE id=17")"
+          test "$source_value" = "$restored"
+          docker compose -f docker-compose.yml exec -T postgres dropdb \
+            -U econith econith_phase05_restored
+          rm -f "$dump_file"
+          echo POSTGRES_FULL_LOGICAL_BACKUP_ISOLATED_RESTORE_PASS
+      - name: SIGKILL backend crash must preserve committed journals and audit
+        run: |
+          # Distinct from a graceful 'compose restart': terminate the process
+          # abruptly, then explicitly re-create the backend without deps.
+          docker compose -f docker-compose.yml kill -s SIGKILL backend_core
+          docker compose -f docker-compose.yml up -d --no-deps backend_core
+          python - <<'PY'
+          import json
+          import time
+          import urllib.request
+          end = time.monotonic() + 90
+          while time.monotonic() < end:
+              try:
+                  with urllib.request.urlopen(
+                      "http://127.0.0.1:8000/api/v1/health", timeout=5
+                  ) as response:
+                      status = json.load(response)
+                  assert status["status"] == "ok", status
+                  assert status["mock"] is True, status
+                  print("SIGKILL_BACKEND_RESTART_HEALTH_PASS")
+                  break
+              except (OSError, AssertionError, ValueError):
+                  time.sleep(2)
+          else:
+              raise SystemExit("backend failed to recover after SIGKILL")
+          PY
+          docker compose -f docker-compose.yml exec -T backend_core python - <<'PY'
+          import json
+          import sqlite3
+          from pathlib import Path
+          for name in ("econith.sqlite", "trades.sqlite"):
+              with sqlite3.connect(Path("/app/runtime-state") / name) as db:
+                  assert db.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+                  marker = db.execute(
+                      "SELECT value FROM phase0_persistence_probe WHERE key=?",
+                      ("runner-check",),
+                  ).fetchone()
+                  assert marker == ("preserve-across-restart",), (name, marker)
+          lines = Path("/app/logs/econith_audit.log").read_text(
+              encoding="utf-8"
+          ).splitlines()
+          assert any(json.loads(line).get("decision") == "DENY" for line in lines)
+          print("SIGKILL_COMMITTED_STATE_AND_AUDIT_RECOVERED_PASS")
+          PY
       - name: Production database outage must fail closed, never fork to SQLite
         run: |
           docker compose -f docker-compose.yml run --rm --no-deps -T \
