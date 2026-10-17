@@ -11,6 +11,7 @@ import hashlib
 import json
 import re
 import sqlite3
+import time
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -77,6 +78,7 @@ class OfflineSpotCaptureJournal:
     def __init__(
         self, path: str | Path, *, mode_provider: Callable[[], QuantMode],
         max_body_bytes: int = 262_144, max_frames_per_session: int = 100_000,
+        max_age_ms: int = 10_000, max_future_skew_ms: int = 1000,
     ) -> None:
         if not callable(mode_provider):
             raise ValueError("SIMULATION-only mode provider is required")
@@ -84,12 +86,16 @@ class OfflineSpotCaptureJournal:
             type(max_body_bytes) is not int or not 1024 <= max_body_bytes <= 4_194_304
             or type(max_frames_per_session) is not int
             or not 1 <= max_frames_per_session <= 1_000_000
+            or type(max_age_ms) is not int or max_age_ms < 0
+            or type(max_future_skew_ms) is not int or max_future_skew_ms < 0
         ):
             raise ValueError("invalid raw-capture resource bounds")
         self.path = Path(path)
         self._mode_provider = mode_provider
         self.max_body_bytes = max_body_bytes
         self.max_frames_per_session = max_frames_per_session
+        self.max_age_ms = max_age_ms
+        self.max_future_skew_ms = max_future_skew_ms
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
@@ -201,6 +207,7 @@ class OfflineSpotCaptureJournal:
 
     def _classify(
         self, parsed: Mapping[str, Any], *, symbol: str, kind: str,
+        received_at_ms: int,
     ) -> None:
         if kind == "snapshot":
             if (
@@ -233,14 +240,24 @@ class OfflineSpotCaptureJournal:
                 OfflineMarketIntegrityJournal._validate(frame)
             except MarketEventError as exc:
                 raise SpotCaptureError("malformed original aggregate trade") from exc
+            timestamp = self._positive(frame["E"], "aggregate trade E")
+            trade_time = self._positive(frame["T"], "aggregate trade T")
+            if timestamp - trade_time > self.max_age_ms:
+                raise SpotCaptureError("trade event/trade clock lag exceeds tolerance")
+            earlier = min(timestamp, trade_time)
         else:
             first = self._positive(frame.get("U"), "U")
             last = self._positive(frame.get("u"), "u")
-            self._positive(frame.get("E"), "exchange depth event time")
+            timestamp = self._positive(frame.get("E"), "exchange depth event time")
+            earlier = timestamp
             if first > last or "pu" in frame or "lastUpdateId" in frame:
                 raise SpotCaptureError("wrong market or invalid Spot depth interval")
             self._level_rows(frame.get("b"))
             self._level_rows(frame.get("a"))
+        if timestamp > received_at_ms + self.max_future_skew_ms:
+            raise SpotCaptureError("source event is future-dated versus receipt")
+        if received_at_ms - earlier > self.max_age_ms:
+            raise SpotCaptureError("source event is stale versus receipt")
 
     def start_session(
         self, session_id: str, *, symbol: str, source: str,
@@ -303,7 +320,10 @@ class OfflineSpotCaptureJournal:
     ) -> int:
         self._simulation_only()
         self._part(session_id, "session_id")
-        received = self._positive(received_at_ms, "received_at_ms")
+        received = self._positive(
+            time.time_ns() // 1_000_000 if received_at_ms is None
+            else received_at_ms, "received_at_ms",
+        )
         if request_started_at_ms is not None:
             requested = self._positive(
                 request_started_at_ms, "request_started_at_ms",
@@ -327,7 +347,10 @@ class OfflineSpotCaptureJournal:
                     raise SpotCaptureError("unrecognized REST depth endpoint")
                 if kind != "snapshot" and endpoint != session["ws_endpoint"]:
                     raise SpotCaptureError("websocket endpoint/session mismatch")
-                self._classify(parsed, symbol=session["symbol"], kind=kind)
+                self._classify(
+                    parsed, symbol=session["symbol"], kind=kind,
+                    received_at_ms=received,
+                )
                 count = conn.execute("""
                     SELECT COUNT(*) AS n FROM offline_spot_capture_records
                     WHERE session_id=?
@@ -355,7 +378,7 @@ class OfflineSpotCaptureJournal:
 
     def record_ws(
         self, session_id: str, raw: str | bytes, *,
-        stream_kind: str, received_at_ms: int,
+        stream_kind: str, received_at_ms: int | None = None,
     ) -> int:
         if stream_kind not in ("aggTrade", "depthUpdate"):
             raise SpotCaptureError("only Spot aggTrade/diff-depth permitted")
@@ -370,7 +393,7 @@ class OfflineSpotCaptureJournal:
     def record_snapshot(
         self, session_id: str, raw: str | bytes, *,
         rest_endpoint: str, request_symbol: str,
-        request_started_at_ms: int, received_at_ms: int,
+        request_started_at_ms: int, received_at_ms: int | None = None,
     ) -> int:
         self._symbol(request_symbol)
         with self._connect() as conn:
@@ -432,7 +455,10 @@ class OfflineSpotCaptureJournal:
                 or row["request_started_at_ms"] is not None
             ):
                 raise SpotCaptureError("stored WebSocket provenance invalid")
-            self._classify(parsed, symbol=session["symbol"], kind=kind)
+            self._classify(
+                parsed, symbol=session["symbol"], kind=kind,
+                received_at_ms=row["received_at_ms"],
+            )
             prior_ms = row["received_at_ms"]
             result.append(CapturedSpotRecord(
                 capture_id=row["capture_id"], session_id=session_id,
