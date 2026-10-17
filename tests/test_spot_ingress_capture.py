@@ -229,6 +229,23 @@ def test_tampered_source_bytes_metadata_or_clock_fail_replay(tmp_path, column, v
         j.replay_as_of("ws1", BASE + 300)
 
 
+
+def test_rest_request_symbol_is_persisted_and_checked_on_replay(tmp_path):
+    j, _ = ready(tmp_path)
+    rest(j, BASE + 200)
+    with sqlite3.connect(j.path) as conn:
+        stored = conn.execute(
+            "SELECT request_symbol FROM offline_spot_capture_records"
+        ).fetchone()
+        assert stored[0] == "BTCUSDT"
+        conn.execute(
+            "UPDATE offline_spot_capture_records SET request_symbol=?",
+            ("ETHUSDT",),
+        )
+    with pytest.raises(SpotCaptureError, match="REST provenance"):
+        j.replay_as_of("ws1", BASE + 300)
+
+
 def test_replay_detects_gap_and_conflicting_duplicate_agg_trades(tmp_path):
     j, _ = ready(tmp_path)
     ws(j, trade(100), BASE + 100)
