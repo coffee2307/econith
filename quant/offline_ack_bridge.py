@@ -151,6 +151,14 @@ class OfflineSignalAckBridge:
             raise AdmissionReceiptError("source signal is missing")
         if fingerprint(origin.payload) != source_hash:
             raise AdmissionReceiptError("outbox source payload mismatch")
+        try:
+            frozen = self.outbox.frozen_route_plan(signal_id)
+        except ValueError as exc:
+            raise AdmissionReceiptError("corrupt frozen plan source") from exc
+        if frozen is not None:
+            expected = frozen["intents"]
+            if len(expected) != count or fingerprint(expected[index]) != intent_hash:
+                raise AdmissionReceiptError("intent disagrees with immutable frozen plan")
 
         now = time.time_ns() // 1_000_000
         with self._connect() as conn:
@@ -237,9 +245,30 @@ class OfflineSignalAckBridge:
                 "SELECT COUNT(*) FROM offline_signal_receipt_legs WHERE signal_id=?",
                 (signal_id,),
             ).fetchone()[0]
-        return (row["status"] == "COMMITTED"
+        if not (row["status"] == "COMMITTED"
                 and row["signal_fingerprint"] == source_hash
-                and row["expected_legs"] == leg_count == count)
+                and row["expected_legs"] == leg_count == count):
+            return False
+        try:
+            frozen = self.outbox.frozen_route_plan(signal_id)
+        except ValueError:
+            return False
+        if frozen is None:
+            return True  # historical research receipts predate plan freezing
+        if len(frozen["intents"]) != count:
+            return False
+        with self._connect() as conn:
+            admitted = conn.execute(
+                """SELECT leg_index,intent_fingerprint
+                   FROM offline_signal_receipt_legs
+                   WHERE signal_id=? ORDER BY leg_index""",
+                (signal_id,),
+            ).fetchall()
+        return all(
+            row["leg_index"] == index
+            and row["intent_fingerprint"] == fingerprint(frozen["intents"][index])
+            for index, row in enumerate(admitted)
+        )
 
     def acknowledge_if_committed(
         self, signal_id: str, source_hash: str, leg_count: int,
