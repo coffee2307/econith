@@ -243,7 +243,9 @@ def test_bad_spot_diff_rejected(mutator):
     mutator(payload)
     with pytest.raises(DepthSyncError):
         book.ingest_diff(payload, received_at_ms=BASE + 100)
-    assert book.status == "BUFFERING"
+    # A rejected websocket packet might contain indispensable updates:
+    # do not silently continue buffering or publish an old book.
+    assert book.status == "RESET_REQUIRED"
 
 
 def test_wrong_session_and_early_snapshot_receipt_rejected():
@@ -291,4 +293,37 @@ def test_book_growth_past_configured_max_levels_requires_resync():
         diff(103, 103, bid=[["98", "1"]]), received_at_ms=BASE + 200,
     )
     assert result.status == "RESET_REQUIRED"
+    assert book.status == "RESET_REQUIRED"
+
+
+def test_clock_regression_resets_instead_of_backdating_book():
+    book, _ = make()
+    initial(book)
+    result = book.ingest_diff(
+        diff(103, 104), received_at_ms=BASE + 100,
+    )
+    assert result.status == "RESET_REQUIRED"
+    with pytest.raises(DepthSyncError):
+        book.view()
+
+
+def test_malformed_packet_after_sync_invalidates_book():
+    book, _ = make()
+    initial(book)
+    with pytest.raises(DepthSyncError, match="wrong stream"):
+        book.ingest_diff(
+            diff(103, 104, symbol="ETHUSDT"),
+            received_at_ms=BASE + 200,
+        )
+    assert book.status == "RESET_REQUIRED"
+    with pytest.raises(DepthSyncError):
+        book.view()
+
+
+def test_non_json_payload_is_rejected_as_depth_sync_error():
+    book, _ = make()
+    event = diff()
+    event["unknown_extra"] = {1, 2}
+    with pytest.raises(DepthSyncError, match="non-JSON"):
+        book.ingest_diff(event, received_at_ms=BASE + 100)
     assert book.status == "RESET_REQUIRED"
