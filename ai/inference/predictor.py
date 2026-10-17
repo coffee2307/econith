@@ -29,7 +29,7 @@ import asyncio
 import logging
 import math
 from dataclasses import asdict
-from typing import Any
+from typing import Any, Callable, Mapping
 
 from ai.agents.agent_loaders import load_active_agents
 from ai.agents.base import BaseAgent
@@ -43,7 +43,7 @@ from ai.regime.regime import load_active_regime
 from ai.regime.switcher import RegimeSwitcher
 from core.event_bus import Event, EventBus
 from core.mode import QuantMode, get_mode_manager
-from quant.offline_signal_outbox import OfflineSignalOutbox
+from quant.offline_signal_outbox import OfflineSignalOutbox, StoredSignal
 
 logger = logging.getLogger("econith.ai.inference")
 
@@ -342,6 +342,40 @@ class Predictor:
             # Relax the transient world shock toward neutral.
             if self._impact_left > 0:
                 self._impact_left -= 1
+
+
+    async def publish_for_market_event(
+        self,
+        source_event_id: str,
+        source_payload: Mapping[str, Any],
+        decision_factory: Callable[[], Mapping[str, Any]],
+    ) -> StoredSignal:
+        """Explicit research-only ingress for a caller-authored immutable event.
+
+        The caller must supply a stable source ID and exact canonical market
+        event, not a wall-clock ID or a mutable feature snapshot. The factory
+        is NEVER called again when a source decision already exists. This is
+        intentionally not wired into the cadence-based default run loop.
+        """
+        if self._offline_signal_outbox is None:
+            raise RuntimeError("durable market-event ingress requires opt-in outbox")
+        if self._mode.mode is not QuantMode.SIMULATION:
+            raise RuntimeError("durable market-event ingress strictly SIMULATION-only")
+        staged = self._offline_signal_outbox.get_for_event(
+            source_event_id, source_payload
+        )
+        if staged is None:
+            staged = self._offline_signal_outbox.stage_for_event(
+                source_event_id, source_payload, decision_factory(),
+                mode=self._mode.mode,
+            )
+        if staged.status != "ACKED":
+            # Crash after commit and before enqueue remains recoverable using
+            # the original source ID and signal envelope.
+            await self._offline_signal_outbox.publish_to_simulation(
+                self._bus, staged, mode=self._mode.mode
+            )
+        return staged
 
     async def _publish_advisory_signal(self, payload: dict[str, Any]) -> None:
         """Default path unchanged; optional durable research path is SIM only."""
