@@ -127,3 +127,46 @@ be essential to reproducing the original KHKT result. A zero-byte
 5. Only then propose high-risk folder moves/deletions as separate PRs.
 
 **Governance:** no real exchange orders, no merge, no research evidence loss.
+
+## Confirmed GitHub Actions root cause and repair
+
+Read-only investigation of GitHub Actions run `38924252770` showed a
+workflow conclusion of `failure` with **zero jobs**. Parsing the current
+`.github/workflows/ci.yml` with PyYAML on the connected Windows
+machine raised `yaml.scanner.ScannerError` at workflow **line 42**,
+the inline `run:` scalar containing a Python dictionary with `: `
+pairs. This invalid YAML prevented GitHub from scheduling jobs.
+
+**Repair:** encode the same Python deploy-gate smoke command as a
+YAML literal block using `run: |` instead of an unquoted inline
+scalar. Preserve command semantics. Add `PyYAML==6.0.2` to development
+requirements and `tests/test_ci_workflow.py` to prevent recurrence.
+
+After this correction, GitHub run
+[38997163293](https://github.com/coffee2307/econith/actions/runs/38997163293)
+successfully created **both** `dashboard` and `pytest` jobs. The
+`dashboard` job passed checkout, `npm ci`, `npm run lint` and
+`npm run build`. The `pytest` job passed environment setup and
+`python -m ci.repo_hygiene_check --root . --enforce`, and continued
+to the Python test step when checked. **Do not label the entire
+workflow successful until the Python job concludes.**
+
+## Static execution-authority checkpoints
+
+The new `ci/architecture_inventory.py` performs source AST analysis
+without importing production modules. Three pure unit tests passed
+on the authorized in-memory Python session. An initial static sample
+identified:
+
+| File | Evidence | Pending action |
+|---|---|---|
+| `quant/ccxt_bridge.py` | Direct `create_order` call plus `quant.fill` publication | Verify hard mainnet kill switch, idempotency and reconciliation |
+| `bridges/quant_bridge.py` | `order.intent` event contract | Map subscribers and Sentinel veto |
+| `econith_quant/bridge/ai_bridge.py` | `order.intent` advisory→intent | Determine actual active runtime binding |
+| `econith_quant/bridge/exchange_bridge.py` | `order.intent` observer and mock execution | Distinguish telemetry from capital-bearing authority |
+| `econith/world/abides_kernel.py` | Publishes `quant.fill` in simulation | Verify World/Quant isolation and mode tags |
+| `sentinel/manager.py` | Consumes `quant.fill` for account risk | Verify fill provenance and ledger truth |
+
+These are **static observations**, not proof that every publisher is
+active concurrently or that capital can actually be double counted.
+The full import/event graph requires a complete checkout and tests.
