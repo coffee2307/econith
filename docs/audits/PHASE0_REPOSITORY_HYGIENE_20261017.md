@@ -170,3 +170,68 @@ identified:
 These are **static observations**, not proof that every publisher is
 active concurrently or that capital can actually be double counted.
 The full import/event graph requires a complete checkout and tests.
+
+
+## Phase 0 follow-up — service ownership, CI and container reality checks
+
+### 2026-10-17: startup/process-safety refactor
+
+Before this change `scripts/dev.mjs` killed **whatever** owned TCP ports
+3001/5001 on Windows via `Stop-Process -Force` or Unix `kill -9`. This
+is unrelated-process termination, NOT a valid resource ownership check.
+At the same time root `npm run dev` presumed that the
+`econith_social` gitlink resolved to a complete checkout with a valid
+`package.json`, even though the Git tree has no `.gitmodules` URL
+for that one remaining gitlink.
+
+Implemented:
+- `scripts/runtime_services.mjs` is a pure manifest-based service planner.
+  A runnable optional Social sidecar requires a parseable package.json and
+  a nonempty npm `dev` script; `setup:all` is optional.
+- `scripts/dev.mjs` no longer executes Windows/Unix port-kill commands.
+  It starts Docker Core even if the optional Social checkout is missing
+  and logs an explicit warning instead of invoking npm in a dead directory.
+  If `ECONITH_REQUIRE_SOCIAL=1`, absence prevents startup.
+- `scripts/setup.mjs` uses deterministic `npm ci`, skips absent Social
+  with a warning or fails if explicitly required. It does not fabricate
+  a repository URL or clone from an untrusted source.
+- Five Node built-in test cases in `tests/node/runtime_services.test.mjs`
+  exercise optional, required, invalid, and valid Social checkout and
+  verify startup does not contain arbitrary port-killing commands.
+  These run on GitHub's Node runner.
+- `docker-compose.yml` and `docker-compose.prod.yml` configuration are
+  validated using disposable **placeholder** variables, not real secrets.
+  Dev Compose itself was not modified.
+
+### Container gates
+
+- `ci.yml`: Node dev-orchestration tests, dashboard lint/build,
+  Python tests and research-only World smoke, plus `container-config`.
+- `.github/workflows/container-images.yml`: actually builds production
+  dashboard and non-ML backend Docker images on relevant PR changes
+  and manual dispatch. No exchange credentials or account operations.
+  Both Docker image builds passed in run
+  [38998339818](https://github.com/coffee2307/econith/actions/runs/38998339818).
+- `.github/workflows/container-smoke.yml`: integration check in
+  disposable Docker Compose with PostgreSQL, Redis and a backend configured
+  with `BINANCE_MARKET_DATA_MODE=mock`,
+  `BINANCE_EXECUTION_ENV=demo` and NO exchange credentials.
+  It validates `/api/v1/health` reports `synthetic_mock`, then tears down
+  the runner's containers and ephemeral volumes.
+  This checks startup/data provenance only: NOT exchange testnet orders,
+  not autonomous-trading readiness, not profit.
+- YAML regression coverage now parses **all** tracked workflows, helping
+  prevent another zero-job GitHub Actions failure.
+
+### Retained deployment caveats
+
+- Production Caddy routes `/api/v1/*` to the backend directly, with
+  credentials added server-side. The dashboard's Next.js Social proxy
+  uses `SOCIAL_INTERNAL_URL`, but production Compose does not deploy
+  `econith_social`. Social production completeness is unresolved.
+- Image builds do not prove operational correctness under traffic,
+  crash recovery, risk gates or real market-data outages.
+- `econith_social` original gitlink is still intentionally preserved
+  pending an owner-confirmed source URL; not automatically bootstrapped.
+- The desktop connection has recently reported the authorized machine
+  offline. No local configuration or file changes have been made.
