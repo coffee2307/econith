@@ -134,7 +134,7 @@ async def run(args: argparse.Namespace) -> dict:
         first = attempts[0]
         second = attempts[1]
         first_originals = source.replay_as_of(
-            first.session_id, as_of_ms=second.finished_at_ms,
+            first.session_id, second.finished_at_ms,
         )
         second_book = OfflineSpotCaptureReplayer(source).replay(
             second.session_id, as_of_ms=second.finished_at_ms,
