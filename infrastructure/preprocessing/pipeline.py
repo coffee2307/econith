@@ -45,6 +45,25 @@ class MarketDataPipeline:
         self._bus.subscribe("md.depth", self._on_depth)
         logger.info("orderflow pipeline registered")
 
+    @staticmethod
+    def _verified_research_metadata(event: Event) -> dict:
+        """Optional source coordinates for only the guarded research graph.
+
+        Ordinary legacy streamer frames contain none of these keys and
+        retain their original derived-payload contract. Missing/partial
+        verified metadata is a handler failure, not silent loss of lineage.
+        """
+        names = (
+            "verified_session_id", "verified_source_record_id",
+            "verified_source_ordinal", "verified_source_available_at_ms",
+        )
+        present = [name in event.payload for name in names]
+        if not any(present):
+            return {}
+        if not all(present):
+            raise ValueError("partial verified research source lineage")
+        return {name: event.payload[name] for name in names}
+
     async def _on_agg_trade(self, event: Event) -> None:
         trade = clean_agg_trade(event.payload["frame"])
         if trade is None:
@@ -60,6 +79,7 @@ class MarketDataPipeline:
             price=trade.price,
             event_ms=trade.event_ms,
             source=event.payload.get("source", "unknown"),
+            **self._verified_research_metadata(event),
         )
         await self._bus.publish(
             "indicator.volume_delta",
@@ -70,6 +90,7 @@ class MarketDataPipeline:
             window_s=vd.window_s,
             trade_count=vd.trade_count,
             source=event.payload.get("source", "unknown"),
+            **self._verified_research_metadata(event),
         )
 
     async def _on_depth(self, event: Event) -> None:
@@ -90,4 +111,5 @@ class MarketDataPipeline:
             best_bid=snapshot.best_bid,
             best_ask=snapshot.best_ask,
             source=event.payload.get("source", "unknown"),
+            **self._verified_research_metadata(event),
         )
