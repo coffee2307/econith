@@ -255,3 +255,25 @@ def test_regressing_partial_fill_is_quarantined_not_replayed(tmp_path):
         )
     assert ledger.get(item.intent_id).status == "UNKNOWN"
     assert ledger.begin_submission(item.intent_id) is False
+
+
+def test_one_broker_order_cannot_be_credited_to_two_intents(tmp_path):
+    ledger = OfflineAdmissionLedger(tmp_path / "ledger.sqlite")
+    first = ledger.admit("intent-a", sample_intent())
+    second = ledger.admit("intent-b", sample_intent())
+    assert first.client_order_id != second.client_order_id
+    assert ledger.begin_submission(first.intent_id)
+    assert ledger.begin_submission(second.intent_id)
+    def evidence(cid):
+        return BrokerObservation(
+            client_order_id=cid,
+            broker_order_id="VENUE-ONE-ONLY",
+            status="FILLED",
+            filled_quantity=0.025,
+        )
+    assert ledger.reconcile_read_only(first.intent_id, evidence).status == "RECONCILED"
+    with pytest.raises(ReconciliationError, match="different intent"):
+        ledger.reconcile_read_only(second.intent_id, evidence)
+    assert ledger.get(first.intent_id).status == "RECONCILED"
+    assert ledger.get(second.intent_id).status == "UNKNOWN"
+    assert ledger.begin_submission(second.intent_id) is False
