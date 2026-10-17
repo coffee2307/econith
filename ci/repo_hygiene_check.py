@@ -34,7 +34,11 @@ def forbidden_tracked_path(path: str) -> str | None:
     parts = normalized.split("/")
     if any(p in _GENERATED_PARTS for p in parts):
         return "tracked-generated-directory"
-    if parts[-1] in _TRACKED_SECRET_BASENAMES:
+    filename = parts[-1]
+    if filename in _TRACKED_SECRET_BASENAMES or (
+        filename.startswith(".env.")
+        and not filename.endswith((".example", ".sample", ".template", ".dist"))
+    ):
         return "tracked-sensitive-local-file"
     if parts[-1].endswith((".pyc", ".pyo", ".tsbuildinfo")):
         return "tracked-compiled-artifact"
