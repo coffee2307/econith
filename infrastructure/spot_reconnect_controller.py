@@ -16,6 +16,7 @@ from typing import Awaitable, Callable
 from infrastructure.spot_ingress_capture import (
     OfflineSpotCaptureJournal, SpotCaptureError,
 )
+from infrastructure.spot_capture_replay import OfflineSpotCaptureReplayer
 from infrastructure.spot_public_capture_adapter import (
     OptInSpotIngressAdapter, SpotTransportResult,
 )
@@ -199,6 +200,30 @@ class OfflineSpotReconnectController:
                 or result.last_update_id <= 0
             ):
                 raise ReconnectError("capture success without verified Spot book")
+            # Callbacks can lie or return a stale result. Independently
+            # reconstruct from journal bytes and require a closed session.
+            replay = OfflineSpotCaptureReplayer(self.journal).replay(
+                result.session_id, as_of_ms=result.last_received_at_ms,
+            )
+            if (
+                replay.book is None
+                or replay.book.last_update_id != result.last_update_id
+                or sum(x.kind == "snapshot" for x in
+                       self.journal.replay_as_of(result.session_id, result.last_received_at_ms)) != 1
+            ):
+                raise ReconnectError("unverified persisted depth before success")
+            with self.journal._connect() as verify_conn:
+                source = verify_conn.execute(
+                    "SELECT * FROM offline_spot_capture_sessions WHERE session_id=?",
+                    (result.session_id,),
+                ).fetchone()
+                if (
+                    source is None
+                    or source["closed_at_ms"] is None
+                    or source["symbol"] != self.symbol
+                    or source["last_receipt_ms"] > result.last_received_at_ms
+                ):
+                    raise ReconnectError("source session must be closed and match result")
         elif (
             not isinstance(failure_code, str)
             or not 1 <= len(failure_code) <= 80
@@ -339,7 +364,8 @@ class OfflineSpotReconnectController:
             raise ValueError("retry budget must be 1..10")
         if type(backoff_s) not in (int, float) or not 0 <= backoff_s <= 30:
             raise ValueError("invalid bounded backoff")
-        self.reconcile_crashed_attempts()
+        # Never automatically steal an active worker's STARTED attempt.
+        # An operator must explicitly reconcile after confirmed process death.
         last_id: str | None = None
         book_id: int | None = None
         ran = 0
