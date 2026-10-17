@@ -42,7 +42,8 @@ from ai.regime.classifier import REGIMES, HeuristicRegimeClassifier, RegimeState
 from ai.regime.regime import load_active_regime
 from ai.regime.switcher import RegimeSwitcher
 from core.event_bus import Event, EventBus
-from core.mode import get_mode_manager
+from core.mode import QuantMode, get_mode_manager
+from quant.offline_signal_outbox import OfflineSignalOutbox
 
 logger = logging.getLogger("econith.ai.inference")
 
@@ -66,8 +67,13 @@ class Predictor:
         bus: EventBus,
         agents: list[BaseAgent] | None = None,
         interval_s: float = 1.0,
+        *,
+        offline_signal_outbox: OfflineSignalOutbox | None = None,
     ) -> None:
         self._bus = bus
+        # Opt-in only. The default producer path is unchanged; no production
+        # service enables this research-only SIMULATION outbox.
+        self._offline_signal_outbox = offline_signal_outbox
         self._agents, self._agent_brain = self._assemble_desks(agents)
         self._classifier, self._regime_brain = self._assemble_regime()
         self._switcher = RegimeSwitcher()
@@ -321,21 +327,35 @@ class Predictor:
             attribution = build_attribution(signals, allocation)
             explain = attribution_to_json(decision.action, decision.direction, attribution)
 
-            await self._bus.publish(
-                "ai.signal",
+            signal_payload = {
                 **asdict(decision),
-                regime_confidence=round(regime.confidence, 4),
-                regime_method=regime.method,
-                world_coupled=k > 0.0,
-                mode=self._mode.mode.value,
-                agent_brain=self._agent_brain,
-                regime_brain=self._regime_brain,
-                explain=explain,
-            )
+                "regime_confidence": round(regime.confidence, 4),
+                "regime_method": regime.method,
+                "world_coupled": k > 0.0,
+                "mode": self._mode.mode.value,
+                "agent_brain": self._agent_brain,
+                "regime_brain": self._regime_brain,
+                "explain": explain,
+            }
+            await self._publish_advisory_signal(signal_payload)
 
             # Relax the transient world shock toward neutral.
             if self._impact_left > 0:
                 self._impact_left -= 1
+
+    async def _publish_advisory_signal(self, payload: dict[str, Any]) -> None:
+        """Default path unchanged; optional durable research path is SIM only."""
+        if self._offline_signal_outbox is None:
+            await self._bus.publish("ai.signal", **payload)
+            return
+        if self._mode.mode is not QuantMode.SIMULATION:
+            raise RuntimeError("offline signal outbox is strictly SIMULATION-only")
+        envelope = self._offline_signal_outbox.stage(payload)
+        # The envelope was committed before the bus receives it. On crash after
+        # queueing but before consumer receipt, manual replay retains the ID.
+        await self._offline_signal_outbox.publish_to_simulation(
+            self._bus, envelope, mode=self._mode.mode
+        )
 
     # -- introspection --------------------------------------------------------
     @property
