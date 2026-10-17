@@ -264,3 +264,63 @@ def test_crash_mid_multileg_replay_completes_once(tmp_path):
         assert db.execute(
             "SELECT COUNT(*) FROM offline_intent_admission"
         ).fetchone()[0] == 2
+
+
+def test_event_queued_but_bus_not_started_replays_after_restart(tmp_path):
+    """EventBus queued the source, but no subscriber ran before process death."""
+    from econith_quant.bridge.ai_bridge import AIBridge
+
+    initial_bus, initial_outbox, _, _ = setup_research(tmp_path)
+    source = stage_signal(initial_outbox)
+    asyncio.run(initial_outbox.publish_to_simulation(
+        initial_bus, source, mode=QuantMode.SIMULATION,
+    ))
+    assert initial_outbox.get(source.signal_id).status == "QUEUED"
+
+    # New process, new queue: only the persistent outbox survived.
+    new_bus, new_outbox, new_ledger, new_inbox = setup_research(tmp_path)
+    bridge = AIBridge(new_bus)
+    bridge._mode = "NORMAL"
+    bridge._min_delta = 0.001
+    bridge.register()
+    new_inbox.register()
+
+    async def recover():
+        await new_bus.start()
+        try:
+            await new_outbox.publish_to_simulation(
+                new_bus, new_outbox.pending()[0], mode=QuantMode.SIMULATION,
+            )
+            for _ in range(250):
+                if new_outbox.get(source.signal_id).status == "ACKED":
+                    return
+                await asyncio.sleep(0.01)
+        finally:
+            await new_bus.stop()
+        raise AssertionError("queued-only signal was not redelivered after restart")
+
+    asyncio.run(recover())
+    with sqlite3.connect(new_ledger.path) as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM offline_intent_admission"
+        ).fetchone()[0] >= 1
+
+
+def test_concurrent_valid_receipts_do_not_fail_or_double_admit(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    _, outbox, ledger, inbox = setup_research(tmp_path)
+    signal = stage_signal(outbox)
+    outbox.mark_queued(signal.signal_id)
+    assert inbox.admit_leg(leg(signal))
+    receipt = (signal.signal_id, fingerprint(signal.payload), 1)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(
+            lambda _: inbox.acknowledge_if_committed(*receipt), range(8),
+        ))
+    assert all(results)
+    assert outbox.get(signal.signal_id).status == "ACKED"
+    with sqlite3.connect(ledger.path) as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM offline_intent_admission"
+        ).fetchone()[0] == 1
