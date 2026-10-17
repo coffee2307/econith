@@ -323,3 +323,46 @@ def test_sessions_are_isolated_and_no_cross_session_snapshot(tmp_path):
         )
     assert len(j.replay_as_of("ws1", BASE + 300)) == 1
     assert len(j.replay_as_of("ws2", BASE + 300)) == 1
+
+
+def test_rejected_future_or_stale_source_time_never_enters_replay(tmp_path):
+    j, _ = ready(tmp_path)
+    ahead = trade(100)
+    ahead["E"] = BASE + 5000
+    ahead["T"] = BASE + 5000
+    with pytest.raises(SpotCaptureError, match="future-dated"):
+        ws(j, ahead, BASE + 100)
+    with pytest.raises(SpotCaptureError, match="stale"):
+        ws(j, trade(100), BASE + 50_000)
+    with pytest.raises(SpotCaptureError, match="future-dated"):
+        ws(j, {**diff(), "E": BASE + 7000}, BASE + 100)
+    with pytest.raises(SpotCaptureError, match="stale"):
+        ws(j, diff(), BASE + 50_000)
+    assert j.replay_as_of("ws1", BASE + 90_000) == []
+
+
+def test_capture_can_stamp_original_receipt_using_local_clock(tmp_path, monkeypatch):
+    j, _ = ready(tmp_path)
+    monkeypatch.setattr(
+        "infrastructure.spot_ingress_capture.time.time_ns",
+        lambda: (BASE + 300) * 1_000_000,
+    )
+    j.record_ws("ws1", wrapped(trade(100)), stream_kind="aggTrade")
+    record = j.replay_as_of("ws1", BASE + 500)[0]
+    assert record.received_at_ms == BASE + 300
+    assert record.payload["a"] == 100
+
+
+def test_corrupted_event_clock_fails_replay_even_if_raw_hash_is_recomputed(tmp_path):
+    import hashlib
+
+    j, _ = ready(tmp_path)
+    ws(j, trade(100), BASE + 100)
+    altered = wrapped({**trade(100), "E": BASE + 9000, "T": BASE + 9000}).encode()
+    with sqlite3.connect(j.path) as conn:
+        conn.execute(
+            "UPDATE offline_spot_capture_records SET raw_blob=?, sha256=?",
+            (altered, hashlib.sha256(altered).hexdigest()),
+        )
+    with pytest.raises(SpotCaptureError, match="future-dated"):
+        j.replay_as_of("ws1", BASE + 500)
