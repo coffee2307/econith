@@ -161,7 +161,7 @@ def test_open_session_and_book_without_bridge_not_admitted(tmp_path):
     assert no_book_journal.replay_as_of(BASE+300) == []
 
 
-def test_gap in_original_aggtrade_fails_before_market_admission(tmp_path):
+def test_gap_in_original_aggtrade_fails_before_market_admission(tmp_path):
     handoff, _, journal, _ = make(tmp_path, trade_ids=(500,503))
     with pytest.raises(SpotCaptureError, match="sequence gap"):
         handoff.promote_session("spot_session", as_of_ms=BASE+300)
