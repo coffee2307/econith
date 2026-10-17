@@ -100,6 +100,14 @@ class OfflineAdmissionLedger:
                     updated_at_ms INTEGER NOT NULL
                 )
             """)
+            # One broker acknowledgement must never be credited to two intents.
+            # SQLite UNIQUE permits many NULL (not yet acknowledged) values.
+            connection.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS
+                    offline_intent_broker_order_unique
+                ON offline_intent_admission (broker_order_id)
+                WHERE broker_order_id IS NOT NULL
+            """)
 
     @contextmanager
     def _connect(self):
@@ -280,13 +288,26 @@ class OfflineAdmissionLedger:
                     )
                     conn.execute("COMMIT")
                     raise ReconciliationError("conflicting broker order ID; intent held UNKNOWN")
-                conn.execute(
-                    """UPDATE offline_intent_admission
-                       SET status=?,broker_order_id=?,broker_status=?,
-                           filled_quantity=?,updated_at_ms=? WHERE intent_id=?""",
-                    (new_status, observation.broker_order_id, observation.status,
-                     observation.filled_quantity, time.time_ns() // 1_000_000, intent_id),
-                )
+                try:
+                    conn.execute(
+                        """UPDATE offline_intent_admission
+                           SET status=?,broker_order_id=?,broker_status=?,
+                               filled_quantity=?,updated_at_ms=? WHERE intent_id=?""",
+                        (new_status, observation.broker_order_id, observation.status,
+                         observation.filled_quantity, time.time_ns() // 1_000_000, intent_id),
+                    )
+                except sqlite3.IntegrityError as exc:
+                    # Collision with a different admitted intent. Quarantine
+                    # this admission; do not claim the same broker fill twice.
+                    conn.execute(
+                        """UPDATE offline_intent_admission
+                           SET status='UNKNOWN',updated_at_ms=? WHERE intent_id=?""",
+                        (time.time_ns() // 1_000_000, intent_id),
+                    )
+                    conn.execute("COMMIT")
+                    raise ReconciliationError(
+                        "broker order already reconciled to a different intent"
+                    ) from exc
                 row = conn.execute(
                     "SELECT * FROM offline_intent_admission WHERE intent_id=?",
                     (intent_id,),
