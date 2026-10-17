@@ -56,7 +56,10 @@ services:
     volumes:
       - ./runtime/models:/app/models:ro
       - ./runtime/datasets:/app/datasets
-      - ./runtime/logs:/app/logs
+      # Durable audit files must be writable by the non-root runtime.
+      - auditlogs:/app/logs
+      # Historical host logs remain accessible, never implicitly deleted.
+      - ./runtime/logs:/app/legacy-host-logs:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -135,6 +138,7 @@ networks:
     driver: bridge
 
 volumes:
+  auditlogs:
   caddy_data:
   caddy_config:
   pgdata:
