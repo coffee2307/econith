@@ -25,6 +25,12 @@ from core.mode import QuantMode
 from quant.offline_admission import fingerprint, stable_client_order_id
 
 _NAMESPACE = re.compile(r"^[A-Za-z0-9_-]{1,24}$")
+_SOURCE_EVENT_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
+
+
+class SourceEventConflict(ValueError):
+    """Same source event identity was reused for different immutable inputs."""
+
 
 
 @dataclass(frozen=True)
@@ -74,6 +80,18 @@ class OfflineSignalOutbox:
                     snapshot_json TEXT NOT NULL,
                     snapshot_fingerprint TEXT NOT NULL,
                     created_at_ms INTEGER NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS offline_input_decisions (
+                    namespace TEXT NOT NULL,
+                    source_event_id TEXT NOT NULL,
+                    source_payload_json TEXT NOT NULL,
+                    source_fingerprint TEXT NOT NULL,
+                    signal_sequence INTEGER NOT NULL UNIQUE,
+                    created_at_ms INTEGER NOT NULL,
+                    PRIMARY KEY (namespace, source_event_id),
+                    FOREIGN KEY(signal_sequence) REFERENCES offline_signal_outbox(sequence)
                 )
             """)
 
@@ -134,6 +152,127 @@ class OfflineSignalOutbox:
                     conn.execute("ROLLBACK")
                 raise
 
+
+
+    @staticmethod
+    def _source_fields(
+        source_event_id: str, source_payload: Mapping[str, Any],
+    ) -> tuple[str, str]:
+        """Require caller-owned event identity, never synthesize one from time."""
+        if not isinstance(source_event_id, str) or not _SOURCE_EVENT_ID.fullmatch(source_event_id):
+            raise ValueError("source event requires explicit stable upstream ID")
+        if not isinstance(source_payload, Mapping) or not source_payload:
+            raise ValueError("source event requires a nonempty immutable payload")
+        try:
+            serialized = json.dumps(
+                dict(source_payload), sort_keys=True, separators=(",", ":"),
+                allow_nan=False,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("source event payload must contain finite JSON data") from exc
+        return serialized, hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _check_source_row(
+        row: sqlite3.Row, serialized: str, digest: str,
+    ) -> None:
+        if (
+            row["source_payload_json"] != serialized
+            or row["source_fingerprint"] != digest
+        ):
+            raise SourceEventConflict(
+                "source event ID reused with different market event payload"
+            )
+
+    def get_for_event(
+        self, source_event_id: str, source_payload: Mapping[str, Any],
+    ) -> StoredSignal | None:
+        """Read existing source-bound decision; conflicting source is denied."""
+        source_json, digest = self._source_fields(source_event_id, source_payload)
+        with self._connect() as conn:
+            event_row = conn.execute(
+                """SELECT * FROM offline_input_decisions
+                   WHERE namespace=? AND source_event_id=?""",
+                (self.namespace, source_event_id),
+            ).fetchone()
+            if event_row is None:
+                return None
+            self._check_source_row(event_row, source_json, digest)
+            signal_row = conn.execute(
+                """SELECT * FROM offline_signal_outbox
+                   WHERE sequence=? AND namespace=?""",
+                (event_row["signal_sequence"], self.namespace),
+            ).fetchone()
+        if signal_row is None:
+            raise SourceEventConflict("source event references missing signal row")
+        return self._decode(signal_row)
+
+    def stage_for_event(
+        self,
+        source_event_id: str,
+        source_payload: Mapping[str, Any],
+        decision: Mapping[str, Any],
+        *,
+        mode: QuantMode,
+    ) -> StoredSignal:
+        """Atomically persist market-event provenance and a single decision.
+
+        A repeated event with identical source returns the ORIGINAL decision,
+        even if current model output changed. It does not create a second
+        sequence or overwrite the first decision. Different source content
+        for the same upstream ID raises SourceEventConflict (fail-closed).
+        """
+        if mode is not QuantMode.SIMULATION:
+            raise RuntimeError("market-event staging strictly SIMULATION-only")
+        serialized_event, event_digest = self._source_fields(
+            source_event_id, source_payload
+        )
+        serialized_decision = self._encode(decision)
+        now = time.time_ns() // 1_000_000
+        with self._connect() as conn:
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                previous = conn.execute(
+                    """SELECT * FROM offline_input_decisions
+                       WHERE namespace=? AND source_event_id=?""",
+                    (self.namespace, source_event_id),
+                ).fetchone()
+                if previous is not None:
+                    self._check_source_row(previous, serialized_event, event_digest)
+                    row = conn.execute(
+                        """SELECT * FROM offline_signal_outbox
+                           WHERE sequence=? AND namespace=?""",
+                        (previous["signal_sequence"], self.namespace),
+                    ).fetchone()
+                    if row is None:
+                        raise SourceEventConflict("source event references missing signal")
+                else:
+                    cursor = conn.execute(
+                        """INSERT INTO offline_signal_outbox
+                           (namespace,payload_json,status,created_at_ms,updated_at_ms)
+                           VALUES (?,?,'STAGED',?,?)""",
+                        (self.namespace, serialized_decision, now, now),
+                    )
+                    conn.execute(
+                        """INSERT INTO offline_input_decisions
+                           (namespace,source_event_id,source_payload_json,
+                            source_fingerprint,signal_sequence,created_at_ms)
+                           VALUES (?,?,?,?,?,?)""",
+                        (self.namespace, source_event_id, serialized_event,
+                         event_digest, cursor.lastrowid, now),
+                    )
+                    row = conn.execute(
+                        "SELECT * FROM offline_signal_outbox WHERE sequence=?",
+                        (cursor.lastrowid,),
+                    ).fetchone()
+                result = self._decode(row)
+                conn.execute("COMMIT")
+                return result
+            except Exception:
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
+                raise
 
     def freeze_route_plan(
         self,
