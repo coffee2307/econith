@@ -152,3 +152,26 @@ def test_invalid_relative_db_path_stops_before_writing(tmp_path, capsys):
                  "--output-dir",str(tmp_path/"out"),
                  "--session-id",SESSION]) == 2
     assert not (tmp_path/"out").exists()
+
+
+def test_saved_real_capture_can_ack_via_authenticated_subprocess(tmp_path, capsys):
+    """No network; receiver is a different OS process, with HMAC-protected ACK."""
+    source = original_db(tmp_path)
+    before = hashlib.sha256(source.read_bytes()).hexdigest()
+    out = tmp_path / "subprocess_chain"
+    result = main([
+        "--source-db", str(source),
+        "--output-dir", str(out),
+        "--session-id", SESSION,
+        "--authenticated-subprocess",
+    ])
+    assert result == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["acceptance"] == "PASSED_OFFLINE_REAL_CAPTURE_TO_RECEIVER_ACK"
+    assert report["cross_process_authenticated_transport"] is True
+    assert report["transport_scope"] == "HMAC_AUTHENTICATED_LOCAL_SUBPROCESS_PIPE_ONLY"
+    assert report["independent_receiver_receipt_count"] == 2
+    assert report["producer_ack_count"] == 2
+    assert report["network_requests"] == 0
+    assert report["orders_submitted"] == 0
+    assert hashlib.sha256(source.read_bytes()).hexdigest() == before
