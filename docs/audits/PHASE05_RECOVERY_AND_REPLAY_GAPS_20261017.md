@@ -235,3 +235,63 @@ This PR now contains `quant/offline_signal_outbox.py`:
 
 These are research and lineage improvements, **not visual Dashboard changes**
 or proof of exactly-once exchange execution.
+
+
+## Phase 0.5: downstream-confirmed durable receipt ACK (SIMULATION ONLY)
+
+`quant/offline_ack_bridge.py` implements a **research-only** acknowledgement
+consumer for `order.intent` and `offline.signal.ack`. It is deliberately
+**not registered in `main.py`**, cannot connect to an exchange and has no
+CCXT order-sending API. Deployment requires explicit creation and registration
+in a separately controlled simulation experiment.
+
+Flow:
+
+1. The opt-in `OfflineSignalOutbox` assigns and commits a source `signal_id`
+   and immutable signal payload **before** queuing `ai.signal`.
+2. AIBridge attaches the source `signal_id`, SHA-256 source fingerprint,
+   deterministic per-leg `intent_id`, 0-based `leg_index` and exact
+   `leg_count` to each intent whose source was outbox-identified.
+   Legacy intents without an origin ID remain compatible but cannot generate
+   a research receipt or authorize REALITY execution.
+3. The separate `OfflineSignalAckBridge` requires SIMULATION mode, confirms
+   the exact signal exists in the outbox and its payload hash matches, checks
+   every leg's deterministic ID, integer index and count, side, finite positive
+   quantity and reduce_only semantics. It writes the admission and leg receipt
+   in **one SQLite transaction** in the `OfflineAdmissionLedger` database.
+4. Only when all declared leg indices are persisted does the durable
+   `offline_signal_receipts` row become `COMMITTED`. At that point
+   the bridge emits the in-process `offline.signal.ack` signal.
+5. A separate ACK handler **does not trust the EventBus message**.
+   It rechecks the immutable source payload and the complete durable receipt,
+   then retires the matching queued signal in the original outbox.
+   Concurrent duplicate acknowledgements are idempotent.
+6. If the consumer crashes after the receipt commit and before ACK,
+   `replay_verified_acks()` explicitly reissues **only verified receipt
+   acknowledgements**, never a new `order.intent` and never a broker order.
+   If the original EventBus queue is lost before the consumer runs,
+   manual retransmission of a `QUEUED` outbox entry reuses its original ID.
+
+Tests in `tests/test_offline_signal_ack.py` cover the real EventBus and
+AIBridge path, partial two-leg receipt, missing or forged acknowledgements,
+duplicate/changed legs, interrupted multi-leg writes, crash after receipt
+before ACK, queue loss before dispatch, parallel ACKs and REALITY isolation.
+`OfflineAdmissionLedger` rows remain `ADMITTED`: receiving local ACK
+**never claims a fill, exchange acknowledgement or investment performance**.
+
+**Remaining limitations / release blockers:** SQLite outbox and inbox are
+two independently committed journals, so a gap between the commits remains.
+The protocol is at-least-once and attempts safe replay, not exactly-once
+delivery. `AIBridge`'s exposure, prices, route profile and Sentinel state
+are still mutable in memory; reconstructing an incomplete multi-leg plan
+after a crash may produce different sizes. The ledger then refuses to
+reconcile the changed business intent, leaving the signal pending. A
+production-grade design needs a frozen durable complete order plan,
+upstream unique market-event IDs, a single executor, full broker position/
+order reconciliation and fault injection in a separately isolated staging
+network. No automatically active recovery/ACK or trading permission has
+been added to `main.py`.
+
+**Capital execution remains hard-blocked in REALITY.** This feature
+supports correctness testing only and must not be used as a production
+order-admission certification.
