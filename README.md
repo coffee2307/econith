@@ -1085,3 +1085,25 @@ Xem **§0 Báo cáo trạng thái** làm nguồn sự thật vận hành hàng n
 - Do NOT treat `REALITY` as permission to place live orders. Quant execution
   remains research-/paper-only until independently approved. The GitHub
   Actions, full E2E and legal gates must pass first.
+
+
+### Safe local startup with optional Social (2026-10-17)
+
+`npm run setup` and `npm run dev` use the root npm lockfile and never
+terminate another application simply because it occupies ports 3001 or 5001.
+`econith_social` is an unresolved optional Git gitlink in this checkout:
+if its `package.json` and `dev` command are absent, development runs only
+the Docker Core stack, with an explicit warning rather than crashing or
+claiming Social was initialized.
+
+When an authorized, complete `econith_social` checkout exists, both
+services can start. To require the sidecar and **fail safely** if it is absent,
+set `ECONITH_REQUIRE_SOCIAL=1` before `npm run setup` or `npm run dev`.
+An occupied port is reported by Docker or the application, not forcibly
+cleared by killing its process. No real-capital trading is enabled by either
+script.
+
+Checks: `node --test tests/node/runtime_services.test.mjs` (pure, no
+Docker/exchange launch); Docker Compose syntax is separately checked in CI,
+and full production image builds are maintained in
+`.github/workflows/container-images.yml`.
