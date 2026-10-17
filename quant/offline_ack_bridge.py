@@ -258,7 +258,13 @@ class OfflineSignalAckBridge:
             return True  # duplicate ACK is idempotent
         if origin.status != "QUEUED":
             return False  # queue insertion may still be in progress
-        self.outbox.acknowledge(signal_id)
+        try:
+            self.outbox.acknowledge(signal_id)
+        except ValueError:
+            # Concurrent workers may race to finalize the same durable
+            # receipt. An already ACKED row is success, not a fatal error.
+            latest = self.outbox.get(signal_id)
+            return latest is not None and latest.status == "ACKED"
         return True
 
     async def _on_intent(self, event: Event) -> None:
