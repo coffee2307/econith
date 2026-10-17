@@ -20,7 +20,7 @@ Design contract (Zero-Breakage)
 * ``main.py`` NEVER imports a vendor package — only these shims. The runtime
   depends on the shim's stable surface, so a vendor bump/removal is contained.
 * Every shim is **optional**. If its vendored source is not pulled (see
-  ``vendors/manifest.json`` + ``scripts/setup_vendors.sh``) the shim reports
+  ``archive/vendors/manifest.json`` + ``scripts/setup_vendors.sh``) the shim reports
   ``available == False`` and the runtime keeps running on its native path.
 * Every shim mediates through the :class:`~core.event_bus.EventBus`.
 
@@ -832,7 +832,7 @@ class VendorShimRegistry:
     async def initialize(self, vendors_root: str | Path = "archive/vendors") -> dict[str, dict[str, Any]]:
         """Monitoring-only initialization.
 
-        Reads ``vendors/manifest.json`` and on-disk ``VENDOR_SHA.txt`` markers to
+        Reads ``archive/vendors/manifest.json`` and on-disk ``VENDOR_SHA.txt`` markers to
         compute vendor readiness without activating any vendor business logic.
         Missing vendors are reported but never raise.
         """
