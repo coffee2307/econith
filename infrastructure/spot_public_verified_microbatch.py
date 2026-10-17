@@ -84,7 +84,7 @@ async def observe_verified_public_batches(
         worker_fence=fence,
     )
     bus = EventBus(mode_provider=mode)
-    publisher = bus.activate_verified_market_only()
+    publisher = bus.activate_verified_market_only(max_inflight=8)
     pipeline = MarketDataPipeline(bus)
     pipeline.register()
     stats = {"md.ticker": 0, "indicator.volume_delta": 0, "indicator.obi": 0}
@@ -168,7 +168,7 @@ async def observe_verified_public_batches(
                 raise VerifiedPublicResearchError("original source changed since receiver ACK")
             observed_before = stats.copy()
             for trade in replay.trades:
-                await publisher.publish_raw(
+                await publisher.publish_raw_confirmed(
                     "md.aggTrade",
                     frame=trade.payload, source="verified_sealed_public_microbatch",
                     available_at_ms=trade.received_at_ms,
@@ -177,7 +177,7 @@ async def observe_verified_public_batches(
                     bounded_public_session=True,
                 )
             book = replay.book
-            await publisher.publish_raw(
+            await publisher.publish_raw_confirmed(
                 "md.depth",
                 symbol=replay.symbol,
                 frame={
@@ -214,6 +214,10 @@ async def observe_verified_public_batches(
                     raise VerifiedPublicResearchError(
                         "research subscribers did not acknowledge data"
                     ) from exc
+            # Confirm raw AND derived EventBus subscribers returned normally.
+            # The historical receipt DB remains the durable source ACK; this
+            # barrier only addresses in-process subscriber failure/cancellation.
+            await bus.wait_verified_idle(timeout_s=30.0)
             # Also refuse legacy publication even with a forged source label.
             try:
                 await bus.publish(
