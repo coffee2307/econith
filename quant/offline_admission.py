@@ -9,10 +9,12 @@ be reconciled using the ORIGINAL stable client order ID, not blindly retried.
 from __future__ import annotations
 
 import hashlib
+import math
 import json
 import re
 import sqlite3
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Literal, Mapping
@@ -99,11 +101,16 @@ class OfflineAdmissionLedger:
                 )
             """)
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
+        """Always close the descriptor, including if a transaction fails."""
         conn = sqlite3.connect(self.path, timeout=10, isolation_level=None)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA busy_timeout=10000")
-        return conn
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA busy_timeout=10000")
+            yield conn
+        finally:
+            conn.close()
 
     @staticmethod
     def _record(row: sqlite3.Row, *, created: bool = False) -> Admission:
@@ -239,7 +246,7 @@ class OfflineAdmissionLedger:
         if observation.status == "NOT_FOUND" or not observation.broker_order_id:
             self._hold_unknown(intent_id)
             return self.get(intent_id)  # not-found is never proof of no submission
-        if observation.filled_quantity < 0:
+        if not math.isfinite(observation.filled_quantity) or observation.filled_quantity < 0:
             self._hold_unknown(intent_id)
             raise ReconciliationError("invalid broker fill quantity")
 
@@ -259,7 +266,14 @@ class OfflineAdmissionLedger:
                     conn.execute("COMMIT")
                     return self._record(current)
                 if current["broker_order_id"] and current["broker_order_id"] != observation.broker_order_id:
-                    raise ReconciliationError("conflicting broker order ID")
+                    # A contradictory broker reference is quarantined rather
+                    # than silently replacing previously verified evidence.
+                    conn.execute(
+                        "UPDATE offline_intent_admission SET status='UNKNOWN' WHERE intent_id=?",
+                        (intent_id,),
+                    )
+                    conn.execute("COMMIT")
+                    raise ReconciliationError("conflicting broker order ID; intent held UNKNOWN")
                 conn.execute(
                     """UPDATE offline_intent_admission
                        SET status=?,broker_order_id=?,broker_status=?,
@@ -274,7 +288,8 @@ class OfflineAdmissionLedger:
                 conn.execute("COMMIT")
                 return self._record(row)
             except Exception:
-                conn.execute("ROLLBACK")
+                if conn.in_transaction:
+                    conn.execute("ROLLBACK")
                 raise
 
     def _hold_unknown(self, intent_id: str) -> None:
