@@ -12,15 +12,10 @@ When executed locally without that container the connection failed silently or
 froze, corrupting the telemetry persistence pipeline.
 
 :func:`init_database` now performs an explicit, bounded connectivity probe
-against the primary DSN during startup. On *any* failure (unreachable host, DNS
-error, auth failure, timeout, missing driver) it:
-
-  1. Emits a high-visibility ``CRITICAL`` log.
-  2. Disposes the half-open primary engine.
-  3. Seamlessly re-routes persistence to a local SQLite failover matrix
-     (``sqlite:///econith_fallback.db``).
-
-The application therefore always boots to a working persistence layer.
+against the primary DSN during startup. In DEVELOPMENT, a failed primary probe may fall back to local SQLite
+for offline research. In STAGING and PRODUCTION, connection failure is
+fatal: silently redirecting authoritative application state to SQLite could
+lose ledger continuity and must never be mistaken for healthy trading.
 """
 from __future__ import annotations
 
@@ -38,7 +33,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import DeclarativeBase
 
-from config.environment import get_environment
+from config.environment import AppEnv, get_environment
 
 logger = logging.getLogger("econith.config.database")
 
@@ -89,17 +84,27 @@ async def _probe(engine: AsyncEngine) -> None:
 
 
 async def init_database() -> AsyncEngine:
-    """Verify the primary DB, failing over to local SQLite on any error.
+    """Verify the primary DB. Strictly fail closed outside development.
 
-    Safe to call once during ASGI startup. Never raises: a total primary failure
-    is intercepted and re-routed to :data:`FALLBACK_URL`.
+    STAGING and PRODUCTION require an online PostgreSQL primary; SQLite or
+    unreachable primary raises before serving any API request. Development
+    retains its explicit offline research fallback.
     """
     global _engine, _session_factory, _using_fallback
 
     env = get_environment()
     primary_async_url = _to_async_url(env.database_url)
+    strict = env.app_env in (AppEnv.STAGING, AppEnv.PRODUCTION)
 
-    # SQLite primary needs no probe -- it is inherently local and reliable.
+    # Never start a production API on the default or a leftover SQLite DSN.
+    # Check the configured driver before any connection attempt and without
+    # disclosing secrets embedded in DATABASE_URL.
+    if strict and not primary_async_url.startswith("postgresql+asyncpg://"):
+        raise RuntimeError(
+            "Authoritative PostgreSQL DATABASE_URL is required in staging/production"
+        )
+
+    # SQLite primary is allowed only in development.
     if primary_async_url.startswith("sqlite"):
         _engine = _build_engine(primary_async_url)
         _session_factory = None
@@ -113,15 +118,28 @@ async def init_database() -> AsyncEngine:
         await _probe(candidate)
     except Exception as exc:  # noqa: BLE001 - ANY primary fault must fail over
         logger.critical(
-            "[DATABASE RUNTIME] Primary Postgres connection failed "
-            "(%s: %s). Deploying local failover instance.",
-            type(exc).__name__, exc,
+            "[DATABASE RUNTIME] Primary Postgres connection failed (%s); "
+            "never include DATABASE_URL or exception details in operational logs.",
+            type(exc).__name__,
         )
         if candidate is not None:
             try:
                 await candidate.dispose()
             except Exception:  # noqa: BLE001 - disposal must never crash startup
                 logger.debug("primary engine disposal raised during failover", exc_info=True)
+        if strict:
+            # The service must not serve a false-green health or split the
+            # authoritative datastore onto an unreviewed local file.
+            _engine = None
+            _session_factory = None
+            _using_fallback = False
+            logger.critical(
+                "[DATABASE RUNTIME] fail-closed: PostgreSQL is unavailable; "
+                "refusing %s startup rather than creating a SQLite fallback",
+                env.app_env.value,
+            )
+            raise RuntimeError("Primary PostgreSQL database unavailable") from exc
+
         _engine = _build_engine(_to_async_url(FALLBACK_URL))
         _session_factory = None
         _using_fallback = True
@@ -150,6 +168,10 @@ def get_engine() -> AsyncEngine:
     global _engine
     if _engine is None:
         env = get_environment()
+        if env.app_env in (AppEnv.STAGING, AppEnv.PRODUCTION):
+            raise RuntimeError(
+                "Database has not passed authoritative startup probe"
+            )
         logger.warning(
             "[DATABASE RUNTIME] get_engine() called before init_database(); "
             "building engine lazily without failover probe"
