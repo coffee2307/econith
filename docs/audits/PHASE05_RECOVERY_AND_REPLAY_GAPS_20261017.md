@@ -341,3 +341,66 @@ decisions is not an authoritative, broker-reconciled position after
 restart. `QUEUED` can still race ahead of a verified receipt ACK; manual
 receipt replay is necessary for that gap. No broker fills, external
 position reconciliation, or exactly-once exchange execution are proven.
+
+
+## Phase 0.5 — source market-event identity and atomic input-to-decision binding (SIMULATION only)
+
+`OfflineSignalOutbox.stage_for_event(source_event_id, source_payload,
+decision, mode=QuantMode.SIMULATION)` is an explicitly opted-in
+research primitive. The input event ID must be provided by the upstream
+caller. **It is never generated from the wall clock, hash of a mutable
+feature dictionary or price alone.** The caller also provides the exact
+market-event payload used as the binding provenance. Neither this
+implementation nor the current ticker collector authenticates that
+provenance against an exchange.
+
+A new `offline_input_decisions` SQLite table stores the caller-origin
+event ID, canonical finite JSON market payload, its SHA-256 digest,
+namespace, and referenced output signal sequence. The unique
+`(namespace,source_event_id)` constraint and a serialized
+`BEGIN IMMEDIATE` transaction commit the complete input association
+**atomically** with the decision stored in `offline_signal_outbox`.
+Concurrent retries cannot allocate a second signal for the same source ID.
+
+For an already persisted matching source event, retries recover the
+original signal and *original decision*, even if a newly computed decision
+or model version would differ. A reused ID with different source JSON is
+rejected with `SourceEventConflict`, not silently attached to the
+previous signal. Distinct source IDs remain distinct even with identical
+price/JSON payloads; hashing only the market price would incorrectly
+collapse legitimate repeated events.
+
+The opt-in `Predictor.publish_for_market_event(source_event_id,
+source_payload,decision_factory)` first checks the durable source
+mapping: the decision factory is not rerun if a matching record already
+exists, preventing unnecessary nondeterministic re-inference on replay.
+It queues only non-ACKED envelopes and follows the existing verified
+consumer/ACK route. REALITY or missing outbox fail closed. The original
+cadence-based `Predictor.run()` is **unchanged**, so new functionality
+is **not** available in the default tick processing pipeline and does
+not alter `main.py`.
+
+`tests/test_offline_market_event_identity.py` covers concurrent
+first writes, restart/re-inference reuse, changed source rejection,
+distinct event identities, SQLite injected-write rollback, malformed
+or nonfinite provenance, REALITY isolation, stopped factory after
+ACK, and full opt-in EventBus/AIBridge/ledger receipt integration.
+
+**Remaining work before claiming ingestion identity correctness:**
+(1) exchange-specific collector must emit authoritative immutable
+stream/sequence IDs together with point-in-time event payloads;
+(2) verify out-of-order, gaps, REST/WS overlap, exchange-session resets
+and duplicate sequence scopes before accepting those keys;
+(3) explicitly define a stable decision-window key when multiple
+indicators/events contribute to one cadence-based inference;
+(4) persist input snapshots **before** inference if failures before the
+first commit must be recovered without recomputation;
+(5) document tamper evidence and authenticated source provenance
+outside an untrusted local SQLite hash;
+(6) retain independent risk/venue authorization and reconciliation.
+
+This design improves **local simulation source deduplication**, not
+production market-data correctness, broker idempotency, capital
+authorization, or profitability. No live orders, demo-account keys,
+automatic replay, main merge or production data migrations are
+performed by this change.
