@@ -119,7 +119,7 @@ async def start_verified_research_runtime(
         raise VerifiedResearchRuntimeError("original replay changed since durable ACK")
 
     bus = EventBus(mode_provider=lambda: QuantMode.SIMULATION)
-    publisher = bus.activate_verified_market_only()
+    publisher = bus.activate_verified_market_only(max_inflight=8)
     pipeline = MarketDataPipeline(bus)
     pipeline.register()
     stats = {"md.ticker":0, "indicator.volume_delta":0,"indicator.obi":0}
@@ -143,7 +143,7 @@ async def start_verified_research_runtime(
         # No external consumer is registered. Only research projection
         # handlers observe this historical batch; execution is never started.
         for record in replay.trades:
-            await publisher.publish_raw(
+            await publisher.publish_raw_confirmed(
                 "md.aggTrade", frame=record.payload,
                 source="verified_closed_session_replay",
                 available_at_ms=record.received_at_ms,
@@ -154,7 +154,7 @@ async def start_verified_research_runtime(
         # A synchronized full book is rendered into *legacy consumer schema*
         # from exact snapshot+diff evidence. Never emit raw depthUpdate as
         # though it were a depth20 REST partial snapshot.
-        await publisher.publish_raw(
+        await publisher.publish_raw_confirmed(
             "md.depth",
             symbol=replay.symbol,
             frame={
@@ -174,6 +174,9 @@ async def start_verified_research_runtime(
             or stats["indicator.obi"] != 1
         ):
             raise VerifiedResearchRuntimeError("derived consumer counts did not match verification")
+        # Verify in-memory raw/derived handlers actually completed, not merely
+        # that the queue contained the expected number of derived events.
+        await bus.wait_verified_idle(timeout_s=15.0)
         # A direct legacy publisher is forbidden after activation, irrespective
         # of any claimed 'verified' source flag in the event body.
         try:
