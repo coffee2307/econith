@@ -82,19 +82,28 @@ jobs:
           python - <<'PY'
           import urllib.error
           import urllib.request
-          req = urllib.request.Request(
-              "http://127.0.0.1:8000/api/v1/mode",
-              data=b'{}',
-              headers={"Content-Type": "application/json"},
-              method="POST",
+          routes = (
+              "/api/v1/mode",
+              "/api/v1/runtime/pause",
+              "/api/v1/quant/simulation/reset",
+              "/api/v1/world/reset",
           )
-          try:
-              urllib.request.urlopen(req, timeout=8)
-          except urllib.error.HTTPError as exc:
-              assert exc.code == 401, f"unsafe unexpected control response {exc.code}"
-          else:
-              raise SystemExit("auth gate incorrectly accepted anonymous mutation")
-          print("UNAUTHORIZED_MUTATION_REJECTED")
+          for route in routes:
+              req = urllib.request.Request(
+                  "http://127.0.0.1:8000" + route,
+                  data=b'{}',
+                  headers={"Content-Type": "application/json"},
+                  method="POST",
+              )
+              try:
+                  urllib.request.urlopen(req, timeout=8)
+              except urllib.error.HTTPError as exc:
+                  assert exc.code == 401, (
+                      f"unprotected mutation {route}: HTTP {exc.code}"
+                  )
+              else:
+                  raise SystemExit(f"auth gate accepted anonymous mutation {route}")
+          print("UNAUTHORIZED_MUTATIONS_REJECTED", len(routes))
           PY
           docker compose -f docker-compose.yml exec -T backend_core python - <<'PY'
           import json
@@ -108,8 +117,14 @@ jobs:
               audit, state, trade_state
           )
           entries = [json.loads(line) for line in audit.read_text(encoding="utf-8").splitlines()]
-          assert any(row.get("decision") == "DENY" and row.get("path") == "/api/v1/mode"
-                     for row in entries), "missing durable denial audit event"
+          for route in (
+              "/api/v1/mode",
+              "/api/v1/runtime/pause",
+              "/api/v1/quant/simulation/reset",
+              "/api/v1/world/reset",
+          ):
+              assert any(row.get("decision") == "DENY" and row.get("path") == route
+                         for row in entries), f"missing durable DENY audit {route}"
           for file in (state, trade_state):
               with sqlite3.connect(file) as connection:
                   assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
