@@ -359,3 +359,38 @@ def test_reality_mode_denies_lease_mutation_and_inspection(tmp_path):
         fence.release(ticket)
     with pytest.raises(RuntimeError, match="SIMULATION"):
         fence.acquire(holder_id="worker_two")
+
+
+def test_existing_controller_schema_migrates_to_sticky_fence_policy(tmp_path):
+    """Old database lacks requires_fence; new opt-in must upgrade in place."""
+    clock = Clock()
+    journal = OfflineSpotCaptureJournal(
+        tmp_path / "legacy_schema.sqlite",
+        mode_provider=lambda: QuantMode.SIMULATION,
+    )
+    with sqlite3.connect(journal.path) as conn:
+        conn.execute("""
+            CREATE TABLE offline_spot_reconnect_controllers (
+                controller_id TEXT PRIMARY KEY, symbol TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            INSERT INTO offline_spot_reconnect_controllers VALUES (?,?)
+        """, ("btc_archive", "BTCUSDT"))
+    fence = OfflineSpotWorkerFence(
+        journal, controller_id="btc_archive", clock_ms=clock, lease_ms=1000,
+    )
+    controller = OfflineSpotReconnectController(
+        journal, controller_id="btc_archive",
+        symbol="BTCUSDT", clock_ms=clock, worker_fence=fence,
+    )
+    with sqlite3.connect(journal.path) as conn:
+        policy = conn.execute("""
+            SELECT requires_fence FROM offline_spot_reconnect_controllers
+            WHERE controller_id='btc_archive'
+        """).fetchone()[0]
+        assert policy == 1
+    with pytest.raises(WorkerLeaseConflict):
+        controller.begin_attempt()
+    claim = fence.acquire(holder_id="worker_one")
+    assert controller.begin_attempt(lease=claim).status == "STARTED"
