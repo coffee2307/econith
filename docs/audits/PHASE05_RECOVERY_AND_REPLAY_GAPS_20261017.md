@@ -91,3 +91,38 @@ execution from healthy Docker or SQLite `PRAGMA quick_check`.
 - The orphan `econith_social` Git gitlink and GPL/MIT boundary within
   `econith_quant/` are not yet resolved. PR #28 is draft and based on
   draft PR #21; `main` is untouched.
+
+
+## WAL-aware SQLite snapshot tool (reviewed code, explicit/manual execution)
+
+`ci/sqlite_consistent_backup.py` provides a manually invoked, **source
+read-only**, online SQLite snapshot using `sqlite3.Connection.backup`.
+Unlike a naive file-system `cp`, it includes already committed rows
+which may still live only in the `-wal` sidecar.
+
+```bash
+# Works on a separately authorized dev/staging copy. Specify real file
+# locations yourself; do not automate against live trading infrastructure.
+mkdir -p backups
+python -m ci.sqlite_consistent_backup \
+  --source datasets/econith.sqlite \
+  --destination backups/econith-state-20261017.sqlite
+python -m ci.sqlite_consistent_backup \
+  --source datasets/trades.sqlite \
+  --destination backups/trades-state-20261017.sqlite
+```
+
+The tool creates only the destination snapshot, verifies SQLite
+`PRAGMA quick_check`, publishes the new file with an atomic
+no-overwrite link, and cleans temporary files on failure. It never
+silently overwrites an existing backup, creates a missing source,
+executes production tasks or modifies the original journal.
+It does not migrate production data and is **not a multi-journal
+transaction**: snapshots of `econith.sqlite` and `trades.sqlite`
+are taken separately, so their time boundaries may differ. A
+coordinated maintenance checkpoint and broker/ledger reconciliation
+are still required for a full production restore.
+
+Unit tests include an *uncheckpointed committed WAL row* case,
+existing-destination refusal, invalid source refusal, missing path
+and explicit CLI entrypoint. See `tests/test_sqlite_consistent_backup.py`.
