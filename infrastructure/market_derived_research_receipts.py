@@ -179,6 +179,14 @@ class OfflineDerivedResearchReceiptLedger:
                     raise DerivedResearchReceiptError(
                         "derived consumer ordinal gap or unverified reorder"
                     )
+                prior_source = conn.execute("""
+                    SELECT ordinal FROM offline_research_derived_receipts
+                    WHERE session_id=? AND consumer_topic=? AND source_record_id=?
+                """, (session_id, topic, source_record_id)).fetchone()
+                if prior_source is not None:
+                    raise DerivedResearchReceiptError(
+                        "source record ID already assigned to another derived ordinal"
+                    )
                 conn.execute("""
                     INSERT INTO offline_research_derived_receipts(
                         session_id,consumer_topic,ordinal,source_record_id,
