@@ -89,6 +89,17 @@ async def test_verified_research_bus_only_sees_receipt_provenance(tmp_path):
         assert status.observed_tickers == 2
         assert status.observed_volume_deltas == 2
         assert status.observed_orderbook_imbalance == 1
+        assert status.durable_derived_research_receipts == 5
+        from infrastructure.market_derived_research_receipts import (
+            OfflineDerivedResearchReceiptLedger,
+        )
+        ledger=OfflineDerivedResearchReceiptLedger(
+            tmp_path/"generated"/"derived_consumer_receipts.sqlite",
+            mode_provider=lambda:QuantMode.SIMULATION,
+        )
+        assert ledger.verified_count(sid,"md.ticker")==2
+        assert ledger.verified_count(sid,"indicator.volume_delta")==2
+        assert ledger.verified_count(sid,"indicator.obi")==1
         assert status.producer_acks == status.receiver_receipts == 2
         assert status.local_receiver_authenticated
         assert status.original_bytes_read_only
@@ -162,6 +173,7 @@ async def test_main_verified_only_lifespan_protects_all_legacy_http(monkeypatch,
             assert ok.status_code == 200
             body = ok.json()
             assert body["producer_acks"] == body["receiver_receipts"] == 2
+            assert body["durable_derived_research_receipts"] == 5
             assert body["execution_started"] is False
             assert body["legacy_streamer_started"] is False
             assert body["history_continuity_verified"] is False
