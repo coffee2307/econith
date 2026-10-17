@@ -25,7 +25,13 @@ _PUBLIC_REST = "https://data-api.binance.vision/api/v3/depth"
 
 
 class SpotTransportError(SpotCaptureError):
-    """No reliable continuous source: abort session and require a fresh one."""
+    """Fail-closed capture error carrying a non-sensitive diagnostic code."""
+
+    def __init__(self, message: str, *, reason: str = "TRANSPORT_ERROR") -> None:
+        if not reason.isascii() or not reason.replace("_", "").isalnum() or len(reason) > 80:
+            raise ValueError("invalid static capture reason")
+        super().__init__(message)
+        self.reason = reason
 
 
 @dataclass(frozen=True)
@@ -87,7 +93,10 @@ class OptInSpotIngressAdapter:
             return "aggTrade"
         if name in (f"{sym}@depth", f"{sym}@depth@100ms"):
             return "depthUpdate"
-        raise SpotTransportError("unexpected combined market stream; no silent discard")
+        raise SpotTransportError(
+            "unexpected combined market stream; no silent discard",
+            reason="UNEXPECTED_STREAM",
+        )
 
     async def capture_open_stream(
         self, stream: AsyncIterable[str | bytes],
@@ -129,6 +138,7 @@ class OptInSpotIngressAdapter:
         high_watermark = 0
         last_ms = opened
         reader_done = False
+        frame_limit_reached = False
         snapshot_started = False
         snapshot_done = False
         reader: asyncio.Task[None] | None = None
@@ -140,7 +150,10 @@ class OptInSpotIngressAdapter:
             try:
                 fifo.put_nowait((kind, data, ts))
             except asyncio.QueueFull as exc:
-                raise SpotTransportError("ingress backpressure overflow: abort session") from exc
+                raise SpotTransportError(
+                    "ingress backpressure overflow: abort session",
+                    reason="QUEUE_BACKPRESSURE",
+                ) from exc
 
         async def _read() -> None:
             count = 0
@@ -148,11 +161,17 @@ class OptInSpotIngressAdapter:
                 async for raw in stream:
                     received = self._clock()
                     count += 1
-                    if count > max_frames:
-                        raise SpotTransportError("finite capture frame bound exceeded")
                     await _queue("ws", raw, received)
+                    if count >= max_frames:
+                        # Bounded *successful* research capture: deliberately
+                        # stop reading after max_frames; never infer continuity
+                        # beyond the bounded observation interval. The writer
+                        # still must persist all queued originals and prove
+                        # a synchronized snapshot before returning success.
+                        await fifo.put(("frame_limit", None, self._clock()))
+                        return
             except Exception as exc:
-                await fifo.put(("error", exc, self._clock()))
+                await fifo.put(("ws_error", exc, self._clock()))
             else:
                 await fifo.put(("eof", None, self._clock()))
 
@@ -163,7 +182,7 @@ class OptInSpotIngressAdapter:
                 received = self._clock()
                 await _queue("snapshot", (raw, request_started_at), received)
             except Exception as exc:
-                await fifo.put(("error", exc, self._clock()))
+                await fifo.put(("snapshot_error", exc, self._clock()))
 
         try:
             reader = asyncio.create_task(_read(), name="spot-capture-ws-read")
@@ -171,12 +190,20 @@ class OptInSpotIngressAdapter:
                 while not (reader_done and (not snapshot_started or snapshot_done)):
                     kind, value, received = await fifo.get()
                     high_watermark = max(high_watermark, fifo.qsize() + 1)
-                    if kind == "error":
+                    if kind in ("ws_error", "snapshot_error"):
+                        reason = (
+                            "WS_READ_FAILED" if kind == "ws_error"
+                            else "REST_SNAPSHOT_FAILED"
+                        )
+                        if isinstance(value, SpotTransportError):
+                            reason = value.reason
                         raise SpotTransportError(
-                            f"capture reader failed: {type(value).__name__}: {value}"
+                            f"capture reader failed: {type(value).__name__}: {value}",
+                            reason=reason,
                         ) from value
-                    if kind == "eof":
+                    if kind in ("eof", "frame_limit"):
                         reader_done = True
+                        frame_limit_reached = kind == "frame_limit"
                         continue
                     if kind == "ws":
                         stream_kind = self._kind(value)
@@ -205,13 +232,21 @@ class OptInSpotIngressAdapter:
                     else:
                         raise SpotTransportError("unrecognized ingest capture event")
             if captured_snapshots != 1:
-                raise SpotTransportError("no captured REST depth snapshot in session")
+                raise SpotTransportError(
+                    "frame bound reached before synchronized snapshot"
+                    if frame_limit_reached else
+                    "no captured REST depth snapshot in session",
+                    reason=("FRAME_LIMIT_UNSYNCED" if frame_limit_reached
+                            else "NO_REST_SNAPSHOT"),
+                )
             state = OfflineSpotCaptureReplayer(self.journal).replay(
                 session_id, as_of_ms=last_ms, limit=5000,
             )
             if state.book is None:
                 raise SpotTransportError(
-                    "captured Spot depth did not establish a usable synchronized book"
+                    "captured Spot depth did not establish a usable synchronized book",
+                    reason=("FRAME_LIMIT_UNSYNCED" if frame_limit_reached
+                            else "BOOK_NOT_SYNCED"),
                 )
             return SpotTransportResult(
                 session_id, self.symbol, captured_ws,
@@ -219,7 +254,10 @@ class OptInSpotIngressAdapter:
                 state.depth_status, state.book.last_update_id,
             )
         except TimeoutError as exc:
-            raise SpotTransportError("capture timed out, session invalid") from exc
+            raise SpotTransportError(
+                "capture timed out, session invalid",
+                reason="CAPTURE_TIMEOUT",
+            ) from exc
         finally:
             for task in (reader, snapshot_task):
                 if task is not None and not task.done():
@@ -270,10 +308,14 @@ class OptInSpotIngressAdapter:
                 )
                 if response.status_code != 200:
                     raise SpotTransportError(
-                        f"REST depth refused HTTP {response.status_code}"
+                        f"REST depth refused HTTP {response.status_code}",
+                        reason="REST_HTTP_FAILED",
                     )
                 if len(response.content) > self.journal.max_body_bytes:
-                    raise SpotTransportError("REST snapshot exceeded raw capture size limit")
+                    raise SpotTransportError(
+                        "REST snapshot exceeded raw capture size limit",
+                        reason="REST_BODY_OVERSIZE",
+                    )
                 return response.content
 
         async with websockets.connect(
