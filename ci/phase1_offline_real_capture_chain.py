@@ -27,6 +27,9 @@ from infrastructure.market_projection_inbox import OfflineMarketProjectionInbox
 from infrastructure.market_cross_process_delivery import (
     OfflineIndependentProjectionReceiver, OfflineCrossProcessProjectionSender,
 )
+from ci.phase1_authenticated_receiver_ipc import (
+    accept_via_authenticated_subprocess,
+)
 
 _PART = "phase1_offline_verified_chain"
 _CANDIDATES = ("captured_copy.sqlite", "verified_market.sqlite", "receiver.sqlite", "chain_acceptance.json")
@@ -111,8 +114,12 @@ def run(opts: argparse.Namespace) -> dict:
         if len(manifest) != len(replay.trades):
             raise ValueError("source promotion manifest incomplete")
         cursor = OfflineMarketProjectionCursor(market)
-        receiver = OfflineIndependentProjectionReceiver(
-            target / _CANDIDATES[2], mode_provider=mode,
+        receiver_path = target / _CANDIDATES[2]
+        # In authenticated mode, the separate Python process initializes and
+        # owns receipt writes; parent only reads after durable ACKs complete.
+        receiver = (
+            None if opts.authenticated_subprocess else
+            OfflineIndependentProjectionReceiver(receiver_path, mode_provider=mode)
         )
         inbox = OfflineMarketProjectionInbox(cursor)
         sender = OfflineCrossProcessProjectionSender(inbox)
@@ -132,14 +139,22 @@ def run(opts: argparse.Namespace) -> dict:
             )
             receipt = sender.deliver_once(
                 "indicator", "risk",
-                receiver_accept=lambda env, at=tick: receiver.accept(
-                    env, now_ms=at,
+                receiver_accept=(
+                    (lambda env, at=tick: accept_via_authenticated_subprocess(
+                        env, receiver_db=receiver_path, now_ms=at,
+                    ))
+                    if opts.authenticated_subprocess else
+                    (lambda env, at=tick: receiver.accept(env, now_ms=at))
                 ),
                 now_ms=tick,
             )
             if receipt is None:
                 raise ValueError("receiver did not acknowledge a durable projection")
         source_receipts = inbox.receipts("indicator", "risk")
+        if receiver is None:
+            receiver = OfflineIndependentProjectionReceiver(
+                receiver_path, mode_provider=mode,
+            )
         receiver_receipts = receiver.receipts("indicator", "risk")
         if len(source_receipts) != len(replay.trades) or len(receiver_receipts) != len(replay.trades):
             raise ValueError("source/receiver ACK ledger missing research projections")
@@ -167,7 +182,14 @@ def run(opts: argparse.Namespace) -> dict:
             "producer_ack_count": len(source_receipts),
             "independent_receiver_receipt_count": len(receiver_receipts),
             "independent_receiver_database": True,
-            "cross_process_authenticated_transport": False,
+            "cross_process_authenticated_transport": bool(
+                opts.authenticated_subprocess
+            ),
+            "transport_scope": (
+                "HMAC_AUTHENTICATED_LOCAL_SUBPROCESS_PIPE_ONLY"
+                if opts.authenticated_subprocess else
+                "LOCAL_IN_PROCESS_CALL"
+            ),
             "history_continuity_verified": False,
             "default_runtime_cutover": False,
         }
@@ -186,6 +208,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source-db", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--session-id", type=str, required=True)
+    parser.add_argument(
+        "--authenticated-subprocess", action="store_true",
+        help="HMAC-authenticated separate local Python receiver process; no network",
+    )
     opts = parser.parse_args(argv)
     try:
         result = run(opts)
