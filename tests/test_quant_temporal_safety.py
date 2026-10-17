@@ -25,7 +25,7 @@ def _dataset(tmp_path, *, btc_rows=60, eth_rows=48, mutate_holdout=False):
             })
     root = tmp_path / "features"
     root.mkdir(parents=True)
-    pd.DataFrame(records).to_parquet(root / "features.parquet", index=False)
+    pd.DataFrame(records).to_parquet(root / "features_00000.parquet", index=False)
     output = tmp_path / "quant_labeled.parquet"
     summary = label_dataset(
         str(root), str(output), 0.25, horizon_preset="scalp",
@@ -70,7 +70,7 @@ def test_purge_respects_actual_target_timestamp_with_gapped_trades(tmp_path):
     })
     root = tmp_path / "source"
     root.mkdir()
-    df.to_parquet(root / "features.parquet", index=False)
+    df.to_parquet(root / "features_00000.parquet", index=False)
     dest = tmp_path / "train.parquet"
     summary = label_dataset(str(root), str(dest), 0.66, horizon_preset="scalp")
     train = pd.read_parquet(dest)
