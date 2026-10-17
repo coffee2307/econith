@@ -295,3 +295,49 @@ been added to `main.py`.
 **Capital execution remains hard-blocked in REALITY.** This feature
 supports correctness testing only and must not be used as a production
 order-admission certification.
+
+
+## Phase 0.5: frozen per-signal routing plan (opt-in SIMULATION research)
+
+The optional `AIBridge(..., offline_signal_outbox=box,
+simulation_mode_provider=...)` path snapshots the **entire**
+`quant.route.plan` metadata and all `order.intent` payloads in
+`offline_frozen_route_plans` inside the **same source SQLite outbox
+database**. Its `BEGIN IMMEDIATE` transaction verifies the original
+staged source, stores a canonical JSON snapshot plus hashes, and commits
+before publishing *any* route-plan or order-intent EventBus event.
+
+For a known `signal_id`, subsequent deliveries and process restarts
+read the exact stored plan instead of re-running mutable AIBridge size,
+mark-price, derisk, portfolio exposure or router-profile calculations.
+A competing first writer with different business data is rejected; it
+cannot replace the frozen snapshot. The optional offline ACK consumer
+rejects any leg that differs from a frozen leg, and re-verifies all
+stored leg fingerprints before considering a durable receipt complete.
+
+The original AIBridge constructor remains fully backward compatible:
+without an explicitly provided outbox **and** SIMULATION mode provider,
+the new snapshot behavior is not enabled. Sentinel `FROZEN`, incompatible
+`REDUCE_ONLY` or any active non-SIMULATION mode veto delivery and
+re-delivery, even when the snapshot already exists. The local isolated
+ledger still cannot place broker orders; REALITY execution remains
+independently blocked by `QuantExecutionBridge`. No default runtime
+wiring, automatic recovery, or production migration is included.
+
+The new regression tests in `tests/test_offline_frozen_route_plan.py`
+cover persisted-plan identity, restarts with changed exposure/marks,
+second-writer conflicts, forged first-delivery leg rejection, Sentinel
+transition and REALITY isolation, post-ACK replay refusal, and mandatory
+explicit mode provider. Existing real EventBus and standalone ACK tests
+remain separate. Results must be confirmed by GitHub CI on the new head.
+
+**Explicit remaining limits:** immutable routing begins at the first
+successful plan freeze, *not* at upstream market event ingestion.
+Crashes before a first plan freeze can still cause a new computation;
+new Predictor signals require immutable ingress keys for source-level
+deduplication. Snapshot and local inbox commits remain on two SQLite
+databases without distributed atomicity. In-memory exposure for *new*
+decisions is not an authoritative, broker-reconciled position after
+restart. `QUEUED` can still race ahead of a verified receipt ACK; manual
+receipt replay is necessary for that gap. No broker fills, external
+position reconciliation, or exactly-once exchange execution are proven.
