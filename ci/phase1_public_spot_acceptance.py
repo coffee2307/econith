@@ -136,7 +136,35 @@ async def run(args: argparse.Namespace) -> dict:
         max_frames=args.max_frames, timeout_s=args.timeout_s,
         heartbeat_interval_s=4.0,
     )
+    # The prior attempt ledger stores only sanitized failure codes.
+    # Distinguish no WebSocket handshake/session from invalid/partial frames
+    # using read-only SQLite counts. Never log private messages/raw market
+    # bodies or accept an incomplete capture as a successful session.
+    attempt_evidence = []
+    with journal._connect() as conn:
+        for attempt in controller.attempts():
+            source = conn.execute("""
+                SELECT opened_at_ms, closed_at_ms, last_receipt_ms
+                FROM offline_spot_capture_sessions WHERE session_id=?
+            """, (attempt.session_id,)).fetchone()
+            kinds = conn.execute("""
+                SELECT kind, COUNT(*) AS n FROM offline_spot_capture_records
+                WHERE session_id=? GROUP BY kind ORDER BY kind
+            """, (attempt.session_id,)).fetchall()
+            attempt_evidence.append({
+                "session_id": attempt.session_id,
+                "session_started": source is not None,
+                "session_closed": (
+                    source["closed_at_ms"] is not None
+                    if source is not None else False
+                ),
+                "frames_by_type": {row["kind"]: row["n"] for row in kinds},
+                "last_persisted_receipt_ms": (
+                    source["last_receipt_ms"] if source is not None else None
+                ),
+            })
     report = {
+        "attempt_evidence": attempt_evidence,
         "scope": "PUBLIC_BINANCE_SPOT_READ_ONLY",
         "symbol": args.symbol,
         "clock_check": asdict(clock),
