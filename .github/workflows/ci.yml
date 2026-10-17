@@ -43,5 +43,5 @@ jobs:
           python -c "from training.deploy_gate import evaluate_gate; ok, _ = evaluate_gate({'rows': 1000, 'annualized_sharpe': 0.5, 'max_drawdown': 0.1, 'evaluation_protocol': 'chronological_holdout_oos', 'signal_col': 'oos_prediction_1h', 'prediction_model_id': ['frozen-check']}); assert ok"
       - name: Paper soak checklist (env defaults)
         run: python -m scripts.paper_soak_check
-      - name: Calibrate world smoke (synthetic fallback)
-        run: python scripts/calibrate_world.py --output /tmp/stochastic_coeffs.json
+      - name: World calibration smoke (fast file/metadata contract)
+        run: python -m scripts.calibrate_world_ci_smoke
