@@ -158,14 +158,36 @@ class OfflineSpotVerifiedResearchHandoff:
                 SELECT * FROM offline_spot_promotion_manifest
                 WHERE capture_session_id=? ORDER BY capture_id
             """, (session_id,)).fetchall()
+        # Verify source and destination once rather than replaying the whole
+        # raw SQLite session for every manifest row.
+        originals = {
+            record.capture_id: record
+            for record in self.capture.replay_as_of(
+                session_id, 2**62, limit=5000,
+            )
+        }
+        admitted = {
+            record.event_id: record
+            for record in self.destination.replay_as_of(
+                2**62, limit=5000,
+            )
+        }
         out = []
         for row in rows:
-            raw = self.capture.replay_as_of(session_id, 2**62, limit=5000)
-            match = next((r for r in raw if r.capture_id == row["capture_id"]), None)
+            match = originals.get(row["capture_id"])
+            stored = admitted.get(row["event_id"])
+            if match is None or match.kind != "aggTrade":
+                raise SpotCaptureError("promotion manifest lost original source provenance")
+            expected_id = (
+                f"md:binance_spot:{match.source}:"
+                f"{match.symbol}:aggTrade:{match.payload['a']}"
+            )
             if (
-                match is None or match.kind != "aggTrade"
-                or hashlib.sha256(match.raw).hexdigest() != row["raw_sha256"]
+                hashlib.sha256(match.raw).hexdigest() != row["raw_sha256"]
                 or match.received_at_ms != row["source_available_at_ms"]
+                or row["event_id"] != expected_id
+                or stored is None or stored.frame != match.payload
+                or stored.available_at_ms > match.received_at_ms
             ):
                 raise SpotCaptureError("promotion manifest lost original source provenance")
             out.append(PromotedTrade(
