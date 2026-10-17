@@ -126,3 +126,58 @@ are still required for a full production restore.
 Unit tests include an *uncheckpointed committed WAL row* case,
 existing-destination refusal, invalid source refusal, missing path
 and explicit CLI entrypoint. See `tests/test_sqlite_consistent_backup.py`.
+
+
+## Offline admission prototype — no broker execution
+
+The review branch now includes `quant/offline_admission.py` with
+`OfflineAdmissionLedger` and `quant/offline_replay_probe.py` with
+`OfflineReplayProbe`. These are deliberately **not wired to `main.py` or
+the real `QuantExecutionBridge` execution flow**. They are research-only
+safety primitives for independent review.
+
+The ledger uses a durable SQLite WAL file with synchronous=FULL, a unique
+`intent_id`, a unique stable hashed `client_order_id`, immutable canonical
+payload fingerprint, and `BEGIN IMMEDIATE` admission transactions. If the
+same `intent_id` is delivered twice with matching semantics, the second
+delivery yields `created=False`; if its content differs it is rejected.
+
+The discrete offline states are `ADMITTED`, `SUBMITTING`, `UNKNOWN`,
+`ACKNOWLEDGED`, `RECONCILED`, `REJECTED`. A simulated submission claim
+may succeed only once. On a crash, interrupted `SUBMITTING` rows are
+moved to `UNKNOWN`, not to an automatically retryable state. A supplied
+read-only fake-broker lookup must report the same client ID and an actual
+broker order ID before an acknowledged/terminal state can be recorded.
+`NOT_FOUND` is ambiguous, **not** permission to submit a replacement.
+A timeout, contradictory order ID, zero-volume claimed fill or regressing
+filled quantity remains `UNKNOWN`.
+
+`OfflineReplayProbe` consumes copied `EventBus` `order.intent` events
+only in SIMULATION, requires an explicit origin `intent_id` and returns
+NEW/DUPLICATE/QUARANTINED diagnostics. It has no broker adapter,
+no send/resubmit method and never emits a fake fill.
+
+Corresponding regression tests:
+`tests/test_offline_order_admission.py`,
+`tests/test_offline_replay_probe.py`, and a direct REALITY hard-deny
+test in `tests/test_execution_truthfulness.py`.
+
+**Additional execution hard stop:** `bridges/quant_bridge.py` now explicitly
+rejects all REALITY order intents with
+`durable_order_admission_not_certified` if they somehow pass the existing
+predictive edge gate. Even future edge_source=model cannot authorize
+broker execution until the durable ledger is integrated and independently
+reviewed. SIMULATION routing is unchanged.
+
+**Remaining gates before any broker integration:** assign immutable
+origin IDs in the actual producer with a durable source event/outbox;
+ensure idempotent submission across multi-process services; perform
+read-only broker reconciliation using verified account/venue scope and
+partial-fill exposure; guarantee a single authorized executor; protect
+against race with actual order placement and broker eventual consistency;
+test orphan order reconciliation and position snapshots; add recovery
+operator procedure and external review of license/compliance. This offline
+model does not claim exactly-once exchange execution.
+
+No network/exchange calls, no broker credentials, no real orders or main
+merges were performed for this prototype.
