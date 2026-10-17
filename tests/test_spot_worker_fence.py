@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from core.mode import QuantMode
-from infrastructure.spot_ingress_capture import OfflineSpotCaptureJournal
+from infrastructure.spot_ingress_capture import OfflineSpotCaptureJournal, SpotCaptureError
 from infrastructure.spot_public_capture_adapter import OptInSpotIngressAdapter
 from infrastructure.spot_reconnect_controller import (
     OfflineSpotReconnectController, ReconnectError,
