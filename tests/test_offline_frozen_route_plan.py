@@ -10,7 +10,7 @@ from core.mode import QuantMode
 from econith_quant.bridge.ai_bridge import AIBridge
 from quant.offline_ack_bridge import AdmissionReceiptError, OfflineSignalAckBridge
 from quant.offline_admission import OfflineAdmissionLedger, fingerprint
-from quant.offline_signal_outbox import OfflineSignalOutbox
+from quant.offline_signal_outbox import OfflineSignalOutbox, derive_leg_intent_id
 
 
 class CapturingBus:
@@ -81,8 +81,17 @@ def test_frozen_plan_cannot_be_overwritten_or_created_for_missing_source(tmp_pat
     changed[0]["quantity"] *= 2
     with pytest.raises(ValueError, match="conflict"):
         box.freeze_route_plan(source.signal_id, saved["route"], changed)
+    missing_id = "sig:freeze:123456"
+    absent_legs = []
+    for index, old in enumerate(saved["intents"]):
+        missing_leg = dict(old)
+        missing_leg["signal_id"] = missing_id
+        missing_leg["intent_id"] = derive_leg_intent_id(
+            missing_id, index, missing_leg["symbol"]
+        )
+        absent_legs.append(missing_leg)
     with pytest.raises(ValueError, match="missing"):
-        box.freeze_route_plan("sig:freeze:123456", saved["route"], changed)
+        box.freeze_route_plan(missing_id, saved["route"], absent_legs)
     assert box.frozen_route_plan(source.signal_id) == saved
 
 
