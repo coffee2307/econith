@@ -193,3 +193,27 @@ async def test_main_does_not_boot_on_bad_snapshot_or_create_execution(monkeypatc
     assert "streamer" not in components
     assert "ccxt_bridge" not in components
     assert "engine" not in components
+
+
+@pytest.mark.asyncio
+async def test_verified_only_denies_legacy_metrics_websocket_without_accept():
+    from types import SimpleNamespace
+    from main import app, stream_metrics
+
+    observed = []
+    class FakeSocket:
+        def __init__(self):
+            self.app = app
+        async def close(self, *, code):
+            observed.append(("close",code))
+        async def accept(self):
+            observed.append(("accept",None))
+            raise AssertionError("legacy WebSocket must not be accepted")
+
+    previous = getattr(app.state,"verified_only_research",False)
+    app.state.verified_only_research = True
+    try:
+        await stream_metrics(FakeSocket())
+        assert observed == [("close",1008)]
+    finally:
+        app.state.verified_only_research = previous
