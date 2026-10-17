@@ -181,3 +181,57 @@ model does not claim exactly-once exchange execution.
 
 No network/exchange calls, no broker credentials, no real orders or main
 merges were performed for this prototype.
+
+
+## Phase 0.5: optional predictor-origin outbox and per-leg intent provenance
+
+The `Predictor` is the actual `ai.signal` producer, and `AIBridge`
+translates those advisory events into `order.intent` events. Previously no
+stable source identity traveled along that boundary.
+
+This PR now contains `quant/offline_signal_outbox.py`:
+- Explicit `OfflineSignalOutbox(path, namespace=...)` maintains a persistent
+  SQLite WAL-backed event journal and assigns a unique `sig:<namespace>:<sequence>`
+  origin identity **at the time the decision is first persisted**.
+- Every `STAGED` decision is committed before EventBus publication; after
+  enqueue it remains `QUEUED`, which is *not* proof of consumer processing.
+  Unacknowledged rows remain available for explicit/manual replay with the
+  exact original serialized decision payload and `signal_id`. Only a
+  separate downstream-confirmed `acknowledge` retires a row.
+- `Predictor(..., offline_signal_outbox=...)` is strictly an **opt-in**
+  SIMULATION research path. **main.py does not enable it.** Omitting the
+  argument retains the legacy producer behavior, and attempting to use an
+  outbox in REALITY fails closed.
+- When an `ai.signal` has a valid origin `signal_id`, the existing
+  Sentinel-gated `AIBridge` forwards that ID and derives a stable, distinct
+  `intent_id` per routed leg from the origin ID, leg index and symbol.
+  It rejects malformed supplied signal IDs rather than forging replacements.
+  Without the optional origin ID, legacy simulation signals remain compatible;
+  they still lack a certified durable identity and cannot authorize real orders.
+- Tests in `tests/test_offline_signal_outbox.py` exercise crash-before-
+  enqueue recovery, explicit replay, forged-ID refusal, SIMULATION-only
+  enforcement, default Predictor compatibility and repeated-leg identity.
+
+**Boundaries and remaining risk:**
+- Staging a newly computed signal produces a **new** outbox sequence. If
+  upstream market inputs are reprocessed and the Predictor recomputes a signal
+  *before it was staged*, this alone cannot deduplicate the recomputation.
+  Proper durability requires an independently stable market/input event key
+  at ingress, and an atomic uniqueness policy linking it to the decision.
+- EventBus only queues an event; `QUEUED` does not imply delivered or
+  persisted by the downstream consumer. The opt-in path currently has no
+  production acknowledgement handshake. Neither `main.py` nor the capital
+  routing path consumes this outbox, and automatic replay is deliberately
+  disabled.
+- A replayed signal may encounter a different in-memory exposure or route
+  profile. Therefore identical `intent_id` with a changed business payload
+  must be quarantined by the *future wired* intent admission ledger.
+  The existing disconnected `OfflineAdmissionLedger` already rejects
+  such conflicts, but no whole-system atomicity guarantee is claimed.
+- Stable `intent_id` does not currently replace
+  `QuantExecutionBridge._client_id`'s timestamp-derived identifier.
+  **REALITY remains unconditionally blocked** pending an independently
+  reviewed broker-reconciled admission and single-writer implementation.
+
+These are research and lineage improvements, **not visual Dashboard changes**
+or proof of exactly-once exchange execution.
