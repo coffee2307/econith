@@ -38,6 +38,10 @@ services:
       LOCAL_LLM_GOVERNOR_CADENCE_TICKS: "120"
       MODEL_DIR: /app/models
       MODEL_REGISTRY: /app/models/registry
+      # Use the database service already present in this dev Compose.
+      DATABASE_URL: postgresql://econith:econith@postgres:5432/econith
+      # SQLite StateRecorder journal is separate from the Postgres engine.
+      STATE_RECORDER_DB_PATH: /app/runtime-state/econith.sqlite
       # Weak-machine friendly: World off until Main Control enables it.
       WORLD_SIMULATION_DEFAULT: "false"
       ECONITH_MOCK_TWAP: "false"
@@ -62,6 +66,7 @@ services:
       - ./datasets:/app/datasets
       # Writable by the non-root econith user; audit must never silently vanish.
       - auditlogs:/app/logs
+      - recorderstate:/app/runtime-state
       # Preserve pre-existing host logs, read-only, rather than deleting them.
       - ./logs:/app/legacy-host-logs:ro
     depends_on:
@@ -127,5 +132,6 @@ networks:
 
 volumes:
   auditlogs:
+  recorderstate:
   pgdata:
   redisdata:
