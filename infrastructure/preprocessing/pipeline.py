@@ -36,6 +36,7 @@ class MarketDataPipeline:
     ) -> None:
         self._bus = bus
         self._obi_levels = obi_levels
+        self._volume_window_s = volume_window_s
         self._vd = VolumeDeltaTracker(window_s=volume_window_s)
         self._last_price: float | None = None
 
@@ -44,6 +45,15 @@ class MarketDataPipeline:
         self._bus.subscribe("md.aggTrade", self._on_agg_trade)
         self._bus.subscribe("md.depth", self._on_depth)
         logger.info("orderflow pipeline registered")
+
+    def reset_verified_research_session(self) -> None:
+        """Never carry rolling volume/price state across unknown WSS gaps.
+
+        Called ONLY between sealed, separately verified research sessions,
+        once the preceding EventBus graph has fully drained.
+        """
+        self._vd = VolumeDeltaTracker(window_s=self._volume_window_s)
+        self._last_price = None
 
     @staticmethod
     def _verified_research_metadata(event: Event) -> dict:
