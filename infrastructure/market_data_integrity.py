@@ -277,6 +277,30 @@ class OfflineMarketIntegrityJournal:
             (event_id, status, received, digest, detail),
         )
 
+    @classmethod
+    def _verified_event(cls, row: sqlite3.Row) -> StoredMarketEvent:
+        """Re-validate raw persisted frames every time they cross a read boundary."""
+        try:
+            frame = json.loads(row["frame_json"])
+            symbol, seq, event_ms, trade_ms, serial, digest = cls._validate(frame)
+        except (TypeError, ValueError, KeyError) as exc:
+            raise MarketEventError("stored market event is malformed") from exc
+        if (
+            digest != row["fingerprint"]
+            or serial != row["frame_json"]
+            or row["event_id"] != f"md:{row['scope']}:{seq}"
+            or row["sequence"] != seq
+            or row["event_ms"] != event_ms
+            or row["trade_ms"] != trade_ms
+            or f":{symbol}:aggTrade" not in row["scope"]
+        ):
+            raise MarketEventError("durable replay record failed integrity verification")
+        return StoredMarketEvent(
+            event_id=row["event_id"], scope=row["scope"], sequence=seq,
+            event_ms=event_ms, trade_ms=trade_ms,
+            available_at_ms=row["available_at_ms"], frame=frame,
+        )
+
     def replay_as_of(self, cutoff_ms: int, *, limit: int = 1000) -> list[StoredMarketEvent]:
         """Return only committed events observable by receipt cutoff in ingest order."""
         self._simulation_only()
@@ -290,26 +314,7 @@ class OfflineMarketIntegrityJournal:
                    ORDER BY ingest_id LIMIT ?""",
                 (cutoff_ms, limit),
             ).fetchall()
-        result = []
-        for row in rows:
-            frame = json.loads(row["frame_json"])
-            symbol, seq, event_ms, trade_ms, serial, digest = self._validate(frame)
-            if (
-                digest != row["fingerprint"]
-                or serial != row["frame_json"]
-                or row["event_id"] != f"md:{row['scope']}:{seq}"
-                or row["sequence"] != seq
-                or row["event_ms"] != event_ms
-                or row["trade_ms"] != trade_ms
-                or f":{symbol}:aggTrade" not in row["scope"]
-            ):
-                raise MarketEventError("durable replay record failed integrity verification")
-            result.append(StoredMarketEvent(
-                event_id=row["event_id"], scope=row["scope"], sequence=seq,
-                event_ms=event_ms, trade_ms=trade_ms,
-                available_at_ms=row["available_at_ms"], frame=frame,
-            ))
-        return result
+        return [self._verified_event(row) for row in rows]
 
     def unresolved_incidents(self) -> list[dict[str, Any]]:
         """Read-only audit list; incidents are never auto-ignored or downgraded."""
