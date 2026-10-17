@@ -23,6 +23,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
+from fastapi import HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -127,6 +128,20 @@ def _extract_credential(request: Request) -> Optional[str]:
     if auth.lower().startswith("bearer "):
         return auth[7:].strip()
     return None
+
+
+def require_api_key(request: Request, settings: Settings) -> None:
+    """Shared GET/read-model authentication contract for protected routers.
+
+    Unlike the blanket mutating-route middleware, selected sensitive GETs
+    (vendor status / Social proxy) require credentials explicitly as well.
+    Keep this logic centralized so routes cannot drift in token semantics.
+    """
+    if not settings.api_auth_enabled:
+        return
+    credential = _extract_credential(request)
+    if credential is None or credential not in settings.api_keys:
+        raise HTTPException(status_code=401, detail="valid API key required")
 
 
 class APIKeyAuthMiddleware(BaseHTTPMiddleware):
