@@ -276,6 +276,7 @@ class OptInSpotIngressAdapter:
         session_id: str | None = None,
         max_frames: int = 300,
         timeout_s: float = 30.0,
+        inject_disconnect_after_frames: int | None = None,
     ) -> SpotTransportResult:
         """Explicit public TLS market-data-only capture; no API keys or orders.
 
@@ -286,6 +287,11 @@ class OptInSpotIngressAdapter:
         self.journal._simulation_only()
         if allow_network is not True:
             raise PermissionError("public network capture requires explicit opt-in")
+        if inject_disconnect_after_frames is not None and (
+            type(inject_disconnect_after_frames) is not int
+            or not 1 <= inject_disconnect_after_frames < max_frames
+        ):
+            raise ValueError("injected disconnect must precede bounded frame limit")
         import httpx
         import websockets
 
@@ -323,8 +329,30 @@ class OptInSpotIngressAdapter:
             max_size=self.journal.max_body_bytes, max_queue=16,
             ping_interval=20, ping_timeout=20,
         ) as connection:
+            stream = connection
+            if inject_disconnect_after_frames is not None:
+                async def _deliberately_interrupt():
+                    count = 0
+                    async for frame in connection:
+                        yield frame
+                        count += 1
+                        if count == inject_disconnect_after_frames:
+                            # Deliberate read-only *local* WS interruption:
+                            # the adapter must mark the old source session
+                            # failed and never imply recovered historical data.
+                            raise SpotTransportError(
+                                "controlled WebSocket disconnect injected",
+                                reason="INJECTED_WS_DISCONNECT",
+                            )
+                    # Early remote EOF must not quietly appear as a
+                    # successfully injected disconnect.
+                    raise SpotTransportError(
+                        "public WebSocket closed before disconnect injection",
+                        reason="WS_EARLY_EOF",
+                    )
+                stream = _deliberately_interrupt()
             return await self.capture_open_stream(
-                connection, get_snapshot,
+                stream, get_snapshot,
                 session_id=session_id or f"ws_{secrets.token_hex(12)}",
                 source="binance_public_simulation",
                 ws_endpoint=_PUBLIC_WS, rest_endpoint=_PUBLIC_REST,
