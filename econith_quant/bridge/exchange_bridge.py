@@ -8,9 +8,10 @@ maker child orders, and (in mock mode) simulates working/filled lifecycle
 transitions, persisting each to the recovery ledger. Every transition is also
 published on ``order.update`` for the dashboard.
 
-Mock TWAP is **opt-in** via ``ECONITH_MOCK_TWAP=true``. When CCXT execution is
-the live path (default), this bridge stays quiet so cockpit does not show a
-fake TWAP lifecycle beside real fills.
+Mock TWAP is **opt-in** via ``ECONITH_MOCK_TWAP=true``. It can emit
+mock lifecycle updates only while the actual Quant mode is SIMULATION,
+even if the operator later switches modes. Every update is explicitly
+marked as simulation; never use these mock records as authenticated fills.
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ import os
 from typing import Any
 
 from core.event_bus import Event, EventBus
+from core.mode import QuantMode, current_mode
 from econith_quant.execution.smart_order import OrderIntent, OrderSide
 from econith_quant.execution.twap import TWAPExecutor
 from econith_quant.recovery.state import TradeStateStore
@@ -65,7 +67,10 @@ class ExchangeBridge:
         self._last_price = float(event.payload.get("price", self._last_price))
 
     async def _on_intent(self, event: Event) -> None:
-        if not self._enabled:
+        # Mock TWAP must NEVER publish a FILLED lifecycle or persist synthetic
+        # orders in REALITY. Re-evaluate the active mode for every event,
+        # including after a runtime SIMULATION -> REALITY transition.
+        if not self._enabled or current_mode() is not QuantMode.SIMULATION:
             return
         p: dict[str, Any] = event.payload
         intent = OrderIntent(
@@ -84,6 +89,9 @@ class ExchangeBridge:
             symbol=intent.symbol,
             side=intent.side.value,
             status="SUBMITTED",
+            mode="SIMULATION",
+            source="mock_twap",
+            simulated=True,
             slices=len(children),
             algo="twap",
             reason=intent.reason,
@@ -114,6 +122,9 @@ class ExchangeBridge:
             symbol=intent.symbol,
             side=intent.side.value,
             status="FILLED",
+            mode="SIMULATION",
+            source="mock_twap",
+            simulated=True,
             slices=len(children),
             algo="twap",
             reason=intent.reason,
