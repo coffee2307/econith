@@ -115,6 +115,23 @@ jobs:
                   assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
           print("DURABLE_AUDIT_AND_BOTH_SQLITE_JOURNALS_PASS")
           PY
+      - name: Production database outage must fail closed, never fork to SQLite
+        run: |
+          docker compose -f docker-compose.yml run --rm --no-deps -T \
+            -e APP_ENV=production \
+            -e DATABASE_URL=postgresql://ci:unusable@127.0.0.1:1/econith \
+            --entrypoint python backend_core -c '
+          import asyncio
+          from config.database import init_database, is_fallback
+          try:
+              asyncio.run(init_database())
+          except RuntimeError as exc:
+              assert str(exc) == "Primary PostgreSQL database unavailable"
+              assert is_fallback() is False
+              print("PRODUCTION_DB_OUTAGE_FAIL_CLOSED_PASS")
+          else:
+              raise AssertionError("production accepted an unavailable database")
+          '
       - name: Collect sanitized container diagnostics on failure
         if: failure()
         run: docker compose -f docker-compose.yml ps && docker compose -f docker-compose.yml logs --tail=80 backend_core
