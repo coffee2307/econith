@@ -130,6 +130,65 @@ jobs:
                   assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
           print("DURABLE_AUDIT_AND_BOTH_SQLITE_JOURNALS_PASS")
           PY
+      - name: State and audit data survive backend container restart
+        run: |
+          docker compose -f docker-compose.yml exec -T backend_core python - <<'PY'
+          import sqlite3
+          from pathlib import Path
+          for name in ("econith.sqlite", "trades.sqlite"):
+              p = Path("/app/runtime-state") / name
+              with sqlite3.connect(p) as db:
+                  db.execute(
+                      "CREATE TABLE IF NOT EXISTS phase0_persistence_probe "
+                      "(key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+                  )
+                  db.execute(
+                      "INSERT OR REPLACE INTO phase0_persistence_probe VALUES (?, ?)",
+                      ("runner-check", "preserve-across-restart"),
+                  )
+          print("PERSISTENCE_PROBE_WRITTEN")
+          PY
+          docker compose -f docker-compose.yml restart backend_core
+          python - <<'PY'
+          import json
+          import time
+          import urllib.request
+          deadline = time.monotonic() + 90
+          while time.monotonic() < deadline:
+              try:
+                  with urllib.request.urlopen(
+                      "http://127.0.0.1:8000/api/v1/health", timeout=5
+                  ) as response:
+                      payload = json.load(response)
+                  assert payload["status"] == "ok"
+                  assert payload["mock"] is True
+                  print("BACKEND_RESTART_HEALTH_PASS")
+                  break
+              except (OSError, ValueError, AssertionError):
+                  time.sleep(2)
+          else:
+              raise SystemExit("backend failed health after stateful restart")
+          PY
+          docker compose -f docker-compose.yml exec -T backend_core python - <<'PY'
+          import json
+          import sqlite3
+          from pathlib import Path
+          for name in ("econith.sqlite", "trades.sqlite"):
+              with sqlite3.connect(Path("/app/runtime-state") / name) as db:
+                  value = db.execute(
+                      "SELECT value FROM phase0_persistence_probe WHERE key = ?",
+                      ("runner-check",),
+                  ).fetchone()
+                  assert value == ("preserve-across-restart",), (name, value)
+          entries = [
+              json.loads(line)
+              for line in Path("/app/logs/econith_audit.log").read_text(
+                  encoding="utf-8"
+              ).splitlines()
+          ]
+          assert any(row.get("decision") == "DENY" for row in entries)
+          print("RESTART_PERSISTENCE_TWO_JOURNALS_AND_AUDIT_PASS")
+          PY
       - name: Production database outage must fail closed, never fork to SQLite
         run: |
           docker compose -f docker-compose.yml run --rm --no-deps -T \
