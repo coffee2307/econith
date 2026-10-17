@@ -249,6 +249,12 @@ class OfflineAdmissionLedger:
         if not math.isfinite(observation.filled_quantity) or observation.filled_quantity < 0:
             self._hold_unknown(intent_id)
             raise ReconciliationError("invalid broker fill quantity")
+        if observation.status in ("PARTIALLY_FILLED", "FILLED") and observation.filled_quantity <= 0:
+            self._hold_unknown(intent_id)
+            raise ReconciliationError("broker claims a fill without positive filled quantity")
+        if observation.filled_quantity < entry.filled_quantity:
+            self._hold_unknown(intent_id)
+            raise ReconciliationError("broker filled quantity regressed; require human reconciliation")
 
         terminal = observation.status in ("FILLED", "CANCELED", "REJECTED")
         new_status = (
