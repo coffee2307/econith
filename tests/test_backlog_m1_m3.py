@@ -10,15 +10,21 @@ import pytest
 def test_deploy_gate_evaluate_pass_fail() -> None:
     from training.deploy_gate import evaluate_gate
 
+    report = {
+        "rows": 200, "annualized_sharpe": 0.2, "max_drawdown": 0.1,
+        "evaluation_protocol": "chronological_holdout_oos",
+        "signal_col": "oos_prediction_1h",
+        "prediction_model_id": ["frozen-test-model"],
+    }
     ok, _ = evaluate_gate(
-        {"rows": 200, "annualized_sharpe": 0.2, "max_drawdown": 0.1},
+        report,
         min_sharpe=-0.5,
         max_drawdown=0.45,
         min_rows=50,
     )
     assert ok is True
     bad, reason = evaluate_gate(
-        {"rows": 10, "annualized_sharpe": 0.2, "max_drawdown": 0.1},
+        {**report, "rows": 10},
         min_rows=50,
     )
     assert bad is False
@@ -28,16 +34,15 @@ def test_deploy_gate_evaluate_pass_fail() -> None:
 def test_deploy_gate_skip(tmp_path: Path) -> None:
     from training.deploy_gate import gate_or_raise
 
-    report = gate_or_raise(
-        holdout=None,
-        metrics_report=None,
-        min_sharpe=-0.5,
-        max_drawdown=0.45,
-        min_rows=50,
-        skip=True,
-    )
-    assert report["skipped"] is True
-    assert report["passed"] is True
+    with pytest.raises(SystemExit, match="skip-backtest is disabled"):
+        gate_or_raise(
+            holdout=None,
+            metrics_report=None,
+            min_sharpe=-0.5,
+            max_drawdown=0.45,
+            min_rows=50,
+            skip=True,
+        )
 
 
 def test_deploy_gate_from_metrics_file(tmp_path: Path) -> None:
@@ -50,15 +55,15 @@ def test_deploy_gate_from_metrics_file(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    report = gate_or_raise(
-        holdout=None,
-        metrics_report=path,
-        min_sharpe=-0.5,
-        max_drawdown=0.45,
-        min_rows=50,
-        skip=False,
-    )
-    assert report["passed"] is True
+    with pytest.raises(SystemExit, match="standalone backtest reports lack verified"):
+        gate_or_raise(
+            holdout=None,
+            metrics_report=path,
+            min_sharpe=-0.5,
+            max_drawdown=0.45,
+            min_rows=50,
+            skip=False,
+        )
 
 
 def test_neural_react_without_checkpoint_is_empty() -> None:
