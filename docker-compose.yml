@@ -60,7 +60,10 @@ services:
       - ./main.py:/app/main.py:ro
       - ./models:/app/models:ro
       - ./datasets:/app/datasets
-      - ./logs:/app/logs
+      # Writable by the non-root econith user; audit must never silently vanish.
+      - auditlogs:/app/logs
+      # Preserve pre-existing host logs, read-only, rather than deleting them.
+      - ./logs:/app/legacy-host-logs:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -123,5 +126,6 @@ networks:
     driver: bridge
 
 volumes:
+  auditlogs:
   pgdata:
   redisdata:
