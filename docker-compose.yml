@@ -42,6 +42,7 @@ services:
       DATABASE_URL: postgresql://econith:econith@postgres:5432/econith
       # SQLite StateRecorder journal is separate from the Postgres engine.
       STATE_RECORDER_DB_PATH: /app/runtime-state/econith.sqlite
+      TRADE_STATE_DB_PATH: /app/runtime-state/trades.sqlite
       # Weak-machine friendly: World off until Main Control enables it.
       WORLD_SIMULATION_DEFAULT: "false"
       ECONITH_MOCK_TWAP: "false"
