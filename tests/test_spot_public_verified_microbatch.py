@@ -190,3 +190,33 @@ def test_cli_optin_and_bounds_no_network_or_db(tmp_path,capsys):
         with pytest.raises(ValueError):
             validate(opts)
     assert not path.exists()
+
+
+@pytest.mark.asyncio
+async def test_missing_durable_receiver_ack_refuses_eventbus_publication(
+    tmp_path, monkeypatch,
+):
+    import infrastructure.spot_public_verified_microbatch as worker
+    root=tmp_path/"receipt_denied"
+    _,capture=fake_capture(root)
+
+    def incomplete_ack(_args):
+        return {
+            "acceptance":"PASSED_OFFLINE_REAL_CAPTURE_TO_RECEIVER_ACK",
+            "book_status":"SYNCED",
+            "producer_ack_count":2,
+            "independent_receiver_receipt_count":1,
+            "original_trades_replayed":2,
+            "lineage_manifest_entries":2,
+            "cross_process_authenticated_transport":True,
+            "network_requests":0,
+            "orders_submitted":0,
+        }
+
+    monkeypatch.setattr(worker,"verify_chain",incomplete_ack)
+    with pytest.raises(VerifiedPublicResearchError,match="durable verified"):
+        await observe_verified_public_batches(
+            output_dir=root,allow_network=True,cycles=1,
+            max_frames=20,capture_once=capture,
+        )
+    assert not (root/"microbatch_progress.json").exists()
