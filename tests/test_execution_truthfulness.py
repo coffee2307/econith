@@ -267,3 +267,36 @@ def test_simulation_mode_remains_explicit_synthetic(monkeypatch) -> None:
     report = asyncio.run(bridge.execute(order))
     assert report.is_filled is True and report.mode == "SIMULATION"
     assert any(t == "quant.fill" for t, _ in records)
+
+
+def test_even_verified_model_edge_cannot_bypass_missing_durable_order_authority(
+    monkeypatch,
+) -> None:
+    """Future OOS model promotion must not accidentally arm capital execution."""
+    import bridges.quant_bridge as qb
+    from core.mode import QuantMode
+
+    monkeypatch.setattr(qb, "current_mode", lambda: QuantMode.REALITY)
+    events: list[tuple[str, dict]] = []
+
+    class Bus:
+        async def publish(self, topic, **payload):
+            events.append((topic, payload))
+
+    bridge = qb.QuantExecutionBridge.__new__(qb.QuantExecutionBridge)
+    bridge._bus = Bus()
+    bridge._build_payload = lambda _: SimpleNamespace(
+        symbol="BTCUSDT", side=SimpleNamespace(value="LONG_OPEN"), quantity=0.01
+    )
+    bridge._evaluate_pretrade = lambda *_: SimpleNamespace(
+        edge_source="model",
+        approved=True,
+        as_dict=lambda: {"approved": True, "edge_source": "model"},
+    )
+    bridge._ccxt = MagicMock()
+    asyncio.run(bridge._on_intent(SimpleNamespace(payload={
+        "intent_id": "frozen-OOS-prediction-001"
+    })))
+    assert len(events) == 1 and events[0][0] == "order.rejected"
+    assert events[0][1]["reason"] == "durable_order_admission_not_certified"
+    bridge._ccxt.execute.assert_not_called()
