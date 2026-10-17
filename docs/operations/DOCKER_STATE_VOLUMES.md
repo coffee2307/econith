@@ -12,7 +12,10 @@ created by Docker as root. A real HTTP request crashed before
 authentication with `PermissionError: /app/logs/econith_audit.log`.
 After repairing audit storage, FastAPI startup failed because
 `StateRecorder` created `datasets/econith.sqlite` inside another
-unwritable host bind path.
+unwritable host bind path. A subsequent run further reached the legacy
+`TradeStateStore`, which also created `datasets/trades.sqlite` inside
+the same unwritable directory; both journals are now explicitly directed
+to separate files on the writable `recorderstate` volume.
 
 These are **real non-root filesystem regressions**, not a missing test
 assertion. Disabling audit, changing to root, or editing host data owners
@@ -23,7 +26,7 @@ recursively would be a poor fix.
 | Path inside container | New storage | Previous data preserved |
 | --- | --- | --- |
 | `/app/logs` | `auditlogs` named Docker volume, writable by uid 1000 | Original host `./logs` (dev) or `./runtime/logs` (prod) is mounted **read-only** at `/app/legacy-host-logs`. |
-| `/app/runtime-state/econith.sqlite` | `recorderstate` named Docker volume | Original `./datasets/econith.sqlite` or `./runtime/datasets/econith.sqlite` is unchanged. |
+| `/app/runtime-state/econith.sqlite` and `/app/runtime-state/trades.sqlite` | `recorderstate` named Docker volume | Original `./datasets/{econith,trades}.sqlite` or production `./runtime/datasets/{econith,trades}.sqlite` remain unchanged. |
 | `/app/datasets` | **Existing host directory bind** | Original datasets stay where they are, without copy or delete. |
 | SQLAlchemy primary database, dev/prod | PostgreSQL service | New dev Compose `DATABASE_URL` explicitly points to its already configured Postgres; production already used Postgres. |
 | Research/model registry | Existing bind paths | Unchanged. |
@@ -44,7 +47,7 @@ does not certify authoritative account ledger recovery.
    Verify existing `./datasets/`, `./logs/`, `./runtime/`,
    SQLite journal and database volumes; hash and back up them **outside**
    the active Compose stack.
-2. Confirm the current recorder journal's SQLite integrity and latest
+2. Confirm both the recorder and trade-order journals' SQLite integrity and latest
    tick/Sentinel records. The new named volume starts empty unless
    the journal is **explicitly migrated**. Starting fresh is not an
    implicit recovery from previously persisted Sentinel state.
