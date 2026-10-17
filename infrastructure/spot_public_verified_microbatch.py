@@ -27,6 +27,9 @@ from core.mode import QuantMode
 from infrastructure.preprocessing.pipeline import MarketDataPipeline
 from infrastructure.spot_capture_replay import OfflineSpotCaptureReplayer
 from infrastructure.spot_ingress_capture import OfflineSpotCaptureJournal
+from infrastructure.spot_incremental_shadow import (
+    IncrementalSpotShadowValidator, IncrementalSpotIntegrityStatus,
+)
 from infrastructure.spot_public_capture_adapter import (
     OptInSpotIngressAdapter, SpotTransportResult,
 )
@@ -101,16 +104,28 @@ async def observe_verified_public_batches(
     for topic in stats:
         bus.subscribe(topic, observe)
     sessions: list[dict[str, Any]] = []
+    incremental_proofs: dict[str, IncrementalSpotIntegrityStatus] = {}
     await bus.start()
     try:
         for cycle in range(cycles):
             async def _capture(session_id: str, sequence: int) -> SpotTransportResult:
                 if capture_once is not None:
                     return await capture_once(session_id, sequence)
-                return await adapter.capture_public_once(
+                # One fresh incremental validator per real TLS/WSS session.
+                # It is fed *only* rows durably COMMITTED to original SQLite.
+                # The validator publishes nothing until the sealed batch
+                # crosses the independent receiver-owned ACK gate below.
+                shadow = IncrementalSpotShadowValidator(
+                    journal, session_id=session_id, symbol=symbol,
+                    source="binance_public_simulation",
+                )
+                admitted_source = await adapter.capture_public_once(
                     allow_network=True, session_id=session_id,
                     max_frames=max_frames, timeout_s=timeout_s,
+                    on_persisted=shadow.observe,
                 )
+                incremental_proofs[session_id] = shadow.finish(admitted_source)
+                return admitted_source
 
             result = await controller.run_fenced_batch(
                 _capture, holder_id="microbatch_public_reader",
@@ -122,6 +137,7 @@ async def observe_verified_public_batches(
                     "no valid public captured/synchronized session; stop without research emit"
                 )
             sid = result.last_session_id
+            incremental_proof = incremental_proofs.get(sid)
             verified_dir = root / f"cycle_{cycle + 1:02d}"
             # The verified_chain reads ORIGINAL SQLite via read-only backup and
             # enforces a separate market DB and independent HMAC receiver DB.
@@ -164,6 +180,13 @@ async def observe_verified_public_batches(
                 replay.book is None or replay.depth_status != "SYNCED"
                 or len(replay.trades) != proof["original_trades_replayed"]
                 or replay.total_records != proof["original_records_replayed"]
+                or (capture_once is None and (
+                    incremental_proof is None
+                    or incremental_proof.book_status != "SYNCED"
+                    or incremental_proof.verified_original_records != replay.total_records
+                    or incremental_proof.verified_agg_trades != len(replay.trades)
+                    or incremental_proof.book_last_update_id != replay.book.last_update_id
+                ))
             ):
                 raise VerifiedPublicResearchError("original source changed since receiver ACK")
             observed_before = stats.copy()
@@ -241,6 +264,11 @@ async def observe_verified_public_batches(
                 "history_continuity_verified": False,
                 "unobserved_between_sessions": cycle > 0,
                 "legacy_streamer_started": False,
+                "post_commit_incremental_shadow_passed": incremental_proof is not None,
+                "post_commit_incremental_source_records": (
+                    incremental_proof.verified_original_records
+                    if incremental_proof is not None else None
+                ),
             })
             # An audit record must be retained independently of UI state.
             (root / "microbatch_progress.json").write_text(
@@ -267,6 +295,9 @@ async def observe_verified_public_batches(
             "execution_started":False,
             "orders_submitted":0,
             "receiver_scope":"HMAC_AUTHENTICATED_LOCAL_SUBPROCESS_PIPE_ONLY",
+            "post_commit_incremental_shadow_passed": (
+                capture_once is None and len(incremental_proofs) >= cycles
+            ),
             "public_tls_peer_confirmed":capture_once is None,
         }
     finally:
