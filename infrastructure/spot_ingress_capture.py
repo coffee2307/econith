@@ -118,6 +118,7 @@ class OfflineSpotCaptureJournal:
                     kind TEXT NOT NULL,
                     received_at_ms INTEGER NOT NULL,
                     request_started_at_ms INTEGER,
+                    request_symbol TEXT,
                     endpoint TEXT NOT NULL,
                     raw_blob BLOB NOT NULL,
                     sha256 TEXT NOT NULL,
@@ -317,6 +318,7 @@ class OfflineSpotCaptureJournal:
         self, session_id: str, *, raw: str | bytes, kind: str,
         endpoint: str, received_at_ms: int,
         request_started_at_ms: int | None,
+        request_symbol: str | None,
     ) -> int:
         self._simulation_only()
         self._part(session_id, "session_id")
@@ -345,6 +347,10 @@ class OfflineSpotCaptureJournal:
                     raise SpotCaptureError("REST request predates websocket session")
                 if kind == "snapshot" and endpoint not in _REST_DEPTH:
                     raise SpotCaptureError("unrecognized REST depth endpoint")
+                if kind == "snapshot" and request_symbol != session["symbol"]:
+                    raise SpotCaptureError("REST request symbol mismatch")
+                if kind != "snapshot" and request_symbol is not None:
+                    raise SpotCaptureError("websocket frame cannot carry REST request")
                 if kind != "snapshot" and endpoint != session["ws_endpoint"]:
                     raise SpotCaptureError("websocket endpoint/session mismatch")
                 self._classify(
@@ -361,10 +367,10 @@ class OfflineSpotCaptureJournal:
                 cursor = conn.execute("""
                     INSERT INTO offline_spot_capture_records
                     (session_id,kind,received_at_ms,request_started_at_ms,
-                     endpoint,raw_blob,sha256)
-                    VALUES (?,?,?,?,?,?,?)
-                """, (session_id, kind, received, requested, endpoint,
-                      body, digest))
+                     request_symbol,endpoint,raw_blob,sha256)
+                    VALUES (?,?,?,?,?,?,?,?)
+                """, (session_id, kind, received, requested, request_symbol,
+                      endpoint, body, digest))
                 conn.execute("""
                     UPDATE offline_spot_capture_sessions SET last_receipt_ms=?
                     WHERE session_id=?
@@ -388,6 +394,7 @@ class OfflineSpotCaptureJournal:
         return self._record(
             session_id, raw=raw, kind=stream_kind, endpoint=endpoint,
             received_at_ms=received_at_ms, request_started_at_ms=None,
+            request_symbol=None,
         )
 
     def record_snapshot(
@@ -404,6 +411,7 @@ class OfflineSpotCaptureJournal:
             session_id, raw=raw, kind="snapshot", endpoint=rest_endpoint,
             received_at_ms=received_at_ms,
             request_started_at_ms=request_started_at_ms,
+            request_symbol=request_symbol,
         )
 
     def replay_as_of(
@@ -445,6 +453,7 @@ class OfflineSpotCaptureJournal:
             if kind == "snapshot":
                 if (
                     endpoint not in _REST_DEPTH
+                    or row["request_symbol"] != session["symbol"]
                     or type(row["request_started_at_ms"]) is not int
                     or not session["opened_at_ms"]
                     <= row["request_started_at_ms"] <= row["received_at_ms"]
@@ -452,6 +461,7 @@ class OfflineSpotCaptureJournal:
                     raise SpotCaptureError("stored REST provenance invalid")
             elif kind not in ("aggTrade", "depthUpdate") or (
                 endpoint != session["ws_endpoint"]
+                or row["request_symbol"] is not None
                 or row["request_started_at_ms"] is not None
             ):
                 raise SpotCaptureError("stored WebSocket provenance invalid")
