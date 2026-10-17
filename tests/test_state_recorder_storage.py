@@ -48,3 +48,29 @@ def test_legacy_recorder_path_remains_backward_compatible():
     from infrastructure.storage.sqlite import DEFAULT_PATH
     cfg = Environment(_env_file=None)
     assert cfg.state_recorder_db_path == str(DEFAULT_PATH)
+
+
+def test_trade_lifecycle_uses_independent_durable_journal(tmp_path, monkeypatch):
+    from econith_quant.recovery import state as state_module
+    path = tmp_path / "runtime-state" / "trades.sqlite"
+    monkeypatch.setattr(
+        state_module, "get_environment",
+        lambda: SimpleNamespace(trade_state_db_path=str(path)),
+    )
+    trades = state_module.TradeStateStore()
+    try:
+        trades.record("BTCUSDT", "BUY", 0.01, 100.0, "twap", "WORKING")
+        active = trades.open_orders()
+        assert len(active) == 1
+        assert active[0]["symbol"] == "BTCUSDT"
+        assert path.is_file()
+    finally:
+        trades.close()
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+
+
+def test_legacy_trade_path_stays_backward_compatible():
+    from config.environment import Environment
+    cfg = Environment(_env_file=None)
+    assert cfg.trade_state_db_path == "datasets/trades.sqlite"
