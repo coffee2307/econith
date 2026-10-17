@@ -18,7 +18,7 @@ from infrastructure.spot_ingress_capture import (
 )
 from infrastructure.spot_capture_replay import OfflineSpotCaptureReplayer
 from infrastructure.spot_public_capture_adapter import (
-    OptInSpotIngressAdapter, SpotTransportResult,
+    OptInSpotIngressAdapter, SpotTransportError, SpotTransportResult,
 )
 from infrastructure.spot_worker_fence import (
     OfflineSpotWorkerFence, WorkerLease, WorkerLeaseConflict,
