@@ -119,7 +119,7 @@ class OfflineSpotReconnectController:
                     (controller_id,symbol) VALUES (?,?)
                 """, (self.controller_id, self.symbol))
                 owned = conn.execute("""
-                    SELECT symbol FROM offline_spot_reconnect_controllers
+                    SELECT symbol, requires_fence FROM offline_spot_reconnect_controllers
                     WHERE controller_id=?
                 """, (self.controller_id,)).fetchone()
                 if owned["symbol"] != self.symbol:
