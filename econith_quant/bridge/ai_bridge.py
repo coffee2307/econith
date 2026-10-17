@@ -23,6 +23,7 @@ from core.event_bus import Event, EventBus
 from econith.quant.routing import EconithRouteKernel
 from econith_quant.execution.smart_order import OrderIntent, OrderSide
 from quant.offline_signal_outbox import derive_leg_intent_id
+from quant.offline_admission import fingerprint
 
 logger = logging.getLogger("econith.quant.bridge.ai")
 
@@ -170,6 +171,7 @@ class AIBridge:
             portfolio_derisk=round(size_scalar, 4),
             portfolio_var_scalar=round(var_scalar, 4),
         )
+        signal_fingerprint = fingerprint(p) if origin_signal_id is not None else None
         for leg_index, leg in enumerate(plan.legs):
             qty = max(leg.quantity, self._min_leg_qty(leg.symbol))
             intent = OrderIntent(
@@ -191,6 +193,9 @@ class AIBridge:
                     "intent_id": derive_leg_intent_id(
                         origin_signal_id, leg_index, intent.symbol
                     ),
+                    "leg_index": leg_index,
+                    "leg_count": len(plan.legs),
+                    "signal_fingerprint": signal_fingerprint,
                 }
                 if origin_signal_id is not None else {}
             )
