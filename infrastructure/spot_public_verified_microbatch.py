@@ -207,6 +207,10 @@ async def observe_verified_public_batches(
             ):
                 raise VerifiedPublicResearchError("original source changed since receiver ACK")
             observed_before = stats.copy()
+            # Inter-session downtime is unobserved. Never allow the rolling
+            # indicator window to blend two separately sealed sessions;
+            # the last cycle's derived graph has already been drained.
+            pipeline.reset_verified_research_session()
             for ordinal, trade in enumerate(replay.trades, start=1):
                 await publisher.publish_raw_confirmed(
                     "md.aggTrade",
