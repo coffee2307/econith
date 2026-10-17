@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 from argparse import Namespace
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -25,7 +24,6 @@ from typing import Any, Awaitable, Callable
 from ci.phase1_offline_real_capture_chain import run as verify_chain
 from core.event_bus import Event, EventBus, RawMarketAdmissionDenied
 from core.mode import QuantMode
-from infrastructure.market_cross_process_delivery import CrossProcessDeliveryError
 from infrastructure.preprocessing.pipeline import MarketDataPipeline
 from infrastructure.spot_capture_replay import OfflineSpotCaptureReplayer
 from infrastructure.spot_ingress_capture import OfflineSpotCaptureJournal
@@ -138,8 +136,7 @@ async def observe_verified_public_batches(
                 proof["acceptance"] != "PASSED_OFFLINE_REAL_CAPTURE_TO_RECEIVER_ACK"
                 or proof["book_status"] != "SYNCED"
                 or proof["producer_ack_count"] <= 0
-                or proof["producer_ack_count"] != proof["receiver_receipts"]
-                if "receiver_receipts" in proof else False
+                or proof["producer_ack_count"] != proof["independent_receiver_receipt_count"]
             ):
                 raise VerifiedPublicResearchError("durable verified research chain refused")
             if (
