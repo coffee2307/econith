@@ -176,7 +176,7 @@ def test_conflicting_broker_order_reference_quarantined(tmp_path):
         ledger.reconcile_read_only(
             "id-ref", lambda _: BrokerObservation(
                 client_order_id=a.client_order_id, broker_order_id="mock-B",
-                status="FILLED",
+                status="FILLED", filled_quantity=0.025,
             )
         )
     assert ledger.get("id-ref").status == "UNKNOWN"
