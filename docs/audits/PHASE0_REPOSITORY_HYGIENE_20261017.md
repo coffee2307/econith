@@ -235,3 +235,73 @@ Implemented:
   pending an owner-confirmed source URL; not automatically bootstrapped.
 - The desktop connection has recently reported the authorized machine
   offline. No local configuration or file changes have been made.
+
+
+## Phase 0 follow-up — source dependency graph and execution truth
+
+The CI-generated read-only architectural inventory in successful GitHub Actions
+run [39000549150](https://github.com/coffee2307/econith/actions/runs/39000549150)
+scanned **225 first-party Python files**, parsed with **zero errors**, and
+reported **381 matched direct-import edges**, including **150 cross-domain
+edges**, **4 static references into `econith_quant`**, **7 literal
+`order.intent` sites**, and **1 file with a recognized order API call**.
+The full JSON is archived as `phase0-architecture-39000549150`. These
+numbers are **static signal coverage**, not exhaustive runtime coverage.
+
+### Why source ownership cannot be solved by moving folders today
+
+- `main.py` **imports both** `econith_quant.bridge.ai_bridge.AIBridge`
+  and `econith_quant.bridge.exchange_bridge.ExchangeBridge`.
+  Therefore `econith_quant/` is not merely an unused historical/vendor
+  project: at least its small bridge/execution/recovery surface is active
+  within the main process. `scripts/check_wiring.py` and
+  `scripts/verify_invariants.py` also import its bridge.
+- Root MIT licensing and the embedded GPLv3 license need source-file
+  provenance/compliance analysis. Do not copy all 776 vendor files into
+  `quant/` or delete that subtree because most files appear unused.
+  Distinguish first-party bridge files from the separately licensed
+  upstream code, and arrange compliant migration only after a license audit.
+- Exact duplicate blobs found in KHKT figures and CSVs preserve
+  experiment and report lineage. See
+  [duplicate ledger](DUPLICATE_FILES_LEDGER_20261017.md).
+  There is no verified byte-identical pair of production executors to
+  delete automatically.
+- The remaining `econith_social` entry is an unconfigured Git *gitlink*,
+  not a source folder. GitHub checkout emits
+  `No url found for submodule path 'econith_social' in .gitmodules`.
+  Preserve until the owner supplies/verifies the historical origin.
+  Optional Social startup is already fail-safe; this warning persists.
+
+### Execution authority protection
+
+Legacy `ExchangeBridge` could previously be opted into with
+`ECONITH_MOCK_TWAP=true` regardless of Quant mode and emit FILLED
+`order.update` records indistinguishable from a real lifecycle.
+It now checks `current_mode() is QuantMode.SIMULATION` for **every
+incoming intent**, including after live mode transitions, before generating
+any mock children or state writes. Its simulated updates carry
+`mode=SIMULATION`, `source=mock_twap` and `simulated=true`.
+Dedicated unit tests cover disabled, opted-in simulation and forbidden
+REALITY paths. This prevents a legacy mock writer from contaminating
+capital-domain cockpit events but is **not proof of a unique real-order
+authority across all edge conditions**.
+
+### Additional outstanding safety controls
+
+- Quant `REALITY` can mean public real-world data, and it is not a signed
+  permission to trade capital. Model deploy attestation, broker mainnet
+  allowlist, independent Sentinel gating and order reconciliation are
+  separate release prerequisites.
+- Production/staging PostgreSQL fail closed when the primary cannot be
+  verified; never use the development SQLite fallback as a hidden
+  split-brain trading ledger.
+- All API-owned mutating HTTP routes require credentials, and Social/
+  vendor protected GETs now use one canonical API-key validator.
+- Docker regression covers cold boot, explicit synthetic provenance, four
+  blocked unauthenticated mutations, durable audit, both SQLite journals,
+  and production Postgres outage refusal. It **does not** cover database
+  backup/restore under traffic, network partitions, disaster recovery or
+  exchange order placement.
+
+No production/order keys were used, no existing host filesystem was cleaned,
+and PR #28 remains draft stacked atop unmerged PR #21.
