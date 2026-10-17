@@ -72,6 +72,7 @@ from infrastructure.observability.alerts import get_alert_dispatcher, register_r
 from infrastructure.preprocessing.pipeline import MarketDataPipeline
 from infrastructure.storage.recorder import StateRecorder
 from infrastructure.websocket.streamer import BinanceWebSocketStreamer
+from infrastructure.spot_verified_cutover_gate import enforce_verified_only_spot_ingress
 from quant.ccxt_bridge import CCXTBinanceBridge
 from sentinel.manager import Sentinel
 
@@ -88,6 +89,8 @@ components: dict[str, object] = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Refuse a false verified-only configuration before DB/engine/network startup.
+    enforce_verified_only_spot_ingress()
     env = get_environment()
     boot_locale = bootstrap_locale_from_env()
     logger.info("dashboard operator locale bootstrapped -> %s", boot_locale)
