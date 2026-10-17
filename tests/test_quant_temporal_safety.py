@@ -24,7 +24,7 @@ def _dataset(tmp_path, *, btc_rows=60, eth_rows=48, mutate_holdout=False):
                 "price": price, "mid": price,
             })
     root = tmp_path / "features"
-    root.mkdir()
+    root.mkdir(parents=True)
     pd.DataFrame(records).to_parquet(root / "features.parquet", index=False)
     output = tmp_path / "quant_labeled.parquet"
     summary = label_dataset(
