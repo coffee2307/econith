@@ -62,7 +62,7 @@ def test_purge_respects_actual_target_timestamp_with_gapped_trades(tmp_path):
 
     # No events between minutes 20 and 45. A horizon from minute 19 can
     # resolve to minute 45, despite 19+15 < the holdout boundary.
-    times = list(range(20)) + list(range(45, 85))
+    times = list(range(20)) + list(range(60, 100))
     df = pd.DataFrame({
         "symbol": ["BTCUSDT"] * len(times),
         "ts_ms": [1_700_000_000_000 + t * 60_000 for t in times],
@@ -72,10 +72,13 @@ def test_purge_respects_actual_target_timestamp_with_gapped_trades(tmp_path):
     root.mkdir()
     df.to_parquet(root / "features.parquet", index=False)
     dest = tmp_path / "train.parquet"
-    summary = label_dataset(str(root), str(dest), 0.50, horizon_preset="scalp")
+    summary = label_dataset(str(root), str(dest), 0.66, horizon_preset="scalp")
     train = pd.read_parquet(dest)
     held = pd.read_parquet(summary["holdout_output"])
     cutoff = int(held.ts_ms.iloc[0])
+    assert cutoff == 1_700_000_000_000 + 60 * 60_000
+    assert summary["purged_train_rows"] > 0
+    assert (train["ts_ms"] < 1_700_000_000_000 + 19 * 60_000).all()
     # For every retained train label, verify the actual time of the trade used
     # to compute each forward return (not merely ts_ms+horizon).
     market_times = df.ts_ms.to_numpy(dtype="int64")
