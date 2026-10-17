@@ -12,6 +12,7 @@ does not acknowledge fills or exchange execution.
 """
 from __future__ import annotations
 
+import math
 import re
 import sqlite3
 import time
@@ -125,6 +126,16 @@ class OfflineSignalAckBridge:
             raise AdmissionReceiptError("derived intent identity mismatch")
         if payload.get("side") not in ("BUY", "SELL"):
             raise AdmissionReceiptError("unrecognized simulated order side")
+        quantity = payload.get("quantity")
+        if (
+            isinstance(quantity, bool)
+            or not isinstance(quantity, (int, float))
+            or not math.isfinite(quantity)
+            or quantity <= 0
+        ):
+            raise AdmissionReceiptError("invalid positive simulated order quantity")
+        if not isinstance(payload.get("reduce_only"), bool):
+            raise AdmissionReceiptError("missing explicit reduce_only flag")
         try:
             intent_hash = fingerprint(payload)
         except ValueError as exc:
@@ -136,8 +147,8 @@ class OfflineSignalAckBridge:
             origin = self.outbox.get(signal_id)
         except ValueError as exc:
             raise AdmissionReceiptError("unknown outbox origin namespace") from exc
-        if origin is None or origin.status == "ACKED":
-            raise AdmissionReceiptError("source signal is missing or retired")
+        if origin is None:
+            raise AdmissionReceiptError("source signal is missing")
         if fingerprint(origin.payload) != source_hash:
             raise AdmissionReceiptError("outbox source payload mismatch")
 
