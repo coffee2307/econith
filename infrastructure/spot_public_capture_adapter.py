@@ -17,7 +17,7 @@ from typing import Any, AsyncIterable, Awaitable, Callable
 from core.mode import QuantMode
 from infrastructure.spot_capture_replay import OfflineSpotCaptureReplayer
 from infrastructure.spot_ingress_capture import (
-    OfflineSpotCaptureJournal, SpotCaptureError,
+    CapturedSpotRecord, OfflineSpotCaptureJournal, SpotCaptureError,
 )
 
 _PUBLIC_WS = "wss://data-stream.binance.vision/stream"
@@ -106,6 +106,7 @@ class OptInSpotIngressAdapter:
         rest_endpoint: str = _PUBLIC_REST,
         max_frames: int = 300,
         timeout_s: float = 30.0,
+        on_persisted: Callable[[CapturedSpotRecord], Awaitable[None]] | None = None,
     ) -> SpotTransportResult:
         """No network is opened here; caller supplies an already-opened stream.
 
@@ -125,6 +126,8 @@ class OptInSpotIngressAdapter:
             raise ValueError("invalid capture timeout")
         if not callable(snapshot_fetch):
             raise TypeError("a read-only REST snapshot fetcher is required")
+        if on_persisted is not None and not callable(on_persisted):
+            raise TypeError("incremental committed-record verifier must be callable")
         opened = self._clock()
         self.journal.start_session(
             session_id, symbol=self.symbol, source=source,
@@ -207,10 +210,18 @@ class OptInSpotIngressAdapter:
                         continue
                     if kind == "ws":
                         stream_kind = self._kind(value)
-                        self.journal.record_ws(
+                        committed_id = self.journal.record_ws(
                             session_id, value, stream_kind=stream_kind,
                             received_at_ms=received,
                         )
+                        # Callback is invoked only AFTER SQLite COMMIT and a
+                        # fresh strict row/fingerprint/source verification.
+                        # A slow verifier stalls the single writer; the
+                        # bounded incoming FIFO aborts rather than dropping.
+                        if on_persisted is not None:
+                            await on_persisted(
+                                self.journal.verify_captured_record(session_id, committed_id)
+                            )
                         captured_ws += 1
                         last_ms = received
                         if stream_kind == "depthUpdate" and not snapshot_started:
@@ -220,12 +231,16 @@ class OptInSpotIngressAdapter:
                             )
                     elif kind == "snapshot":
                         raw, requested = value
-                        self.journal.record_snapshot(
+                        committed_id = self.journal.record_snapshot(
                             session_id, raw, rest_endpoint=rest_endpoint,
                             request_symbol=self.symbol,
                             request_started_at_ms=requested,
                             received_at_ms=received,
                         )
+                        if on_persisted is not None:
+                            await on_persisted(
+                                self.journal.verify_captured_record(session_id, committed_id)
+                            )
                         captured_snapshots += 1
                         last_ms = received
                         snapshot_done = True
@@ -277,6 +292,7 @@ class OptInSpotIngressAdapter:
         max_frames: int = 300,
         timeout_s: float = 30.0,
         inject_disconnect_after_frames: int | None = None,
+        on_persisted: Callable[[CapturedSpotRecord], Awaitable[None]] | None = None,
     ) -> SpotTransportResult:
         """Explicit public TLS market-data-only capture; no API keys or orders.
 
@@ -357,4 +373,5 @@ class OptInSpotIngressAdapter:
                 source="binance_public_simulation",
                 ws_endpoint=_PUBLIC_WS, rest_endpoint=_PUBLIC_REST,
                 max_frames=max_frames, timeout_s=timeout_s,
+                on_persisted=on_persisted,
             )
