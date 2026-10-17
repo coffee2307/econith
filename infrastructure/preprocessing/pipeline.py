@@ -69,9 +69,18 @@ class MarketDataPipeline:
         if trade is None:
             return
 
+        research_metadata = self._verified_research_metadata(event)
+        # Replaying a sealed research session must depend on the original
+        # local source-availability clock, NEVER on how fast this process
+        # happens to replay the historical batch. Legacy realtime frames
+        # retain the existing monotonic clock implementation unchanged.
+        research_clock = (
+            research_metadata["verified_source_available_at_ms"] / 1000.0
+            if research_metadata else None
+        )
         self._last_price = trade.price
-        self._vd.add(trade)
-        vd = self._vd.value()
+        self._vd.add(trade, now=research_clock)
+        vd = self._vd.value(now=research_clock)
 
         await self._bus.publish(
             "md.ticker",
