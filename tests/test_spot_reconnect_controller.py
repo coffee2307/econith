@@ -376,3 +376,22 @@ async def test_each_successful_finite_session_is_independent_not_continuous(tmp_
     assert first.last_session_id != second.last_session_id
     assert [a.sequence for a in c.attempts()] == [1, 2]
     assert second.history_continuity_verified is False
+
+
+@pytest.mark.asyncio
+async def test_sanitized_transport_reason_survives_failed_attempt_in_sqlite(tmp_path):
+    c, _, journal, _, _ = rig(tmp_path)
+    async def break_source(*args):
+        raise SpotTransportError(
+            "private URL should never be stored",
+            reason="QUEUE_BACKPRESSURE",
+        )
+    outcome = await c.run_batch(break_source, max_attempts=1)
+    assert outcome.status == "EXHAUSTED"
+    assert c.attempts()[0].failure_code == "QUEUE_BACKPRESSURE"
+    assert c.outages()[0].last_failure_code == "QUEUE_BACKPRESSURE"
+    with sqlite3.connect(journal.path) as db:
+        stored = repr(db.execute(
+            "SELECT failure_code FROM offline_spot_reconnect_attempts"
+        ).fetchall())
+    assert "private URL" not in stored
