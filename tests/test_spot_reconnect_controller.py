@@ -340,3 +340,39 @@ def test_ledger_status_reads_forbidden_in_reality(tmp_path):
         c.attempts()
     with pytest.raises(RuntimeError, match="SIMULATION"):
         c.outages()
+
+
+def test_reused_controller_id_cannot_mix_distinct_spot_symbols(tmp_path):
+    c, _, journal, current, _ = rig(tmp_path)
+    with pytest.raises(ReconnectError, match="another symbol"):
+        OfflineSpotReconnectController(
+            journal, controller_id="btc_reader",
+            symbol="ETHUSDT", clock_ms=current,
+        )
+    assert c.attempts() == []
+
+
+@pytest.mark.asyncio
+async def test_stale_closed_session_result_cannot_be_reused_for_next_attempt(tmp_path):
+    c, adapter, _, _, _ = rig(tmp_path)
+    past = await healthy(adapter, "unrelated_session")
+    async def replay_old_result(session_id, seq):
+        assert session_id != past.session_id
+        return past
+    result = await c.run_batch(replay_old_result, max_attempts=1)
+    assert result.status == "EXHAUSTED"
+    assert c.attempts()[0].status == "FAILED"
+    assert c.outages()[0].coverage_verified is False
+
+
+@pytest.mark.asyncio
+async def test_each_successful_finite_session_is_independent_not_continuous(tmp_path):
+    c, adapter, _, _, _ = rig(tmp_path)
+    async def capture(session_id, seq):
+        return await healthy(adapter, session_id, update=100 + seq * 100)
+    first = await c.run_batch(capture, max_attempts=1)
+    second = await c.run_batch(capture, max_attempts=1)
+    assert first.status == second.status == "RECOVERED"
+    assert first.last_session_id != second.last_session_id
+    assert [a.sequence for a in c.attempts()] == [1, 2]
+    assert second.history_continuity_verified is False
