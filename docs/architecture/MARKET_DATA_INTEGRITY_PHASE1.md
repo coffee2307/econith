@@ -198,3 +198,95 @@ events; it does not repair missing exchange frames or certify
 continuity for other streams. In particular, `md.depth` partial book
 snapshots still need an exchange-appropriate snapshot/diff
 synchronization protocol, not simple trade-ID increments.
+
+
+## Phase 1 — SQLite-local durable projection outbox/inbox (opt-in)
+
+`infrastructure/market_projection_inbox.py` adds
+`OfflineMarketProjectionInbox` for consumption of **already persisted and
+verified** market projections. The outbox is not a second best-effort staging
+table: the producer's `offline_market_projections` table IS the durable outbox,
+written atomically with its source cursor by
+`OfflineMarketProjectionCursor.commit_projection`. A crash after producer
+commit and before consumer scheduling cannot lose an outbox record.
+
+A separate `receiver` subscribes explicitly to a stable producer
+`source_consumer`. `claim_next(source_consumer, receiver)` leases the earliest
+unacknowledged projection by durable ingest order, checking the original
+market event provenance, canonical projection digest and source's projection
+cursor. It uses `BEGIN IMMEDIATE` for concurrency and a random lease token
+to fence stale workers. An unexpired outstanding claim blocks a competing
+claim for the **same receiver**; independent receivers can process the same
+projection separately. `as_of_ms` is bounded by `now_ms` and source
+`available_at_ms`; later projections must not leapfrog an earlier event.
+
+`acknowledge(claim, result)` requires a valid unexpired current lease,
+verifies the source event and claimed projection again, and commits a
+**finite canonical JSON local result** plus the receipt and lease deletion
+in one SQLite transaction. Same token + identical payload ACK retry is
+idempotent, including across restarts. Conflicting ACK, stale lease,
+malformed result or tampered stored provenance is rejected. On simulated
+SQLite failure, both receipt and lease deletion roll back.
+
+`receipts(source_consumer, receiver, as_of_ms=...)` independently rechecks the
+immutable source, projection and receipt checksums and filters by durable
+`committed_at_ms` (not just exchange timestamps). Retained receipts are the
+downstream **local materialized result and idempotency ledger**. There is no
+external message bus consumer ACK.
+
+### Offline usage
+
+```python
+from core.mode import QuantMode
+from infrastructure.market_data_integrity import OfflineMarketIntegrityJournal
+from infrastructure.market_delivery_cursor import OfflineMarketProjectionCursor
+from infrastructure.market_projection_inbox import OfflineMarketProjectionInbox
+
+journal = OfflineMarketIntegrityJournal(
+    "research/market-integrity.sqlite",
+    mode_provider=lambda: QuantMode.SIMULATION,
+)
+producer = OfflineMarketProjectionCursor(journal)
+inbox = OfflineMarketProjectionInbox(producer)
+
+# Only after accepted source events were durably projected with the producer.
+claim = inbox.claim_next("price-projection", "risk-reader")
+if claim is not None:
+    # Pure/offline computation ONLY; no EventBus publish or external effects.
+    result = {"verified_price": claim.projection.value["price"]}
+    receipt = inbox.acknowledge(claim, result)
+    # Persisted result and its ACK exist in the same SQLite transaction.
+```
+
+**Critical limits:**
+
+1. **SQLite-local atomicity only.** Executing side effects outside the receipt
+   transaction (network publish, in-process EventBus queue, another database,
+   file, order placement, exchange ACK) is **not** covered by the idempotency
+   receipt. A crash can repeat such effects. Treat pending callback work as
+   at-least-once; callbacks must be pure and retry-safe.
+2. This is not a registered `MarketDataPipeline` subscriber, default
+   `main.py` hook, durable cross-service transport, exchange authentication,
+   or a claim of end-to-end exactly-once processing.
+3. Explicit simulated receipt/claim clocks exist to reproduce offline tests.
+   They are **not** authoritative wall-clock attestations; an external
+   capture adapter must supply verified clocks and transport identities
+   before its results can be treated as market observations.
+4. Separate source/consumer/receiver identifiers and receipts avoid repeating
+   local logical work, but there is no decision-window source manifest, book
+   snapshot/diff sync, portfolio execution ACK, or capital authorization.
+   REALITY mode is refused.
+
+New regression tests in `tests/test_market_projection_inbox.py` check local
+crash/restart recovery, idempotent duplicate ACK, stale lease fencing,
+concurrent contenders, independent receivers, receipt as-of filtering,
+transaction rollback, tampered market/projection/receipt evidence, invalid
+clock/payload/ID and mode isolation.
+
+**Next gate:** Before any real-time EventBus integration, design a
+cross-process downstream transport protocol with durable at-least-once
+delivery, consumer-owned inbox transaction boundaries, backlog/retry metrics,
+backpressure, dead-letter policy, and source-version verification. Only then
+integrate a read-only, provenance-bound websocket ingress and Binance
+diff-depth snapshot synchronization. Green CI does not certify alpha or
+real-money safety.
