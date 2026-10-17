@@ -125,3 +125,76 @@ out-of-order inputs, strict timestamps, point-in-time replay, database
 restart, concurrent workers, rollback and mode isolation. No live
 network, broker connection, exchange credentials or trading orders
 are required.
+
+
+## Research delivery cursor — durable projections, not EventBus ACK
+
+`infrastructure/market_delivery_cursor.py` now adds the opt-in
+`OfflineMarketProjectionCursor`, backed by the **same local SQLite file**
+as the verified market journal. It is not registered by `main.py` and
+requires an explicit `QuantMode.SIMULATION` provider from the journal.
+
+Each isolated `consumer` has an independent cursor and at most one
+active, renewable-on-expiry lease. `claim_next` selects the first
+unprocessed event in durable `ingest_id` order, honoring first-receipt
+`available_at_ms` and refusing to skip an earlier event that is not
+observable yet. The lease token is randomly generated and kept in
+SQLite. Worker restart or timeout can reissue the **same source event**
+under a **new** token, fencing the previous token.
+
+`commit_projection(claim, projection)` requires an unexpired valid
+lease, revalidates the original immutable market frame and ensures
+the cursor is at the precise next event. It then writes a canonical
+finite-JSON projection with SHA-256 fingerprint, advances the cursor,
+and deletes the lease in **one `BEGIN IMMEDIATE` transaction**.
+An SQLite insertion or cursor write failure rolls everything back.
+`projections(consumer)` verifies both the source row and durable
+projection fingerprint and checks source identity/receipt timestamp
+against the stored projection metadata.
+
+These guarantees are deliberately narrower than exactly-once
+end-to-end data delivery. The projection callback MUST NOT create an
+external side effect: a crash after external transmission but before
+`commit_projection` can cause that action to repeat. No EventBus
+publication, downstream consumer receipt, derived indicator update,
+or broker order is acknowledged by this cursor. To publish persisted
+projections externally, a **separate durable outbox and independently
+idempotent downstream consumer** are still required; neither currently
+exists for market-derived projections.
+
+Example:
+
+```python
+from core.mode import QuantMode
+from infrastructure.market_data_integrity import OfflineMarketIntegrityJournal
+from infrastructure.market_delivery_cursor import OfflineMarketProjectionCursor
+
+journal = OfflineMarketIntegrityJournal(
+    "research/market-integrity.sqlite",
+    mode_provider=lambda: QuantMode.SIMULATION,
+)
+consumer = OfflineMarketProjectionCursor(journal)
+claim = consumer.claim_next("price-projection")
+if claim is not None:
+    # Pure, deterministic local projection. NO publishing/trading here.
+    result = {"price": claim.event.frame["p"]}
+    receipt = consumer.commit_projection(claim, result)
+    # Other processes may read consumer.projections("price-projection").
+```
+
+**Tests** in `tests/test_market_delivery_cursor.py` cover crash before
+commit, expired lease takeover and stale-worker fencing, cross-thread
+claim contention, independent consumers, point-in-time cursor order,
+transaction rollback, restart, tampering, invalid payloads, mode
+changes and preservation of pending source records. Operational
+health, retry storms, consumer lag and delivery dead-letter handling
+remain to be designed before activating any default pipeline.
+
+### Incident and gap handling remains fail-closed
+
+The source journal's GAP and OUT_OF_ORDER incidents are retained as
+an audit history. This projection cursor consumes **only accepted**
+events; it does not repair missing exchange frames or certify
+continuity for other streams. In particular, `md.depth` partial book
+snapshots still need an exchange-appropriate snapshot/diff
+synchronization protocol, not simple trade-ID increments.
