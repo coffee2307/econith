@@ -18,6 +18,9 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: dashboard/package-lock.json
+      - name: Root dev orchestration contracts
+        working-directory: .
+        run: node --test tests/node/runtime_services.test.mjs
       - run: npm ci
       - run: npm run lint
       - run: npm run build
