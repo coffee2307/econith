@@ -25,6 +25,9 @@ from ci.phase1_offline_real_capture_chain import run as verify_chain
 from core.event_bus import Event, EventBus, RawMarketAdmissionDenied
 from core.mode import QuantMode
 from infrastructure.preprocessing.pipeline import MarketDataPipeline
+from infrastructure.market_derived_research_receipts import (
+    OfflineDerivedResearchReceiptLedger,
+)
 from infrastructure.spot_capture_replay import OfflineSpotCaptureReplayer
 from infrastructure.spot_ingress_capture import OfflineSpotCaptureJournal
 from infrastructure.spot_incremental_shadow import (
@@ -91,6 +94,9 @@ async def observe_verified_public_batches(
     pipeline = MarketDataPipeline(bus)
     pipeline.register()
     stats = {"md.ticker": 0, "indicator.volume_delta": 0, "indicator.obi": 0}
+    derived_ledger = OfflineDerivedResearchReceiptLedger(
+        root / "derived_consumer_receipts.sqlite", mode_provider=mode,
+    )
     pending = asyncio.Event()
 
     async def observe(event: Event) -> None:
@@ -98,6 +104,17 @@ async def observe_verified_public_batches(
             event.payload.get("source") != "verified_sealed_public_microbatch"
         ):
             raise VerifiedPublicResearchError("derived consumer got unexpected source")
+        # The observer's deterministic projection and source ordinal are
+        # transactionally persisted before its coroutine returns. EventBus
+        # completion alone is not a durable consumer processing receipt.
+        derived_ledger.accept(
+            topic=event.topic,
+            session_id=event.payload["verified_session_id"],
+            ordinal=event.payload["verified_source_ordinal"],
+            source_record_id=event.payload["verified_source_record_id"],
+            source_available_at_ms=event.payload["verified_source_available_at_ms"],
+            projection=event.payload,
+        )
         stats[event.topic] += 1
         pending.set()
 
@@ -190,7 +207,7 @@ async def observe_verified_public_batches(
             ):
                 raise VerifiedPublicResearchError("original source changed since receiver ACK")
             observed_before = stats.copy()
-            for trade in replay.trades:
+            for ordinal, trade in enumerate(replay.trades, start=1):
                 await publisher.publish_raw_confirmed(
                     "md.aggTrade",
                     frame=trade.payload, source="verified_sealed_public_microbatch",
@@ -198,6 +215,10 @@ async def observe_verified_public_batches(
                     observed_market_time_ms=trade.payload["E"],
                     session_id=sid, historical_replay=True,
                     bounded_public_session=True,
+                    verified_session_id=sid,
+                    verified_source_record_id=f"{sid}:aggTrade:{trade.capture_id}",
+                    verified_source_ordinal=ordinal,
+                    verified_source_available_at_ms=trade.received_at_ms,
                 )
             book = replay.book
             await publisher.publish_raw_confirmed(
@@ -212,6 +233,10 @@ async def observe_verified_public_batches(
                 available_at_ms=book.available_at_ms,
                 session_id=sid, historical_replay=True,
                 bounded_public_session=True,
+                verified_session_id=sid,
+                verified_source_record_id=f"{sid}:book:{book.last_update_id}",
+                verified_source_ordinal=1,
+                verified_source_available_at_ms=book.available_at_ms,
             )
             wanted = {
                 "md.ticker": len(replay.trades),
@@ -241,6 +266,14 @@ async def observe_verified_public_batches(
             # The historical receipt DB remains the durable source ACK; this
             # barrier only addresses in-process subscriber failure/cancellation.
             await bus.wait_verified_idle(timeout_s=30.0)
+            durable_derived = {
+                topic: derived_ledger.verified_count(sid, topic)
+                for topic in wanted
+            }
+            if durable_derived != wanted:
+                raise VerifiedPublicResearchError(
+                    "durable derived-consumer receipts incomplete or inconsistent"
+                )
             # Also refuse legacy publication even with a forged source label.
             try:
                 await bus.publish(
@@ -260,6 +293,8 @@ async def observe_verified_public_batches(
                 "producer_acks": proof["producer_ack_count"],
                 "receiver_receipts": proof["independent_receiver_receipt_count"],
                 "derived": emitted,
+                "durable_derived_receipts": durable_derived,
+                "research_consumer_receipts_durable": True,
                 "historical_replay_only": True,
                 "history_continuity_verified": False,
                 "unobserved_between_sessions": cycle > 0,
@@ -295,6 +330,8 @@ async def observe_verified_public_batches(
             "execution_started":False,
             "orders_submitted":0,
             "receiver_scope":"HMAC_AUTHENTICATED_LOCAL_SUBPROCESS_PIPE_ONLY",
+            "research_observer_receipts_durable": True,
+            "other_eventbus_subscribers_durable": False,
             "post_commit_incremental_shadow_passed": (
                 capture_once is None and len(incremental_proofs) >= cycles
             ),
