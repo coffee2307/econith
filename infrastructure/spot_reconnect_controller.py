@@ -255,6 +255,7 @@ class OfflineSpotReconnectController:
         self, attempt_id: int, *,
         status: str, failure_code: str | None = None,
         result: SpotTransportResult | None = None,
+        lease: WorkerLease | None = None,
     ) -> CaptureAttempt:
         self.journal._simulation_only()
         now = self._now()
@@ -303,6 +304,7 @@ class OfflineSpotReconnectController:
         with self.journal._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             try:
+                self._check_mutation_lease(conn, lease, now_ms=now)
                 row = conn.execute("""
                     SELECT * FROM offline_spot_reconnect_attempts
                     WHERE attempt_id=? AND controller_id=?
@@ -366,14 +368,17 @@ class OfflineSpotReconnectController:
                 raise ReconnectError("attempt not found")
             return self._attempt(row)
 
-    def reconcile_crashed_attempts(self) -> int:
-        """On restart make interrupted attempts durable; never resume their ID."""
+    def reconcile_crashed_attempts(
+        self, *, lease: WorkerLease | None = None,
+    ) -> int:
+        """Reconcile after confirmed worker death or fenced takeover."""
         self.journal._simulation_only()
         now = self._now()
         count = 0
         with self.journal._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             try:
+                self._check_mutation_lease(conn, lease, now_ms=now)
                 rows = conn.execute("""
                     SELECT * FROM offline_spot_reconnect_attempts
                     WHERE controller_id=? AND status='STARTED'
@@ -402,12 +407,15 @@ class OfflineSpotReconnectController:
                 raise
         return count
 
-    def begin_attempt(self) -> CaptureAttempt:
+    def begin_attempt(
+        self, *, lease: WorkerLease | None = None,
+    ) -> CaptureAttempt:
         self.journal._simulation_only()
         now = self._now()
         with self.journal._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             try:
+                self._check_mutation_lease(conn, lease, now_ms=now)
                 prev = conn.execute("""
                     SELECT * FROM offline_spot_reconnect_attempts
                     WHERE controller_id=? ORDER BY sequence DESC LIMIT 1
@@ -439,6 +447,7 @@ class OfflineSpotReconnectController:
         *,
         max_attempts: int = 3, backoff_s: float = 0.0,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        _lease_ref: Callable[[], WorkerLease] | None = None,
     ) -> ReconnectRun:
         """Bounded retries, distinct session+snapshot each time, durable causes.
 
@@ -461,13 +470,18 @@ class OfflineSpotReconnectController:
             if index:
                 await sleep(min(backoff_s * (2 ** (index - 1)), 30.0))
             self.journal._simulation_only()
-            attempt = self.begin_attempt()
+            attempt = self.begin_attempt(
+                lease=_lease_ref() if _lease_ref is not None else None,
+            )
             ran += 1
             last_id = attempt.session_id
             try:
                 result = await capture_once(attempt.session_id, attempt.sequence)
                 self.journal._simulation_only()
-                self._complete(attempt.attempt_id, status="SUCCESS", result=result)
+                self._complete(
+                    attempt.attempt_id, status="SUCCESS", result=result,
+                    lease=_lease_ref() if _lease_ref is not None else None,
+                )
                 book_id = result.last_update_id
                 break
             except asyncio.CancelledError:
@@ -477,6 +491,7 @@ class OfflineSpotReconnectController:
                 self._complete(
                     attempt.attempt_id, status="INTERRUPTED",
                     failure_code="TASK_CANCELLED",
+                    lease=_lease_ref() if _lease_ref is not None else None,
                 )
                 raise
             except Exception as exc:
@@ -488,6 +503,7 @@ class OfflineSpotReconnectController:
                 self._complete(
                     attempt.attempt_id, status="FAILED",
                     failure_code=code,
+                    lease=_lease_ref() if _lease_ref is not None else None,
                 )
         return ReconnectRun(
             "RECOVERED" if book_id is not None else "EXHAUSTED",
