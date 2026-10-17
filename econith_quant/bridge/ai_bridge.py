@@ -15,14 +15,15 @@ Accepted intents are published on ``order.intent`` for the exchange bridge.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from ai.quant.portfolio import PortfolioRiskModel, PortfolioState
 from config.environment import get_environment
 from core.event_bus import Event, EventBus
 from econith.quant.routing import EconithRouteKernel
 from econith_quant.execution.smart_order import OrderIntent, OrderSide
-from quant.offline_signal_outbox import derive_leg_intent_id
+from quant.offline_signal_outbox import OfflineSignalOutbox, derive_leg_intent_id
+from core.mode import QuantMode
 from quant.offline_admission import fingerprint
 
 logger = logging.getLogger("econith.quant.bridge.ai")
@@ -53,8 +54,15 @@ class AIBridge:
         self,
         bus: EventBus,
         router: EconithRouteKernel | None = None,
+        *,
+        offline_signal_outbox: OfflineSignalOutbox | None = None,
+        simulation_mode_provider: Callable[[], QuantMode] | None = None,
     ) -> None:
         self._bus = bus
+        if offline_signal_outbox is not None and simulation_mode_provider is None:
+            raise ValueError("offline snapshot routing requires an explicit mode provider")
+        self._offline_signal_outbox = offline_signal_outbox
+        self._simulation_mode_provider = simulation_mode_provider
         env = get_environment()
         self._min_delta = env.ai_min_exposure_delta
         self._conf_floor = env.ai_confidence_floor
@@ -102,6 +110,38 @@ class AIBridge:
     async def _on_signal(self, event: Event) -> None:
         p: dict[str, Any] = event.payload
         action = p.get("action", "FLAT")
+        origin_signal_id = p.get("signal_id")
+
+        # Entire snapshot path is opt-in and SIMULATION-only. Verify the exact
+        # previously staged signal before reading/replaying any route. This
+        # check precedes exposure-delta filtering and all mutable sizing.
+        if self._offline_signal_outbox is not None:
+            if self._simulation_mode_provider() is not QuantMode.SIMULATION:
+                await self._veto("OFFLINE_SNAPSHOT_REQUIRES_SIMULATION", action)
+                return
+            try:
+                source = self._offline_signal_outbox.get(origin_signal_id)
+                frozen = self._offline_signal_outbox.frozen_route_plan(origin_signal_id)
+            except (ValueError, TypeError):
+                await self._veto("INVALID_FROZEN_SIGNAL", action)
+                return
+            if source is None or source.status == "ACKED" or source.payload != p:
+                await self._veto("INVALID_OUTBOX_SOURCE", action)
+                return
+            if frozen is not None:
+                if self._mode == "FROZEN":
+                    await self._veto("FROZEN", action)
+                    return
+                if self._mode == "REDUCE_ONLY" and not all(
+                    leg["reduce_only"] for leg in frozen["intents"]
+                ):
+                    await self._veto("REDUCE_ONLY", action)
+                    return
+                await self._bus.publish("quant.route.plan", **frozen["route"])
+                for intent in frozen["intents"]:
+                    await self._bus.publish("order.intent", **intent)
+                return
+
         direction = float(p.get("direction", 0.0))
         confidence = float(p.get("confidence", 0.0))
 
@@ -129,7 +169,6 @@ class AIBridge:
         # malformed supplied IDs instead of making up a time-based replacement.
         # Legacy signals without this field remain compatible in simulation;
         # REALITY execution has an independent unconditional hard-deny gate.
-        origin_signal_id = p.get("signal_id")
         if origin_signal_id is not None:
             try:
                 derive_leg_intent_id(origin_signal_id, 0, "BTCUSDT")
@@ -145,16 +184,18 @@ class AIBridge:
             await self._veto("REDUCE_ONLY", action)
             return
 
-        self._target_exposure = target
+        # The original runtime keeps its existing exposure tracking. The
+        # optional snapshot path defers mutation until the whole plan commits.
+        if self._offline_signal_outbox is None:
+            self._target_exposure = target
         ref_mark = self._mark("BTCUSDT")
-        # Portfolio VaR haircut from a single-desk proxy book (BTC exposure).
         state = PortfolioState(
             symbols=["BTCUSDT"],
-            weights=[float(self._target_exposure)],
+            weights=[float(target)],
         )
         var_scalar = self._risk.derisk_scalar(state)
         size_scalar = max(0.05, min(1.0, self._derisk * var_scalar))
-        base_qty = (self._base_notional / ref_mark) * abs(delta) * size_scalar        # Demo wallet is small — route BTC perp only until multi-asset sizing is tuned.
+        base_qty = (self._base_notional / ref_mark) * abs(delta) * size_scalar
         route_symbol = "BTCUSDT" if self._demo_execution else (
             str(p.get("symbol", "")).upper() or None
         )
@@ -165,13 +206,13 @@ class AIBridge:
             reduce_only=reduce_only,
             symbol=route_symbol,
         )
-        await self._bus.publish(
-            "quant.route.plan",
+        route_payload = {
             **plan.payload(),
-            portfolio_derisk=round(size_scalar, 4),
-            portfolio_var_scalar=round(var_scalar, 4),
-        )
+            "portfolio_derisk": round(size_scalar, 4),
+            "portfolio_var_scalar": round(var_scalar, 4),
+        }
         signal_fingerprint = fingerprint(p) if origin_signal_id is not None else None
+        intents: list[dict[str, Any]] = []
         for leg_index, leg in enumerate(plan.legs):
             qty = max(leg.quantity, self._min_leg_qty(leg.symbol))
             intent = OrderIntent(
@@ -184,9 +225,6 @@ class AIBridge:
                 ),
                 reduce_only=reduce_only,
             )
-            # Provenance-only enrichment: real orders remain blocked by
-            # QuantExecutionBridge until admission and broker reconciliation
-            # are independently certified.
             origin_fields = (
                 {
                     "signal_id": origin_signal_id,
@@ -199,15 +237,32 @@ class AIBridge:
                 }
                 if origin_signal_id is not None else {}
             )
-            await self._bus.publish(
-                "order.intent",
+            intents.append({
                 **origin_fields,
-                symbol=intent.symbol,
-                side=intent.side.value,
-                quantity=intent.quantity,
-                reduce_only=intent.reduce_only,
-                reason=intent.reason,
-            )
+                "symbol": intent.symbol,
+                "side": intent.side.value,
+                "quantity": intent.quantity,
+                "reduce_only": intent.reduce_only,
+                "reason": intent.reason,
+            })
+
+        if self._offline_signal_outbox is not None:
+            try:
+                snapshot = self._offline_signal_outbox.freeze_route_plan(
+                    origin_signal_id, route_payload, intents
+                )
+            except ValueError:
+                # Never emit a partially or differently routed plan.
+                await self._veto("FROZEN_PLAN_CONFLICT", action)
+                return
+            route_payload = snapshot["route"]
+            intents = snapshot["intents"]
+            self._target_exposure = target
+
+        # No bus event is emitted until the entire opt-in plan is committed.
+        await self._bus.publish("quant.route.plan", **route_payload)
+        for payload in intents:
+            await self._bus.publish("order.intent", **payload)
 
     def router_status(self) -> dict[str, Any]:
         return self._router.status()
