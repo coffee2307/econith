@@ -48,3 +48,23 @@ jobs:
         run: python -m scripts.paper_soak_check
       - name: World calibration smoke (fast file/metadata contract)
         run: python -m scripts.calibrate_world_ci_smoke
+
+
+  container-config:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ECONITH_API_KEY: CI_ONLY_PLACEHOLDER_NOT_A_SECRET
+      POSTGRES_PASSWORD: CI_ONLY_PLACEHOLDER_NOT_A_SECRET
+      REDIS_PASSWORD: CI_ONLY_PLACEHOLDER_NOT_A_SECRET
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate dev and production Compose without starting services
+        run: |
+          # Compose's env_file requires a local path. No credentials are used;
+          # this job never connects to an exchange or starts a container.
+          printf '# Disposable GitHub Actions config validation file\n' > .env
+          printf '# Disposable GitHub Actions config validation file\n' > .env.production
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.prod.yml config --quiet
+          rm -f .env .env.production
