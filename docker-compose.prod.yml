@@ -41,6 +41,7 @@ services:
       MODEL_REGISTRY: /app/models/registry
       # SQLite StateRecorder journal is separate from the Postgres engine.
       STATE_RECORDER_DB_PATH: /app/runtime-state/econith.sqlite
+      TRADE_STATE_DB_PATH: /app/runtime-state/trades.sqlite
       WORLD_SIMULATION_DEFAULT: ${WORLD_SIMULATION_DEFAULT:-true}
       ECONITH_MOCK_TWAP: "false"
       # Remote provider is the reliable first route. Ollama is an optional
