@@ -103,13 +103,17 @@ jobs:
 
           audit = Path("/app/logs/econith_audit.log")
           state = Path("/app/runtime-state/econith.sqlite")
-          assert audit.is_file() and state.is_file(), (audit, state)
+          trade_state = Path("/app/runtime-state/trades.sqlite")
+          assert audit.is_file() and state.is_file() and trade_state.is_file(), (
+              audit, state, trade_state
+          )
           entries = [json.loads(line) for line in audit.read_text(encoding="utf-8").splitlines()]
           assert any(row.get("decision") == "DENY" and row.get("path") == "/api/v1/mode"
                      for row in entries), "missing durable denial audit event"
-          with sqlite3.connect(state) as connection:
-              assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
-          print("DURABLE_AUDIT_AND_SQLITE_RECORDER_PASS")
+          for file in (state, trade_state):
+              with sqlite3.connect(file) as connection:
+                  assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+          print("DURABLE_AUDIT_AND_BOTH_SQLITE_JOURNALS_PASS")
           PY
       - name: Collect sanitized container diagnostics on failure
         if: failure()
