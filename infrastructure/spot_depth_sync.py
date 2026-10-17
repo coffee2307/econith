@@ -162,9 +162,14 @@ class OfflineSpotDepthSynchronizer:
             raise DepthSyncError("depth event is stale")
         bids = self._levels(frame.get("b"))
         asks = self._levels(frame.get("a"))
-        digest = hashlib.sha256(json.dumps(
-            dict(frame), sort_keys=True, separators=(",", ":"), allow_nan=False,
-        ).encode("utf-8")).hexdigest()
+        try:
+            raw = json.dumps(
+                dict(frame), sort_keys=True, separators=(",", ":"),
+                allow_nan=False,
+            )
+        except (TypeError, ValueError) as exc:
+            raise DepthSyncError("non-JSON or nonfinite depth payload") from exc
+        digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()
         return _Diff(first, final, received, digest, bids, asks)
 
     def _clear(self, status: str) -> None:
@@ -175,6 +180,7 @@ class OfflineSpotDepthSynchronizer:
         self.last_update_id: int | None = None
         self.snapshot_received_at_ms: int | None = None
         self.available_at_ms: int | None = None
+        self._last_seen_ms: int | None = None
 
     def _reset(self, reason: str) -> DepthSyncResult:
         self._clear("RESET_REQUIRED")
@@ -219,6 +225,8 @@ class OfflineSpotDepthSynchronizer:
         asks = self._asks.copy()
         self._replace(bids, diff.bids)
         self._replace(asks, diff.asks)
+        if len(bids) > self.max_levels or len(asks) > self.max_levels:
+            return self._reset("local book grew beyond safe bounded depth")
         try:
             self._assert_book(bids, asks)
         except DepthSyncError as exc:
@@ -237,7 +245,22 @@ class OfflineSpotDepthSynchronizer:
         received = self._positive(received_at_ms, "received_at_ms")
         if self.status == "RESET_REQUIRED":
             return DepthSyncResult(self.status, None, "call reconnect and reacquire snapshot")
-        diff = self._parse_diff(frame, received)
+        try:
+            diff = self._parse_diff(frame, received)
+        except DepthSyncError:
+            # A malformed packet can hide a required update. The current
+            # book must never remain trusted after rejecting one.
+            self._reset("malformed depth update; continuity cannot be proven")
+            raise
+        if (
+            (self._last_seen_ms is not None and received < self._last_seen_ms)
+            or (
+                self.snapshot_received_at_ms is not None
+                and received < self.snapshot_received_at_ms
+            )
+        ):
+            return self._reset("non-monotonic local receipt clock")
+        self._last_seen_ms = received
         if self.status in {"SYNCED", "WAITING_BRIDGE"}:
             return self._apply(diff)
         if len(self._buffer) >= self.max_buffer:
