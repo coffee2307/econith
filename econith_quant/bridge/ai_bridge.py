@@ -22,6 +22,7 @@ from config.environment import get_environment
 from core.event_bus import Event, EventBus
 from econith.quant.routing import EconithRouteKernel
 from econith_quant.execution.smart_order import OrderIntent, OrderSide
+from quant.offline_signal_outbox import derive_leg_intent_id
 
 logger = logging.getLogger("econith.quant.bridge.ai")
 
@@ -123,6 +124,18 @@ class AIBridge:
         # Closing/flattening may use reduceOnly; opening never should (no position yet).
         reduce_only = bool(is_reducing_exposure)
 
+        # A persisted signal may carry a durable origin identity. Reject
+        # malformed supplied IDs instead of making up a time-based replacement.
+        # Legacy signals without this field remain compatible in simulation;
+        # REALITY execution has an independent unconditional hard-deny gate.
+        origin_signal_id = p.get("signal_id")
+        if origin_signal_id is not None:
+            try:
+                derive_leg_intent_id(origin_signal_id, 0, "BTCUSDT")
+            except (TypeError, ValueError):
+                await self._veto("INVALID_SIGNAL_ID", action)
+                return
+
         # --- Sentinel veto enforcement --------------------------------------
         if self._mode == "FROZEN":
             await self._veto("FROZEN", action)
@@ -157,7 +170,7 @@ class AIBridge:
             portfolio_derisk=round(size_scalar, 4),
             portfolio_var_scalar=round(var_scalar, 4),
         )
-        for leg in plan.legs:
+        for leg_index, leg in enumerate(plan.legs):
             qty = max(leg.quantity, self._min_leg_qty(leg.symbol))
             intent = OrderIntent(
                 symbol=leg.symbol,
@@ -169,8 +182,21 @@ class AIBridge:
                 ),
                 reduce_only=reduce_only,
             )
+            # Provenance-only enrichment: real orders remain blocked by
+            # QuantExecutionBridge until admission and broker reconciliation
+            # are independently certified.
+            origin_fields = (
+                {
+                    "signal_id": origin_signal_id,
+                    "intent_id": derive_leg_intent_id(
+                        origin_signal_id, leg_index, intent.symbol
+                    ),
+                }
+                if origin_signal_id is not None else {}
+            )
             await self._bus.publish(
                 "order.intent",
+                **origin_fields,
                 symbol=intent.symbol,
                 side=intent.side.value,
                 quantity=intent.quantity,
