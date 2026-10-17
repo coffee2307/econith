@@ -284,12 +284,17 @@ class OfflineMarketProjectionCursor:
             self._positive_ms(as_of_ms, "as_of_ms")
         with self.journal._connect() as conn:
             rows = conn.execute(
-                """SELECT p.*, e.frame_json, e.fingerprint, e.scope, e.sequence,
+                """SELECT p.consumer, p.ingest_id,
+                          p.event_id AS projection_event_id,
+                          p.available_at_ms AS projection_available_at_ms,
+                          p.value_json, p.value_fingerprint,
+                          e.event_id, e.available_at_ms,
+                          e.frame_json, e.fingerprint, e.scope, e.sequence,
                           e.event_ms, e.trade_ms
                    FROM offline_market_projections p
                    JOIN offline_market_events e ON p.ingest_id=e.ingest_id
                    WHERE p.consumer=?
-                     AND (? IS NULL OR p.available_at_ms <= ?)
+                     AND (? IS NULL OR e.available_at_ms <= ?)
                    ORDER BY p.ingest_id""",
                 (consumer, as_of_ms, as_of_ms),
             ).fetchall()
@@ -302,8 +307,8 @@ class OfflineMarketProjectionCursor:
             except (TypeError, ValueError) as exc:
                 raise MarketEventError("stored projection is malformed") from exc
             if (
-                row["event_id"] != source.event_id
-                or row["available_at_ms"] != source.available_at_ms
+                row["projection_event_id"] != source.event_id
+                or row["projection_available_at_ms"] != source.available_at_ms
                 or serialized != row["value_json"]
                 or digest != row["value_fingerprint"]
             ):
