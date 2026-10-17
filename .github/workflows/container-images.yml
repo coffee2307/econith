@@ -1,0 +1,43 @@
+name: container-images
+
+on:
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "requirements*.txt"
+      - "econith/**"
+      - "quant/**"
+      - "core/**"
+      - "ai/**"
+      - "api/**"
+      - "bridges/**"
+      - "config/**"
+      - "sentinel/**"
+      - "infrastructure/**"
+      - "econith_quant/bridge/**"
+      - "econith_quant/execution/**"
+      - "econith_quant/recovery/**"
+      - "dashboard/**"
+      - ".github/workflows/container-images.yml"
+  workflow_dispatch:
+
+jobs:
+  backend-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Build non-ML, non-credentialed backend image
+        run: docker build --pull --build-arg INSTALL_ML=false -t econith-backend:pr-check -f Dockerfile .
+  dashboard-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Build production Next.js standalone image
+        run: docker build --pull -t econith-dashboard:pr-check -f dashboard/Dockerfile.prod dashboard
