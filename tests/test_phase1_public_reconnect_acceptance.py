@@ -18,7 +18,10 @@ from infrastructure.spot_public_capture_adapter import (
     OptInSpotIngressAdapter, SpotTransportError,
 )
 
-BASE = int(time.time_ns() // 1_000_000)
+# Exchange fixture frames must use the time of emission. A module-import-time
+# timestamp becomes stale if the full CI suite takes longer than 10 seconds.
+def event_now_ms() -> int:
+    return time.time_ns() // 1_000_000
 
 
 def opts(tmp_path, *extra):
@@ -49,22 +52,24 @@ def test_invalid_bounds_rejected_before_network(tmp_path, extra):
 
 
 def _frame_trade(agg):
+    now = event_now_ms()
     return json.dumps({
         "stream":"btcusdt@aggTrade",
         "data":{
             "e":"aggTrade", "s":"BTCUSDT",
-            "a":agg, "E":BASE, "T":BASE-10,
+            "a":agg, "E":now, "T":now-10,
             "f":agg,"l":agg, "p":"101", "q":"0.02", "m":False,
         },
     }).encode()
 
 
 def _frame_depth():
+    now = event_now_ms()
     return json.dumps({
         "stream":"btcusdt@depth@100ms",
         "data":{
             "e":"depthUpdate", "s":"BTCUSDT",
-            "E":BASE, "U":100, "u":102,
+            "E":now, "U":100, "u":102,
             "b":[["100","4"]], "a":[],
         },
     }).encode()
@@ -120,7 +125,7 @@ async def test_forced_public_socket_disconnect_is_terminal_and_closes_original(t
             WHERE session_id='forced_01'
         """).fetchone()
     assert session["closed_at_ms"] is not None
-    assert len(journal.replay_as_of("forced_01", BASE + 60000)) >= 10
+    assert len(journal.replay_as_of("forced_01", event_now_ms() + 60000)) >= 10
 
 
 @pytest.mark.asyncio
@@ -132,7 +137,7 @@ async def test_controlled_reconnect_fails_then_fresh_real_protocol_bridge_succee
     import httpx
 
     async def fake_clock(**kwargs):
-        return ObservedClock(BASE, 0, 80, 40)
+        return ObservedClock(event_now_ms(), 0, 80, 40)
 
     class FakeWS:
         async def __aenter__(self):
@@ -169,7 +174,7 @@ async def test_controlled_reconnect_fails_then_fresh_real_protocol_bridge_succee
         "--max-frames","20",
     )
     report = await run(params)
-    assert report["acceptance"] == "PASSED_CONTROLLED_RECONNECT_WITH_UNRECOVERED_HISTORY_GAP"
+    assert report["acceptance"] == "PASSED_CONTROLLED_RECONNECT_WITH_UNRECOVERED_HISTORY_GAP", report
     assert report["result"] == "RECOVERED"
     assert report["source_sessions_distinct"] is True
     assert report["attempts"][0]["failure_code"] == "INJECTED_WS_DISCONNECT"
