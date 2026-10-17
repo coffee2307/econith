@@ -217,3 +217,41 @@ def test_broker_rejected_is_terminal_only_with_order_evidence(tmp_path):
     )
     assert result.status == "REJECTED"
     assert ledger.begin_submission(obj.intent_id) is False
+
+
+def test_filled_without_positive_quantity_is_not_broker_attestation(tmp_path):
+    ledger = OfflineAdmissionLedger(tmp_path / "ledger.sqlite")
+    row = ledger.admit("no-filled-volume", sample_intent())
+    ledger.begin_submission(row.intent_id)
+    with pytest.raises(ReconciliationError, match="positive filled quantity"):
+        ledger.reconcile_read_only(
+            row.intent_id,
+            lambda cid: BrokerObservation(
+                client_order_id=cid, status="FILLED",
+                broker_order_id="MOCK-ID", filled_quantity=0.0,
+            ),
+        )
+    assert ledger.get(row.intent_id).status == "UNKNOWN"
+
+
+def test_regressing_partial_fill_is_quarantined_not_replayed(tmp_path):
+    ledger = OfflineAdmissionLedger(tmp_path / "ledger.sqlite")
+    item = ledger.admit("progressive-fill", sample_intent())
+    ledger.begin_submission(item.intent_id)
+    ledger.reconcile_read_only(
+        item.intent_id,
+        lambda cid: BrokerObservation(
+            client_order_id=cid, status="PARTIALLY_FILLED",
+            broker_order_id="MOCK-ID", filled_quantity=0.012,
+        ),
+    )
+    with pytest.raises(ReconciliationError, match="regressed"):
+        ledger.reconcile_read_only(
+            item.intent_id,
+            lambda cid: BrokerObservation(
+                client_order_id=cid, status="PARTIALLY_FILLED",
+                broker_order_id="MOCK-ID", filled_quantity=0.005,
+            ),
+        )
+    assert ledger.get(item.intent_id).status == "UNKNOWN"
+    assert ledger.begin_submission(item.intent_id) is False
