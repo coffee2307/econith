@@ -1,0 +1,80 @@
+name: container-smoke
+
+on:
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - "requirements*.txt"
+      - "main.py"
+      - "core/**"
+      - "api/**"
+      - "bridges/**"
+      - "quant/**"
+      - "config/**"
+      - "sentinel/**"
+      - ".github/workflows/container-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-backend-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Configure offline synthetic CI environment (no exchange credentials)
+        run: |
+          cat > .env <<'EOF'
+          APP_ENV=development
+          API_AUTH_ENABLED=true
+          API_KEYS=CI_DUMMY_KEY_FOR_DISPOSABLE_RUNNER
+          BINANCE_EXECUTION_ENV=demo
+          BINANCE_MARKET_DATA_MODE=mock
+          BINANCE_CCXT_DEFAULT_TYPE=spot
+          BINANCE_DEMO_API_KEY=
+          BINANCE_DEMO_API_SECRET=
+          BINANCE_TRADE_API_KEY=
+          BINANCE_TRADE_API_SECRET=
+          WORLD_SIMULATION_DEFAULT=false
+          HYPOTHESIS_USE_LLM=false
+          EOF
+      - name: Start only databases and backend, no social or exchange accounts
+        run: docker compose -f docker-compose.yml up --build -d backend_core
+      - name: Assert responsive backend health and synthetic data provenance
+        run: |
+          python - <<'PY'
+          import json
+          import time
+          import urllib.error
+          import urllib.request
+
+          url = "http://127.0.0.1:8000/api/v1/health"
+          deadline = time.monotonic() + 120
+          last_error = None
+          while time.monotonic() < deadline:
+              try:
+                  with urllib.request.urlopen(url, timeout=4) as response:
+                      data = json.load(response)
+                  assert data.get("status") == "ok", data
+                  assert data.get("mock") is True, data
+                  source = (data.get("market_data") or {}).get("source")
+                  assert source == "synthetic_mock", data
+                  print("SAFE_BACKEND_SMOKE_PASS", data["status"], source)
+                  break
+              except (OSError, ValueError) as exc:
+                  last_error = exc
+                  time.sleep(2)
+          else:
+              raise SystemExit(f"backend startup or health assertion failed: {last_error}")
+          PY
+      - name: Collect sanitized container diagnostics on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml ps && docker compose -f docker-compose.yml logs --tail=80 backend_core
+      - name: Shut down disposable Docker stack
+        if: always()
+        run: docker compose -f docker-compose.yml down -v --remove-orphans
