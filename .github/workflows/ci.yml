@@ -44,6 +44,14 @@ jobs:
           pip install -r requirements-dev.txt
       - name: Repository hygiene guard
         run: python -m ci.repo_hygiene_check --root . --enforce
+      - name: Static architecture / event authority inventory (read only)
+        run: python -m ci.architecture_inventory --root . --output /tmp/econith-phase0-architecture.json
+      - name: Preserve architecture inventory for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase0-architecture-${{ github.run_id }}
+          path: /tmp/econith-phase0-architecture.json
+          retention-days: 30
       - name: First-party tests
         run: python -m pytest tests/ -q --tb=short
       - name: Deploy gate unit smoke
