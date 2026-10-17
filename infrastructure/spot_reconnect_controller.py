@@ -20,6 +20,9 @@ from infrastructure.spot_capture_replay import OfflineSpotCaptureReplayer
 from infrastructure.spot_public_capture_adapter import (
     OptInSpotIngressAdapter, SpotTransportResult,
 )
+from infrastructure.spot_worker_fence import (
+    OfflineSpotWorkerFence, WorkerLease, WorkerLeaseConflict,
+)
 
 
 class ReconnectError(SpotCaptureError):
@@ -74,6 +77,7 @@ class OfflineSpotReconnectController:
         self, journal: OfflineSpotCaptureJournal, *,
         controller_id: str, symbol: str,
         clock_ms: Callable[[], int] | None = None,
+        worker_fence: OfflineSpotWorkerFence | None = None,
     ) -> None:
         if not isinstance(journal, OfflineSpotCaptureJournal):
             raise ValueError("offline capture journal required")
@@ -82,13 +86,32 @@ class OfflineSpotReconnectController:
         self.symbol = journal._symbol(symbol)
         self.journal = journal
         self.clock_ms = clock_ms or (lambda: time.time_ns() // 1_000_000)
+        if worker_fence is not None and (
+            not isinstance(worker_fence, OfflineSpotWorkerFence)
+            or worker_fence.journal.path.resolve() != journal.path.resolve()
+            or worker_fence.controller_id != self.controller_id
+        ):
+            raise ValueError("worker fence must share controller identity and journal")
+        self.worker_fence = worker_fence
         with journal._connect() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS offline_spot_reconnect_controllers (
                     controller_id TEXT PRIMARY KEY,
-                    symbol TEXT NOT NULL
+                    symbol TEXT NOT NULL,
+                    requires_fence INTEGER NOT NULL DEFAULT 0
+                        CHECK (requires_fence IN (0,1))
                 )
             """)
+            columns = {
+                row["name"] for row in conn.execute(
+                    "PRAGMA table_info(offline_spot_reconnect_controllers)"
+                )
+            }
+            if "requires_fence" not in columns:
+                conn.execute("""
+                    ALTER TABLE offline_spot_reconnect_controllers
+                    ADD COLUMN requires_fence INTEGER NOT NULL DEFAULT 0
+                """)
             conn.execute("BEGIN IMMEDIATE")
             try:
                 conn.execute("""
@@ -101,6 +124,13 @@ class OfflineSpotReconnectController:
                 """, (self.controller_id,)).fetchone()
                 if owned["symbol"] != self.symbol:
                     raise ReconnectError("controller ID already bound to another symbol")
+                if self.worker_fence is not None:
+                    conn.execute("""
+                        UPDATE offline_spot_reconnect_controllers
+                        SET requires_fence=1 WHERE controller_id=?
+                    """, (self.controller_id,))
+                elif owned["requires_fence"]:
+                    raise ReconnectError("controller requires a durable worker fence")
                 conn.execute("COMMIT")
             except Exception:
                 if conn.in_transaction:
@@ -146,6 +176,23 @@ class OfflineSpotReconnectController:
 
     def _now(self) -> int:
         return self.journal._positive(self.clock_ms(), "controller clock")
+
+    def _check_mutation_lease(
+        self, conn: sqlite3.Connection, claim: WorkerLease | None,
+        *, now_ms: int,
+    ) -> None:
+        policy = conn.execute("""
+            SELECT requires_fence FROM offline_spot_reconnect_controllers
+            WHERE controller_id=?
+        """, (self.controller_id,)).fetchone()
+        if policy is None:
+            raise ReconnectError("controller policy missing")
+        if policy["requires_fence"]:
+            OfflineSpotWorkerFence.require_current(
+                conn, claim, controller_id=self.controller_id, now_ms=now_ms,
+            )
+        elif claim is not None:
+            raise WorkerLeaseConflict("fenced claim cannot enter legacy controller")
 
     @staticmethod
     def _attempt(row: sqlite3.Row) -> CaptureAttempt:
