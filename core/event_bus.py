@@ -40,6 +40,32 @@ logger = logging.getLogger("econith.core.event_bus")
 Handler = Callable[["Event"], Awaitable[None]]
 ModeProvider = Callable[[], QuantMode]
 
+# Explicitly raw market topics used by today's unverified Spot publisher.
+# Do not include md.ticker: it is a derived event of MarketDataPipeline.
+_VERIFIED_ONLY_RAW_TOPICS = frozenset(("md.aggTrade", "md.depth"))
+
+
+class RawMarketAdmissionDenied(RuntimeError):
+    """Unverified raw market frames cannot enter a protected research bus."""
+
+
+class VerifiedMarketPublisher:
+    """Opaque in-process bus capability, not independently verified evidence.
+
+    A producer must independently verify immutable source/receiver provenance
+    before publishing with this capability. Receiving this object does NOT
+    attest Binance source origin or authorize trading.
+    """
+
+    def __init__(self, bus: "EventBus", token: object) -> None:
+        self._bus = bus
+        self._token = token
+
+    async def publish_raw(self, topic: str, **payload: Any) -> None:
+        await self._bus._publish_verified_market(
+            topic, self._token, **payload,
+        )
+
 # --- governance domains ------------------------------------------------------
 # Handlers with no domain are ungoverned (default). Execution / order-routing
 # nodes should subscribe with ``domain=DOMAIN_QUANT``.
@@ -84,6 +110,7 @@ class EventBus:
         # Injectable for testing; defaults to the process-global QuantMode.
         self._mode_provider: ModeProvider = mode_provider or current_mode
         self._gate_log_at: dict[str, float] = {}
+        self._verified_market_token: object | None = None
 
     def subscribe(
         self, topic: str, handler: Handler, *, domain: Optional[str] = None
@@ -97,7 +124,43 @@ class EventBus:
         self._subscribers[topic].append(_Subscription(handler=handler, domain=domain))
         logger.debug("subscribed handler to topic '%s' (domain=%s)", topic, domain)
 
+    def activate_verified_market_only(self) -> VerifiedMarketPublisher:
+        """Opt-in *pre-start*, SIMULATION-only raw market publisher boundary.
+
+        This does not select a verified data source. An admitted source must
+        separately prove original-capture replay and durable receiver ACK.
+        The default EventBus behavior remains unchanged.
+        """
+        if self._mode_provider() is not QuantMode.SIMULATION:
+            raise RawMarketAdmissionDenied("verified market bus is research SIMULATION-only")
+        if self._running or not self._queue.empty():
+            raise RawMarketAdmissionDenied("verified admission must be enabled before bus traffic")
+        if self._verified_market_token is not None:
+            raise RawMarketAdmissionDenied("verified publisher capability already issued")
+        self._verified_market_token = object()
+        return VerifiedMarketPublisher(self, self._verified_market_token)
+
+    async def _publish_verified_market(
+        self, topic: str, token: object, **payload: Any,
+    ) -> None:
+        if (
+            self._mode_provider() is not QuantMode.SIMULATION
+            or topic not in _VERIFIED_ONLY_RAW_TOPICS
+            or self._verified_market_token is None
+            or token is not self._verified_market_token
+        ):
+            raise RawMarketAdmissionDenied("unverified or invalid raw market publisher")
+        await self._queue.put(Event(topic=topic, payload=payload))
+
     async def publish(self, topic: str, **payload: Any) -> None:
+        if (
+            self._verified_market_token is not None
+            and topic in _VERIFIED_ONLY_RAW_TOPICS
+        ):
+            raise RawMarketAdmissionDenied(
+                "direct raw market EventBus publication blocked: "
+                "verified publisher capability required"
+            )
         await self._queue.put(Event(topic=topic, payload=payload))
 
     async def start(self) -> None:
