@@ -479,3 +479,69 @@ class OfflineSpotCaptureJournal:
                 payload=parsed if kind == "snapshot" else parsed["data"],
             ))
         return result
+
+    def verify_captured_record(
+        self, session_id: str, capture_id: int,
+    ) -> CapturedSpotRecord:
+        """Bounded O(1)-row reread after raw SQLite COMMIT.
+
+        This verifies the exact stored byte fingerprint/source scope and
+        temporal receipt without re-reading thousands of earlier frames.
+        A final whole-session replay must STILL validate sequence continuity,
+        snapshot bridging, and history at close.
+        """
+        self._simulation_only()
+        self._part(session_id, "session_id")
+        capture_id = self._positive(capture_id, "capture_id")
+        with self._connect() as conn:
+            session = self._session(conn, session_id)
+            row = conn.execute("""
+                SELECT * FROM offline_spot_capture_records
+                WHERE session_id=? AND capture_id=?
+            """, (session_id, capture_id)).fetchone()
+        if row is None:
+            raise SpotCaptureError("missing committed source record")
+        body = bytes(row["raw_blob"])
+        if hashlib.sha256(body).hexdigest() != row["sha256"]:
+            raise SpotCaptureError("source record fingerprint mismatch")
+        recovered, parsed = self._parse(body)
+        when = row["received_at_ms"]
+        if (
+            recovered != body
+            or type(when) is not int
+            or when < session["opened_at_ms"]
+            or (
+                session["closed_at_ms"] is not None
+                and when > session["closed_at_ms"]
+            )
+        ):
+            raise SpotCaptureError("source record bytes or time changed")
+        kind = row["kind"]
+        endpoint = row["endpoint"]
+        if kind == "snapshot":
+            if (
+                endpoint not in _REST_DEPTH
+                or row["request_symbol"] != session["symbol"]
+                or type(row["request_started_at_ms"]) is not int
+                or not session["opened_at_ms"]
+                <= row["request_started_at_ms"] <= when
+            ):
+                raise SpotCaptureError("committed snapshot provenance invalid")
+        elif kind not in ("aggTrade", "depthUpdate") or (
+            endpoint != session["ws_endpoint"]
+            or row["request_symbol"] is not None
+            or row["request_started_at_ms"] is not None
+        ):
+            raise SpotCaptureError("committed WSS provenance invalid")
+        self._classify(
+            parsed, symbol=session["symbol"], kind=kind,
+            received_at_ms=when,
+        )
+        return CapturedSpotRecord(
+            capture_id=capture_id, session_id=session_id,
+            symbol=session["symbol"], source=session["source"],
+            kind=kind, received_at_ms=when,
+            request_started_at_ms=row["request_started_at_ms"],
+            endpoint=endpoint, raw=body,
+            payload=parsed if kind == "snapshot" else parsed["data"],
+        )
