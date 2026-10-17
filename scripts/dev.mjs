@@ -1,67 +1,42 @@
+// ECONITH controlled dev startup: no arbitrary process/port termination.
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { planDevServices } from "./runtime_services.mjs";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
-const socialDir = path.join(root, "econith_social");
+const requireSocial = /^(1|true|yes)$/i.test(process.env.ECONITH_REQUIRE_SOCIAL ?? "");
 
-function freePort(port) {
-  if (process.platform === "win32") {
-    spawnSync(
-      "powershell",
-      [
-        "-NoProfile",
-        "-Command",
-        `Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue | ` +
-          "ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }",
-      ],
-      { stdio: "ignore" },
-    );
-    return;
-  }
-  spawnSync("sh", ["-c", `lsof -ti:${port} | xargs kill -9 2>/dev/null || true`], {
-    stdio: "ignore",
-  });
+let plan;
+try {
+  plan = planDevServices(root, { requireSocial });
+} catch (error) {
+  console.error(String(error));
+  process.exit(1);
 }
 
 if (!fs.existsSync(path.join(root, "node_modules", "concurrently"))) {
-  console.log("Installing root dev dependencies...");
-  const install = spawnSync("npm", ["install"], {
+  console.log("Installing root dependencies from package-lock.json...");
+  const install = spawnSync(process.platform === "win32" ? "npm.cmd" : "npm", ["ci"], {
     cwd: root,
     stdio: "inherit",
-    shell: true,
+    shell: process.platform === "win32",
   });
-  if (install.status !== 0) {
-    process.exit(install.status ?? 1);
-  }
+  if (install.status !== 0) process.exit(install.status ?? 1);
 }
 
-console.log("Freeing social ports 3001 / 5001 if occupied...");
-freePort(3001);
-freePort(5001);
+if (!plan.social.available) {
+  console.warn(`[ECONITH] Social sidecar skipped: ${plan.social.reason}`);
+  console.warn("[ECONITH] Core Docker stack will run without the optional Social UI.");
+}
 
+// Never kill unrelated processes merely because their port numbers overlap.
+// Docker or the Social application will report a binding error explicitly.
 const { default: concurrently } = await import("concurrently");
-
-const { result } = concurrently(
-  [
-    {
-      command: "docker compose up --build",
-      cwd: root,
-      name: "docker",
-      prefixColor: "blue",
-    },
-    {
-      command: "npm run dev",
-      cwd: socialDir,
-      name: "social",
-      prefixColor: "magenta",
-    },
-  ],
-  {
-    prefix: "name",
-    restartTries: 0,
-  },
-);
-
-result.catch(() => process.exit(1));
+const { result } = concurrently(plan.services, {
+  prefix: "name",
+  restartTries: 0,
+  killOthersOn: ["failure"],
+});
+result.catch(() => { process.exitCode = 1; });
