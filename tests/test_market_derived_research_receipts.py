@@ -211,3 +211,86 @@ async def test_partial_verified_metadata_poisoned_and_reported(tmp_path):
             )
     finally:
         await bus.stop()
+
+
+@pytest.mark.asyncio
+async def test_historical_volume_delta_uses_receipt_time_not_replay_speed():
+    import asyncio
+    from core.event_bus import EventBus
+    from infrastructure.preprocessing.pipeline import MarketDataPipeline
+
+    async def run_replay(delay: float):
+        bus=EventBus(mode_provider=lambda:QuantMode.SIMULATION)
+        pub=bus.activate_verified_market_only()
+        MarketDataPipeline(bus,volume_window_s=0.02).register()
+        values=[]
+        async def receive(event):
+            values.append((event.payload["trade_count"],
+                           event.payload["volume_delta"]))
+        bus.subscribe("indicator.volume_delta",receive)
+        await bus.start()
+        try:
+            for ordinal in (1,2):
+                if ordinal == 2:
+                    await asyncio.sleep(delay)
+                await pub.publish_raw_confirmed(
+                    "md.aggTrade",
+                    frame={
+                        "e":"aggTrade","s":"BTCUSDT","a":500+ordinal,
+                        "E":1_780_000_000_000+ordinal,
+                        "T":1_780_000_000_000+ordinal,
+                        "f":500+ordinal,"l":500+ordinal,
+                        "p":"101.25","q":"0.2","m":False,
+                    },
+                    source="verified_closed_session_replay",
+                    verified_session_id="rec_fixture01",
+                    verified_source_record_id=f"rec_fixture01:aggTrade:{100+ordinal}",
+                    verified_source_ordinal=ordinal,
+                    verified_source_available_at_ms=1_780_000_000_010+ordinal,
+                )
+            await bus.wait_verified_idle()
+            return values
+        finally:
+            await bus.stop()
+
+    fast=await run_replay(0)
+    delayed=await run_replay(0.05)
+    assert fast == delayed
+    assert [v[0] for v in fast] == [1,2]
+
+
+@pytest.mark.asyncio
+async def test_research_session_reset_does_not_mix_unknown_gap_windows():
+    import asyncio
+    from core.event_bus import EventBus
+    from infrastructure.preprocessing.pipeline import MarketDataPipeline
+
+    bus=EventBus(mode_provider=lambda:QuantMode.SIMULATION)
+    pub=bus.activate_verified_market_only()
+    pipeline=MarketDataPipeline(bus,volume_window_s=10)
+    pipeline.register()
+    counts=[]
+    async def recv(event):
+        counts.append(event.payload["trade_count"])
+    bus.subscribe("indicator.volume_delta",recv)
+    await bus.start()
+    try:
+        for session_idx in (1,2):
+            if session_idx == 2:
+                await bus.wait_verified_idle()
+                pipeline.reset_verified_research_session()
+            sid=f"rec_fixture0{session_idx}"
+            await pub.publish_raw_confirmed(
+                "md.aggTrade",
+                frame={"e":"aggTrade","s":"BTCUSDT","a":500,
+                    "E":1_780_000_000_000,"T":1_780_000_000_000,
+                    "f":500,"l":500,"p":"100.25","q":"0.1","m":False},
+                verified_session_id=sid,
+                verified_source_record_id=f"{sid}:aggTrade:101",
+                verified_source_ordinal=1,
+                verified_source_available_at_ms=1_780_000_000_020,
+            )
+        await bus.wait_verified_idle()
+        assert counts == [1,1]
+    finally:
+        await bus.stop()
