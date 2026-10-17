@@ -341,3 +341,47 @@ async def test_bounded_lifetime_and_frame_count_do_not_return_false_success(tmp_
             stalled(), hanging_snapshot,
             session_id="timeout", timeout_s=0.05,
         )
+
+
+@pytest.mark.asyncio
+async def test_finite_frame_bound_success_only_after_synced_snapshot(tmp_path):
+    adapter, journal, _ = make(tmp_path)
+    first = raw(depth())
+    second = raw(trade(10))
+    third = raw(trade(11))
+    result = await adapter.capture_open_stream(
+        feed(first, second, third, gap=0.001), rest,
+        session_id="bounded_good", max_frames=2,
+    )
+    assert result.websocket_frames == 2
+    assert result.snapshot_captures == 1
+    assert result.depth_status == "SYNCED"
+    assert result.last_update_id == 102
+    originals = journal.replay_as_of("bounded_good", result.last_received_at_ms)
+    assert [r.raw for r in originals if r.kind == "aggTrade"] == [second]
+    assert len(originals) == 3
+
+
+@pytest.mark.asyncio
+async def test_unsynced_frame_limit_exposes_static_diagnostic_reason(tmp_path):
+    adapter, journal, _ = make(tmp_path)
+    with pytest.raises(SpotTransportError, match="frame bound") as err:
+        await adapter.capture_open_stream(
+            feed(raw(trade(1)), raw(trade(2)), raw(trade(3))),
+            rest, session_id="bounded_unhealthy", max_frames=2,
+        )
+    assert err.value.reason == "FRAME_LIMIT_UNSYNCED"
+    assert len(journal.replay_as_of("bounded_unhealthy", BASE + 5000)) == 2
+
+
+@pytest.mark.asyncio
+async def test_snapshot_failure_exposes_static_diagnostic_reason(tmp_path):
+    adapter, _, _ = make(tmp_path)
+    async def failure(*args):
+        raise OSError("private_url_or_user_data")
+    with pytest.raises(SpotTransportError) as err:
+        await adapter.capture_open_stream(
+            feed(raw(depth()), gap=0.001),
+            failure, session_id="rest_error_reason",
+        )
+    assert err.value.reason == "REST_SNAPSHOT_FAILED"
