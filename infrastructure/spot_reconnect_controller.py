@@ -497,7 +497,12 @@ class OfflineSpotReconnectController:
             except Exception as exc:
                 # No exception string: network exceptions may contain URL,
                 # credentials, query arguments or other private context.
-                code = type(exc).__name__
+                code = (
+                    exc.reason if isinstance(exc, SpotTransportError)
+                    else "SOURCE_EVIDENCE_REJECTED"
+                    if isinstance(exc, SpotCaptureError)
+                    else type(exc).__name__
+                )
                 if not code.isidentifier() or len(code) > 80:
                     code = "CAPTURE_ERROR"
                 self._complete(
