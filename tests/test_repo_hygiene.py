@@ -15,6 +15,9 @@ def test_forbidden_generated_and_local_credential_paths() -> None:
     assert forbidden_tracked_path("core/__pycache__/engine.cpython-312.pyc")
     assert forbidden_tracked_path(".env.production")
     assert forbidden_tracked_path("secret/.env.local")
+    assert forbidden_tracked_path("dashboard/.env.development")
+    assert forbidden_tracked_path("services/.env.test")
+    assert forbidden_tracked_path(".env.production.example") is None
     assert forbidden_tracked_path("ai/cache.pt") is None
     assert forbidden_tracked_path("econith_quant/LICENSE") is None
     assert forbidden_tracked_path("KHKT_Evaluation/final_report/figures.png") is None
