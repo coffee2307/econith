@@ -38,3 +38,31 @@ dashboard/out/
 # extraction artifact
 _plan_extracted.txt
 dist/econith_runpod_train_bundle.zip
+
+# disposable local build/test caches
+**/.next/
+**/.turbo/
+**/dist/
+**/build/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+*.egg-info/
+*.tsbuildinfo
+*.log
+
+# local editor/merge artifacts (keep source-controlled results)
+*.orig
+*.rej
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# IDE local settings
+.vscode/
+.idea/
