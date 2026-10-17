@@ -39,6 +39,8 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379/0
       MODEL_DIR: /app/models
       MODEL_REGISTRY: /app/models/registry
+      # SQLite StateRecorder journal is separate from the Postgres engine.
+      STATE_RECORDER_DB_PATH: /app/runtime-state/econith.sqlite
       WORLD_SIMULATION_DEFAULT: ${WORLD_SIMULATION_DEFAULT:-true}
       ECONITH_MOCK_TWAP: "false"
       # Remote provider is the reliable first route. Ollama is an optional
@@ -58,6 +60,7 @@ services:
       - ./runtime/datasets:/app/datasets
       # Durable audit files must be writable by the non-root runtime.
       - auditlogs:/app/logs
+      - recorderstate:/app/runtime-state
       # Historical host logs remain accessible, never implicitly deleted.
       - ./runtime/logs:/app/legacy-host-logs:ro
     depends_on:
@@ -139,6 +142,7 @@ networks:
 
 volumes:
   auditlogs:
+  recorderstate:
   caddy_data:
   caddy_config:
   pgdata:
