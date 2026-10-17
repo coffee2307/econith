@@ -511,6 +511,86 @@ class OfflineSpotReconnectController:
             sum(o.restored_at_ms is None for o in self.outages()), False,
         )
 
+    async def run_fenced_batch(
+        self,
+        capture_once: Callable[[str, int], Awaitable[SpotTransportResult]],
+        *,
+        holder_id: str,
+        max_attempts: int = 3,
+        backoff_s: float = 0.0,
+        heartbeat_interval_s: float = 5.0,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    ) -> ReconnectRun:
+        """Exclusive SQLite owner with renewal and transactional ACK fencing.
+
+        This cannot kill a stale WebSocket connection or fence side effects in
+        another datastore. Source captures remain session scoped, offline only.
+        """
+        self.journal._simulation_only()
+        fence = self.worker_fence
+        if fence is None:
+            raise ValueError("run_fenced_batch requires configured worker_fence")
+        if (
+            type(heartbeat_interval_s) not in (int, float)
+            or not 0 < heartbeat_interval_s < fence.lease_ms / 2000
+        ):
+            raise ValueError("heartbeat interval must be below half the lease")
+        claim = fence.acquire(holder_id=holder_id)
+        state = {"claim": claim}
+        worker: asyncio.Task[ReconnectRun] | None = None
+        try:
+            # Expired generations cannot commit in the same DB; only the
+            # newly acquired owner may reconcile their unfinished attempts.
+            self.reconcile_crashed_attempts(lease=state["claim"])
+            worker = asyncio.create_task(
+                self.run_batch(
+                    capture_once, max_attempts=max_attempts,
+                    backoff_s=backoff_s, sleep=sleep,
+                    _lease_ref=lambda: state["claim"],
+                ),
+                name="spot-fenced-reconnect",
+            )
+            while True:
+                done, _ = await asyncio.wait(
+                    {worker}, timeout=heartbeat_interval_s,
+                )
+                if done:
+                    return await worker
+                state["claim"] = fence.renew(state["claim"])
+        finally:
+            if worker is not None and not worker.done():
+                worker.cancel()
+                await asyncio.gather(worker, return_exceptions=True)
+            try:
+                fence.release(state["claim"])
+            except (WorkerLeaseConflict, RuntimeError):
+                # Lease was already lost or REALITY mode became active.
+                pass
+
+    async def run_fenced_public(
+        self, adapter: OptInSpotIngressAdapter, *, holder_id: str,
+        allow_network: bool = False, max_attempts: int = 3,
+        backoff_s: float = 1.0, max_frames: int = 300,
+        timeout_s: float = 30.0, heartbeat_interval_s: float = 5.0,
+    ) -> ReconnectRun:
+        """Explicit public, read-only market capture under durable ownership."""
+        self.journal._simulation_only()
+        if allow_network is not True:
+            raise PermissionError("explicit public market-data opt-in required")
+        if adapter.journal is not self.journal or adapter.symbol != self.symbol:
+            raise ValueError("adapter must share controller journal and symbol")
+
+        async def _once(session_id: str, _sequence: int) -> SpotTransportResult:
+            return await adapter.capture_public_once(
+                allow_network=True, session_id=session_id,
+                max_frames=max_frames, timeout_s=timeout_s,
+            )
+
+        return await self.run_fenced_batch(
+            _once, holder_id=holder_id, max_attempts=max_attempts,
+            backoff_s=backoff_s, heartbeat_interval_s=heartbeat_interval_s,
+        )
+
     async def run_public(
         self, adapter: OptInSpotIngressAdapter, *,
         allow_network: bool = False,
