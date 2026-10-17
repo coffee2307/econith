@@ -13,13 +13,11 @@ before historical research events may be released to subscribers.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from core.mode import QuantMode
 from infrastructure.spot_capture_replay import OfflineSpotCaptureReplayer
-from infrastructure.spot_depth_sync import (
-    DepthSyncError, OfflineSpotDepthSynchronizer,
-)
+from infrastructure.spot_depth_sync import OfflineSpotDepthSynchronizer
 from infrastructure.spot_ingress_capture import (
     CapturedSpotRecord, OfflineSpotCaptureJournal,
 )
@@ -79,6 +77,7 @@ class IncrementalSpotShadowValidator:
         self._last_trade_id: int | None = None
         self._last_trade_payload: dict[str, Any] | None = None
         self.originals = 0
+        self.ws_frames = 0
         self.trades = 0
         self.depth_updates = 0
         self.snapshots = 0
@@ -116,6 +115,7 @@ class IncrementalSpotShadowValidator:
                     "source capture or local receipt order regressed"
                 )
             if record.kind == "aggTrade":
+                self.ws_frames += 1
                 agg = record.payload["a"]
                 if self._last_trade_id is not None:
                     if agg == self._last_trade_id:
@@ -132,6 +132,7 @@ class IncrementalSpotShadowValidator:
                     self._last_trade_id = agg
                     self._last_trade_payload = record.payload
             elif record.kind == "depthUpdate":
+                self.ws_frames += 1
                 self.depth_updates += 1
                 result = self.book.ingest_diff(
                     record.payload, received_at_ms=record.received_at_ms,
@@ -174,10 +175,7 @@ class IncrementalSpotShadowValidator:
             or result.symbol != self.symbol
             or self.snapshots != 1
             or self.trades <= 0
-            or result.websocket_frames != self.trades + self.depth_updates
-            # Identical aggregate-trade IDs are legal duplicate original
-            # frames; the official result still counts all WS frames.
-            and False
+            or result.websocket_frames != self.ws_frames
         ):
             raise IncrementalSpotIntegrityError(
                 "incremental capture counts/session do not match source"
