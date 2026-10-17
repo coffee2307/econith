@@ -2,10 +2,11 @@
 
 Guarded API security + operational audit trail.
 
-A rigid, low-overhead authentication middleware that inspects an API key or
-Bearer token on sensitive *mutating* router paths (mode switching, world
-mutation, execution-intent injection, sentinel controls). Read-only endpoints
-and the websocket streams are never gated so the dashboard keeps working.
+A rigid, low-overhead authentication middleware that requires an API key or
+Bearer token on ALL mutating operations inside the owned API namespace
+(including new routes added in the future). Read-only endpoints and websocket
+streams remain outside this middleware's mutating-route check; production
+edge authentication remains an independent, required protection.
 
 Every state-altering command that reaches a protected route is written to a
 rotating, structured audit log (JSON lines) so operator actions are fully
@@ -135,6 +136,10 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self._settings = settings or get_settings()
         self._audit = get_audit_logger(self._settings)
+        self._api_prefix = self._settings.api_prefix.rstrip("/")
+        # Protect every mutating operation in our owned API namespace.
+        # A manually curated sensitive-prefix list is brittle: newly added
+        # routes (runtime/reset, locale, simulation reset) could bypass auth.
         self._protected = self._settings.protected_path_prefixes
         if not self._settings.api_auth_enabled:
             logger.warning(
@@ -150,7 +155,13 @@ class APIKeyAuthMiddleware(BaseHTTPMiddleware):
     def _is_protected(self, method: str, path: str) -> bool:
         if method.upper() not in _MUTATING_METHODS:
             return False
-        return any(path.startswith(prefix) for prefix in self._protected)
+        # Segment boundaries matter: /api/v10 is NOT /api/v1.
+        # This remains API-only; static assets, health GETs and WebSockets
+        # do not become accidentally subject to mutating-route checks.
+        return (
+            path == self._api_prefix
+            or path.startswith(self._api_prefix + "/")
+        )
 
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
