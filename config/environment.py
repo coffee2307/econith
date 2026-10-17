@@ -107,6 +107,9 @@ class Environment(BaseSettings):
     state_recorder_db_path: str = Field(
         default="datasets/econith.sqlite", alias="STATE_RECORDER_DB_PATH"
     )
+    trade_state_db_path: str = Field(
+        default="datasets/trades.sqlite", alias="TRADE_STATE_DB_PATH"
+    )
 
     # --- Sentinel risk governance ----------------------------------------
     # Tunable thresholds. Defaults are strict (production). For local dev
