@@ -42,3 +42,38 @@ def test_policy_uses_method_and_exact_prefix_segments(method, path):
     middleware = object.__new__(APIKeyAuthMiddleware)
     middleware._api_prefix = "/api/v1"
     assert not middleware._is_protected(method, path)
+
+
+def test_shared_router_api_key_validation(monkeypatch):
+    from types import SimpleNamespace
+    from fastapi import HTTPException
+    from starlette.requests import Request
+    from core.api.auth import require_api_key
+
+    cfg = SimpleNamespace(api_auth_enabled=True, api_keys=frozenset({"expected"}))
+
+    def request(headers):
+        return Request({
+            "type": "http", "method": "GET", "path": "/api/v1/vendors/status",
+            "headers": [(key.lower().encode(), value.encode())
+                        for key, value in headers.items()],
+            "query_string": b"",
+        })
+
+    require_api_key(request({"x-api-key": "expected"}), cfg)
+    require_api_key(request({"authorization": "Bearer expected"}), cfg)
+    for value in ({}, {"x-api-key": "wrong"}, {"authorization": "Bearer wrong"}):
+        with pytest.raises(HTTPException) as error:
+            require_api_key(request(value), cfg)
+        assert error.value.status_code == 401
+
+    cfg.api_auth_enabled = False
+    require_api_key(request({}), cfg)
+
+
+def test_router_modules_use_one_canonical_credential_function() -> None:
+    from api.endpoints import social, vendors
+    from core.api.auth import require_api_key
+
+    assert social._require_api_key is require_api_key
+    assert vendors._require_api_key is require_api_key
