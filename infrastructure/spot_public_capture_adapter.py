@@ -1,0 +1,290 @@
+"""Explicit opt-in, research-only public Binance Spot capture transport.
+
+No default pipeline subscriptions and no exchange order functionality. Open a
+read-only TLS socket only when capture_public_once(allow_network=True) is
+called. Offline capture_open_stream accepts injected transports for repeatable
+fault testing. No frame is published before a durable raw SQLite capture.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import secrets
+import time
+from dataclasses import dataclass
+from typing import Any, AsyncIterable, Awaitable, Callable
+
+from core.mode import QuantMode
+from infrastructure.spot_capture_replay import OfflineSpotCaptureReplayer
+from infrastructure.spot_ingress_capture import (
+    OfflineSpotCaptureJournal, SpotCaptureError,
+)
+
+_PUBLIC_WS = "wss://data-stream.binance.vision/stream"
+_PUBLIC_REST = "https://data-api.binance.vision/api/v3/depth"
+
+
+class SpotTransportError(SpotCaptureError):
+    """No reliable continuous source: abort session and require a fresh one."""
+
+
+@dataclass(frozen=True)
+class SpotTransportResult:
+    session_id: str
+    symbol: str
+    websocket_frames: int
+    snapshot_captures: int
+    last_received_at_ms: int
+    queue_high_watermark: int
+    depth_status: str
+    last_update_id: int
+
+
+class OptInSpotIngressAdapter:
+    """Capture a bounded public read-only Spot stream and REST snapshot.
+
+    WebSocket messages and snapshot responses are independently stamped
+    immediately when their awaitable returns, then fed into a bounded FIFO
+    writer. Queue overflow is terminal, not a lossy optimization. A single
+    writer commits all captures in received order, and replay must reconstruct
+    a synchronized book before this operation can report success.
+
+    Injected transports do not prove TLS peer identity. Use
+    capture_public_once() for a standard hostname-verified TLS connection;
+    even that is transport-level peer validation, not a signed exchange
+    event or verified local wall-clock.
+    """
+
+    def __init__(
+        self, journal: OfflineSpotCaptureJournal, *, symbol: str,
+        clock_ms: Callable[[], int] | None = None,
+        queue_capacity: int = 128,
+        snapshot_limit: int = 1000,
+    ) -> None:
+        if not isinstance(journal, OfflineSpotCaptureJournal):
+            raise ValueError("an immutable offline Spot capture journal is required")
+        journal._simulation_only()
+        journal._symbol(symbol)
+        if type(queue_capacity) is not int or not 2 <= queue_capacity <= 8192:
+            raise ValueError("queue_capacity must be between 2 and 8192")
+        if snapshot_limit not in (100, 500, 1000, 5000):
+            raise ValueError("invalid explicit read-only depth snapshot limit")
+        self.journal = journal
+        self.symbol = symbol
+        self.clock = clock_ms or (lambda: time.time_ns() // 1_000_000)
+        self.queue_capacity = queue_capacity
+        self.snapshot_limit = snapshot_limit
+
+    def _clock(self) -> int:
+        value = self.clock()
+        return self.journal._positive(value, "transport local receipt clock")
+
+    def _kind(self, body: str | bytes) -> str:
+        _, parsed = self.journal._parse(body)
+        name = parsed.get("stream")
+        sym = self.symbol.lower()
+        if name == f"{sym}@aggTrade":
+            return "aggTrade"
+        if name in (f"{sym}@depth", f"{sym}@depth@100ms"):
+            return "depthUpdate"
+        raise SpotTransportError("unexpected combined market stream; no silent discard")
+
+    async def capture_open_stream(
+        self, stream: AsyncIterable[str | bytes],
+        snapshot_fetch: Callable[[str, int], Awaitable[str | bytes]],
+        *, session_id: str, source: str = "offline_fixture",
+        ws_endpoint: str = _PUBLIC_WS,
+        rest_endpoint: str = _PUBLIC_REST,
+        max_frames: int = 300,
+        timeout_s: float = 30.0,
+    ) -> SpotTransportResult:
+        """No network is opened here; caller supplies an already-opened stream.
+
+        The first recorded Spot diff triggers a concurrent read-only REST
+        snapshot request. Independent readers enqueue in first-receipt order.
+        Both stop on malformed evidence, resource overflow or transport loss.
+        A healthy session requires an actually bridged book, not only TCP EOF.
+        """
+        self.journal._simulation_only()
+        if type(max_frames) is not int or not 1 <= max_frames <= 4998:
+            raise ValueError("max_frames must fit bounded full-session replay")
+        if (
+            type(timeout_s) not in (int, float)
+            or not 0 < timeout_s <= 600
+            or timeout_s != timeout_s
+        ):
+            raise ValueError("invalid capture timeout")
+        if not callable(snapshot_fetch):
+            raise TypeError("a read-only REST snapshot fetcher is required")
+        opened = self._clock()
+        self.journal.start_session(
+            session_id, symbol=self.symbol, source=source,
+            ws_endpoint=ws_endpoint, opened_at_ms=opened,
+        )
+        fifo: asyncio.Queue[tuple[str, Any, int]] = asyncio.Queue(
+            maxsize=self.queue_capacity
+        )
+        captured_ws = 0
+        captured_snapshots = 0
+        high_watermark = 0
+        last_ms = opened
+        reader_done = False
+        snapshot_started = False
+        snapshot_done = False
+        reader: asyncio.Task[None] | None = None
+        snapshot_task: asyncio.Task[None] | None = None
+
+        async def _queue(kind: str, data: Any, ts: int) -> None:
+            # No await between receipt stamping and enqueue. Under overload,
+            # abort; never silently remove/replace an earlier original frame.
+            try:
+                fifo.put_nowait((kind, data, ts))
+            except asyncio.QueueFull as exc:
+                raise SpotTransportError("ingress backpressure overflow: abort session") from exc
+
+        async def _read() -> None:
+            count = 0
+            try:
+                async for raw in stream:
+                    received = self._clock()
+                    count += 1
+                    if count > max_frames:
+                        raise SpotTransportError("finite capture frame bound exceeded")
+                    await _queue("ws", raw, received)
+            except Exception as exc:
+                await fifo.put(("error", exc, self._clock()))
+            else:
+                await fifo.put(("eof", None, self._clock()))
+
+        async def _snapshot() -> None:
+            try:
+                request_started_at = self._clock()
+                raw = await snapshot_fetch(self.symbol, self.snapshot_limit)
+                received = self._clock()
+                await _queue("snapshot", (raw, request_started_at), received)
+            except Exception as exc:
+                await fifo.put(("error", exc, self._clock()))
+
+        try:
+            reader = asyncio.create_task(_read(), name="spot-capture-ws-read")
+            async with asyncio.timeout(timeout_s):
+                while not (reader_done and (not snapshot_started or snapshot_done)):
+                    kind, value, received = await fifo.get()
+                    high_watermark = max(high_watermark, fifo.qsize() + 1)
+                    if kind == "error":
+                        raise SpotTransportError(
+                            f"capture reader failed: {type(value).__name__}: {value}"
+                        ) from value
+                    if kind == "eof":
+                        reader_done = True
+                        continue
+                    if kind == "ws":
+                        stream_kind = self._kind(value)
+                        self.journal.record_ws(
+                            session_id, value, stream_kind=stream_kind,
+                            received_at_ms=received,
+                        )
+                        captured_ws += 1
+                        last_ms = received
+                        if stream_kind == "depthUpdate" and not snapshot_started:
+                            snapshot_started = True
+                            snapshot_task = asyncio.create_task(
+                                _snapshot(), name="spot-capture-rest-snapshot"
+                            )
+                    elif kind == "snapshot":
+                        raw, requested = value
+                        self.journal.record_snapshot(
+                            session_id, raw, rest_endpoint=rest_endpoint,
+                            request_symbol=self.symbol,
+                            request_started_at_ms=requested,
+                            received_at_ms=received,
+                        )
+                        captured_snapshots += 1
+                        last_ms = received
+                        snapshot_done = True
+                    else:
+                        raise SpotTransportError("unrecognized ingest capture event")
+            if captured_snapshots != 1:
+                raise SpotTransportError("no captured REST depth snapshot in session")
+            state = OfflineSpotCaptureReplayer(self.journal).replay(
+                session_id, as_of_ms=last_ms, limit=5000,
+            )
+            if state.book is None:
+                raise SpotTransportError(
+                    "captured Spot depth did not establish a usable synchronized book"
+                )
+            return SpotTransportResult(
+                session_id, self.symbol, captured_ws,
+                captured_snapshots, last_ms, high_watermark,
+                state.depth_status, state.book.last_update_id,
+            )
+        except TimeoutError as exc:
+            raise SpotTransportError("capture timed out, session invalid") from exc
+        finally:
+            for task in (reader, snapshot_task):
+                if task is not None and not task.done():
+                    task.cancel()
+            await asyncio.gather(
+                *(task for task in (reader, snapshot_task) if task is not None),
+                return_exceptions=True,
+            )
+            # Close the session on *both* success and failure; never reuse a
+            # suspect capture session after EOF, writer error or cancellation.
+            # If the local clock regressed, closing fails closed as well.
+            self.journal.close_session(session_id, closed_at_ms=self._clock())
+
+    async def capture_public_once(
+        self, *, allow_network: bool = False,
+        session_id: str | None = None,
+        max_frames: int = 300,
+        timeout_s: float = 30.0,
+    ) -> SpotTransportResult:
+        """Explicit public TLS market-data-only capture; no API keys or orders.
+
+        Uses pinned public WS/REST hosts, certificate validation, no redirects,
+        no environment proxies, and a single GET /api/v3/depth.
+        Never invoked by default startup or the existing EventBus.
+        """
+        self.journal._simulation_only()
+        if allow_network is not True:
+            raise PermissionError("public network capture requires explicit opt-in")
+        import httpx
+        import websockets
+
+        sym = self.symbol.lower()
+        url = (
+            f"{_PUBLIC_WS}?streams={sym}@aggTrade/"
+            f"{sym}@depth@100ms"
+        )
+
+        async def get_snapshot(symbol: str, limit: int) -> bytes:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(10.0),
+                follow_redirects=False,
+                trust_env=False,
+                verify=True,
+                headers={"Accept-Encoding": "identity"},
+            ) as client:
+                response = await client.get(
+                    _PUBLIC_REST, params={"symbol": symbol, "limit": limit},
+                )
+                if response.status_code != 200:
+                    raise SpotTransportError(
+                        f"REST depth refused HTTP {response.status_code}"
+                    )
+                if len(response.content) > self.journal.max_body_bytes:
+                    raise SpotTransportError("REST snapshot exceeded raw capture size limit")
+                return response.content
+
+        async with websockets.connect(
+            url, open_timeout=10, close_timeout=5,
+            max_size=self.journal.max_body_bytes, max_queue=16,
+            ping_interval=20, ping_timeout=20,
+        ) as connection:
+            return await self.capture_open_stream(
+                connection, get_snapshot,
+                session_id=session_id or f"ws_{secrets.token_hex(12)}",
+                source="binance_public_simulation",
+                ws_endpoint=_PUBLIC_WS, rest_endpoint=_PUBLIC_REST,
+                max_frames=max_frames, timeout_s=timeout_s,
+            )
