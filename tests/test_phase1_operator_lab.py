@@ -28,9 +28,23 @@ async def test_operator_report_reopens_real_sqlite_and_never_claims_gap_free(tmp
         capture_factory=capture,persistent_receiver=True,
     )
     assert status.accepted_sessions==2
+    # Optional aggregate diagnostics cannot certify source success.
+    stage_dir=evidence/"attempt_001"
+    (stage_dir/"stage_latency.json").write_text(json.dumps({
+        "schema":"econith-phase1-stage-latency-v1",
+        "diagnostic_not_source_evidence":True,
+        "raw_event_contents_recorded":False,
+        "source_complete":True,
+        "stages":{"source_sqlite_commit":{
+            "samples":5,"total_ms":22.0,"p95_ms":6.0,
+        }},
+    }),encoding="utf-8")
     report=lab.inspect_trial(trial)
     assert report["verdict"]=="BOUNDED_SEGMENTS_ACCEPTED_WITH_UNKNOWN_HISTORY_GAPS"
     assert report["passed"]==2
+    assert len(report["stage_profile_diagnostics"])==1
+    assert report["stage_profile_diagnostics"][0]["diagnostic_only"] is True
+    assert report["stage_profile_diagnostics"][0]["top_stages_by_total_ms"][0]["stage"]=="source_sqlite_commit"
     assert report["unknown_session_boundaries"]==1
     assert report["outage_windows"]==0
     assert report["total_receiver_acks_in_passed_attempts"]==8
