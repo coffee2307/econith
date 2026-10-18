@@ -267,6 +267,18 @@ def run_smoke(*,allow_public:bool,profile:str,
         raise RuntimeError("missing Python dependencies; run pinned venv setup")
     if health["ram_available_gib"] is not None and health["ram_available_gib"] < 0.25:
         raise RuntimeError("unsafe memory pressure; close apps or use a CPU VPS")
+    # A 24h endurance run on a paging-starved Windows host is not a
+    # reproducible market-data acceptance test. Quick remains opt-in,
+    # but Hour/Day require a conservative local RAM headroom preflight.
+    if (
+        profile in ("hour","day")
+        and health["ram_available_gib"] is not None
+        and health["ram_available_gib"] < 1.5
+    ):
+        raise RuntimeError(
+            "insufficient free RAM for Hour/Day: at least 1.5 GiB "
+            "available required; free memory or use a CPU VPS"
+        )
     base=(evidence_base or _default_evidence_base()).expanduser().resolve()
     if base==_root() or _root() in base.parents:
         raise ValueError("evidence must be OUTSIDE git checkout")
