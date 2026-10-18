@@ -257,6 +257,42 @@ def _write_report(trial_dir:Path,summary:dict) -> None:
     (trial_dir/"REPORT.md").write_text("\n".join(lines),encoding="utf-8")
 
 
+
+def _profile_launch_argv(*,profile:str,trial:Path,python_executable:str) -> list[str]:
+    """Build a bounded public-research launch, without starting network I/O.
+
+    Longer operator profiles deliberately use the same fresh-public-WSS
+    isolation that passed the real 3x500 diagnostic. A duration target
+    describes an observation window, NOT gap-free source history.
+    """
+    if profile not in _PROFILES:
+        raise ValueError("invalid public trial profile")
+    if not isinstance(trial,Path) or not trial.is_absolute():
+        raise ValueError("operator trial root must be absolute")
+    if type(python_executable) is not str or not python_executable:
+        raise ValueError("Python executable required")
+    config=_PROFILES[profile]
+    argv=[
+        python_executable,
+        "-m","ci.phase1_forward_endurance_trial",
+        "--allow-public-market-data","--persistent-receiver","--single-socket",
+        "--output-dir",str(trial/"evidence"),
+        "--attempts",str(config["attempts"]),
+        "--max-frames",str(config["max_frames"]),
+        "--timeout-s",str(config["timeout_s"]),
+        "--max-storage-mb",str(config["max_storage_mb"]),
+        "--ws-idle-timeout-s","15",
+    ]
+    if profile in ("diagnostic","hour","day"):
+        # Sealed source segments do not form gap-free history. The old
+        # retained WSS lease could accumulate stale unread frames between
+        # attempts; use a new pinned TLS lease per segment in longer trials.
+        argv.append("--fresh-socket-per-segment")
+    if config["watch_hours"] is not None:
+        argv+=["--watch-hours",str(config["watch_hours"])]
+    return argv
+
+
 def run_smoke(*,allow_public:bool,profile:str,
               evidence_base:Path|None=None,
               python_executable:str|None=None) -> int:
@@ -291,22 +327,10 @@ def run_smoke(*,allow_public:bool,profile:str,
     (trial/"doctor.json").write_text(
         json.dumps(health,indent=2)+"\n",encoding="utf-8",
     )
-    profile_data=_PROFILES[profile]
-    argv=[
-        python_executable or sys.executable,
-        "-m","ci.phase1_forward_endurance_trial",
-        "--allow-public-market-data","--persistent-receiver","--single-socket",
-        "--output-dir",str(trial/"evidence"),
-        "--attempts",str(profile_data["attempts"]),
-        "--max-frames",str(profile_data["max_frames"]),
-        "--timeout-s",str(profile_data["timeout_s"]),
-        "--max-storage-mb",str(profile_data["max_storage_mb"]),
-        "--ws-idle-timeout-s","15",
-    ]
-    if profile=="diagnostic":
-        argv.append("--fresh-socket-per-segment")
-    if profile_data["watch_hours"] is not None:
-        argv+=["--watch-hours",str(profile_data["watch_hours"])]
+    argv=_profile_launch_argv(
+        profile=profile,trial=trial,
+        python_executable=python_executable or sys.executable,
+    )
     (trial/"launch.json").write_text(
         json.dumps({
             "profile":profile,
