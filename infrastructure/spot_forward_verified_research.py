@@ -90,6 +90,7 @@ async def observe_forward_spot_research(
     queue_capacity: int = 128,
     max_book_staleness_ms: int = 2500,
     persistent_receiver: bool = False,
+    public_ws_idle_timeout_s: float = 30.0,
 ) -> ForwardSpotResearchStatus:
     """One real *in-session* research pass (no default startup/auto retry).
 
@@ -109,6 +110,8 @@ async def observe_forward_spot_research(
         or type(max_book_staleness_ms) is not int
         or not 100 <= max_book_staleness_ms <= 30000
         or type(persistent_receiver) is not bool
+        or type(public_ws_idle_timeout_s) not in (int,float)
+        or not 0.1 <= public_ws_idle_timeout_s <= 120
     ):
         raise ValueError("invalid fresh, bounded forward research configuration")
     offline = stream is not None and snapshot_fetch is not None
@@ -306,6 +309,7 @@ async def observe_forward_spot_research(
                     allow_network=True, session_id=session_id,
                     max_frames=max_frames, timeout_s=timeout_s,
                     on_persisted=forward,
+                    idle_timeout_s=public_ws_idle_timeout_s,
                 )
             proof = shadow.finish(result)
             wanted = {
