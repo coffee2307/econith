@@ -47,6 +47,7 @@ async def run_single_socket_forward_watch(
     max_book_staleness_ms: int = 2500,
     max_total_storage_bytes: int = 100_000_000,
     watch_duration_s: float | None = None,
+    fresh_socket_per_segment: bool = False,
     clock_check: Callable[[],Awaitable[bool]] | None = None,
     _lease_factory=None,
     _monotonic_s=None,
@@ -55,12 +56,52 @@ async def run_single_socket_forward_watch(
         raise PermissionError("public Binance research requires opt-in")
     if clock_check is None or not callable(clock_check):
         raise PermissionError("public clock preflight required before each segment")
+    if type(fresh_socket_per_segment) is not bool:
+        raise ValueError("invalid public lease freshness policy")
     # Input policy, owner lock and budgets are independently validated again
     # by run_forward_research_supervisor BEFORE any source connection.
     factory=_lease_factory or open_pinned_public_spot_lease
     stack:AsyncExitStack | None=None
     lease:PinnedPublicSpotLease | None=None
     starts=reuses=discarded=0
+
+    async def close_lease(*, failed: bool) -> None:
+        nonlocal stack,lease,discarded
+        if lease is not None:
+            lease.invalidate()
+        if stack is not None:
+            try:
+                await stack.aclose()
+            finally:
+                stack=None
+                lease=None
+                if failed:
+                    discarded+=1
+
+    async def checked_clock() -> bool:
+        # A prior WSS continues buffering venue messages when no segment
+        # reader is attached. A failed network/time preflight can therefore
+        # leave a "healthy" but stale socket behind. Never reuse it.
+        try:
+            result=await clock_check()
+        except BaseException as exc:
+            await close_lease(failed=True)
+            # httpx.ConnectTimeout is typically the Binance public time
+            # preflight. Persist an unambiguous STATIC failure code, not a
+            # potentially private HTTP exception message or URL.
+            if type(exc).__name__=="ConnectTimeout" and (
+                type(exc).__module__.startswith("httpx")
+                or type(exc).__module__.startswith("httpcore")
+            ):
+                from infrastructure.spot_public_capture_adapter import SpotTransportError
+                raise SpotTransportError(
+                    "public clock preflight connection timed out",
+                    reason="CLOCK_PREFLIGHT_CONNECT_TIMEOUT",
+                ) from exc
+            raise
+        if result is not True:
+            await close_lease(failed=True)
+        return result
 
     async def consume(directory:Path,sid:str,iteration:int):
         nonlocal stack,lease,starts,reuses,discarded
@@ -95,16 +136,14 @@ async def run_single_socket_forward_watch(
             )
             if reused:
                 reuses+=1
+            if fresh_socket_per_segment:
+                # Test only bounded independent captures on NEW public WSS
+                # sockets. No assumed continuity across discarded segments.
+                await close_lease(failed=False)
             return result
         except BaseException:
-            # Connection is suspect regardless of failure origin, even if
-            # the failure happened after the receiver child COMMIT.
-            lease.invalidate()
-            if stack is not None:
-                await stack.aclose()
-            stack=None
-            lease=None
-            discarded+=1
+            # A failed or suspect source must never reach the next segment.
+            await close_lease(failed=True)
             raise
 
     try:
@@ -117,15 +156,12 @@ async def run_single_socket_forward_watch(
             persistent_receiver=True,
             public_ws_idle_timeout_s=public_ws_idle_timeout_s,
             watch_duration_s=watch_duration_s,
-            clock_check=clock_check,
+            clock_check=checked_clock,
             capture_factory=consume,
             _monotonic_s=_monotonic_s,
         )
     finally:
-        if stack is not None:
-            await stack.aclose()
-            if lease is not None:
-                lease.invalidate()
+        await close_lease(failed=False)
     return SingleSocketWatchStatus(
         supervisor=supervisor,
         public_socket_starts=starts,
