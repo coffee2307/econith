@@ -27,6 +27,7 @@ from infrastructure.spot_forward_outbox import OfflineForwardSpotOutbox, Forward
 from infrastructure.spot_forward_checkpoints import OfflineForwardSessionCheckpoints
 from infrastructure.spot_forward_eligibility import rescan_forward_eligibility
 from infrastructure.spot_forward_owner import exclusive_forward_owner
+from infrastructure.market_persistent_hmac_receiver import PersistentHmacResearchReceiver
 from infrastructure.spot_ingress_capture import OfflineSpotCaptureJournal
 
 _SOURCE = "verified_forward_spot_shadow"
@@ -57,6 +58,7 @@ async def recover_staged_forward_spot(
     max_envelopes: int = 2000,
     reconstruct_missing: bool = False,
     max_book_staleness_ms: int = 2500,
+    persistent_receiver: bool = False,
 ) -> ForwardStagedRecoveryReport:
     """Operator-invoked proof for staged rows; never resumes raw capture."""
     if (
@@ -64,6 +66,7 @@ async def recover_staged_forward_spot(
         or not root.is_dir() or root != root.resolve()
         or type(max_envelopes) is not int or not 1 <= max_envelopes <= 2000
         or type(reconstruct_missing) is not bool
+        or type(persistent_receiver) is not bool
         or type(max_book_staleness_ms) is not int
         or not 100 <= max_book_staleness_ms <= 30000
     ):
@@ -172,8 +175,14 @@ async def recover_staged_forward_spot(
         for consumer in named:
             consumer.register(bus)
 
+        persistent_client = (
+            PersistentHmacResearchReceiver(receiver_path)
+            if persistent_receiver else None
+        )
         await bus.start()
         try:
+            if persistent_client is not None:
+                await persistent_client.start()
             for row in items:
                 e = row.envelope
                 data = json.loads(e.projection_json)
@@ -186,11 +195,20 @@ async def recover_staged_forward_spot(
                     raise ForwardOutboxError("original data diverges from staged envelope")
                 # Re-send EXACT original wire intent; signed receiver-owned receipt
                 # is idempotent even after a crash between its COMMIT and our ACK.
-                confirmations = await asyncio.to_thread(
-                    accept_batch_via_authenticated_subprocess,
-                    [e], receiver_db=receiver_path,
-                    now_ms=max(__import__("time").time_ns() // 1_000_000, e.available_at_ms),
-                )
+                now_ms = max(__import__("time").time_ns() // 1_000_000,
+                             e.available_at_ms)
+                if persistent_client is None:
+                    confirmations = await asyncio.to_thread(
+                        accept_batch_via_authenticated_subprocess,
+                        [e], receiver_db=receiver_path, now_ms=now_ms,
+                    )
+                else:
+                    # Still one independent SQLite COMMIT/HMAC ACK per
+                    # envelope. We reuse only the authenticated child process,
+                    # not ACKs or delivery status; uncertain ACK fails closed.
+                    confirmations = await persistent_client.accept_batch(
+                        [e], now_ms=now_ms,
+                    )
                 if len(confirmations) != 1:
                     raise ForwardOutboxError("independent receiver ACK unavailable")
                 outbox.ack_receiver(e, confirmations[0])
@@ -254,4 +272,8 @@ async def recover_staged_forward_spot(
                 checkpoint_suffix_repaired=suffix_repaired,
             )
         finally:
-            await bus.stop()
+            try:
+                if persistent_client is not None:
+                    await persistent_client.close()
+            finally:
+                await bus.stop()
