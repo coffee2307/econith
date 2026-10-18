@@ -89,9 +89,10 @@ asyncio.run(observe_forward_spot_research(
     )
     assert reopened.read_verified().last_capture_id==cursor
     audit=inspect(root)
-    assert audit["inspection_status"]=="ORPHAN_FENCE_REQUIRES_OPERATOR_REVIEW"
+    assert audit["inspection_status"]=="OWNER_FENCE_PRESENT_REQUIRES_OPERATOR_REVIEW"
     assert audit["originals_not_projected"]==src-cursor
-    assert audit["orphan_owner_fence_present"]
+    assert audit["owner_fence_present"]
+    assert audit["owner_liveness_verified"] is False
     assert audit["source_continuity_certified"] is False
     assert audit["receiver_hmac_cryptography_certified_by_this_inspector"] is False
     assert audit["mutations_performed"] is False
