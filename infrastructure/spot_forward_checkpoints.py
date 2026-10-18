@@ -223,6 +223,82 @@ class OfflineForwardSessionCheckpoints:
                 raise
         return self.verified_prefix(completed_outbox)
 
+    def append_live(
+        self, e: ProjectionEnvelope, *,
+        completed_item: ForwardOutboxItem, expected_ordinal: int,
+    ) -> ForwardCheckpointStatus:
+        """O(1) latest-tail checkpoint after independently durable event ACK.
+
+        The per-event hot path checks the exact indexed DERIVED_ACKED
+        outbox row and source-scoped HMAC receipt, then commits one chained
+        checkpoint under SQLite BEGIN IMMEDIATE. It does NOT reread the
+        entire historical chain at every event. Existing chain integrity
+        is FULLY reverified against immutable source/outbox/receiver/derived
+        evidence at session close and by independent supervisor/recovery.
+        A previous row tampered DURING an open session may therefore be
+        caught at sealing, not immediately; it is never certified PASS.
+        """
+        self._sim()
+        receipt=self._expected(e)
+        if (
+            type(expected_ordinal) is not int
+            or not 1 <= expected_ordinal <= 5000
+            or not isinstance(completed_item, ForwardOutboxItem)
+            or completed_item.envelope != e
+            or completed_item.status != "DERIVED_ACKED"
+            or completed_item.receiver_receipt_id != receipt
+        ):
+            raise ForwardCheckpointError("live checkpoint missing exact complete ACK")
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                identity=db.execute("""
+                    SELECT session_id FROM forward_checkpoint_identity
+                    WHERE singleton=1
+                """).fetchone()
+                if identity is None or identity["session_id"]!=self.session_id:
+                    raise ForwardCheckpointError("checkpoint session identity changed")
+                last=db.execute("""
+                    SELECT ordinal,checkpoint_sha256,available_at_ms,capture_id
+                    FROM forward_checkpoint
+                    ORDER BY ordinal DESC LIMIT 1
+                """).fetchone()
+                ordinal=(last["ordinal"]+1 if last is not None else 1)
+                previous=(
+                    last["checkpoint_sha256"] if last is not None else _GENESIS
+                )
+                if (
+                    ordinal != expected_ordinal
+                    or (last is not None and (
+                        e.ingest_id <= last["capture_id"]
+                        or e.available_at_ms < last["available_at_ms"]
+                    ))
+                    or len(previous)!=64
+                    or any(c not in "0123456789abcdef" for c in previous)
+                ):
+                    raise ForwardCheckpointError("live checkpoint tail/outbox order mismatch")
+                digest=_digest(previous,ordinal,e,receipt)
+                db.execute("""
+                    INSERT INTO forward_checkpoint (
+                        ordinal,capture_id,source_event_id,available_at_ms,
+                        projection_fingerprint,receiver_receipt_id,
+                        previous_sha256,checkpoint_sha256
+                    ) VALUES (?,?,?,?,?,?,?,?)
+                """,(ordinal,e.ingest_id,e.event_id,e.available_at_ms,
+                     e.projection_fingerprint,receipt,previous,digest))
+                db.execute("COMMIT")
+            except BaseException:
+                if db.in_transaction:
+                    db.execute("ROLLBACK")
+                raise
+        return ForwardCheckpointStatus(
+            session_id=self.session_id,
+            checkpointed_events=ordinal,
+            last_capture_id=e.ingest_id,
+            last_available_at_ms=e.available_at_ms,
+            tail_sha256=digest,
+        )
+
     def reconcile(self, completed_outbox: list[ForwardOutboxItem]) -> ForwardCheckpointStatus:
         """After independent source/derived replay, repair only missing suffix."""
         self.verified_prefix(completed_outbox)
