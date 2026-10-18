@@ -117,6 +117,7 @@ async def observe_forward_spot_research(
     max_source_raw_bytes: int = 200_000_000,
     experiment_reuse_derived_connections: bool = False,
     diagnose_pressure: bool = False,
+    experiment_reuse_producer_connections: bool = False,
 ) -> ForwardSpotResearchStatus:
     """One real *in-session* research pass (no default startup/auto retry).
 
@@ -145,6 +146,7 @@ async def observe_forward_spot_research(
         or not 100 <= max_projector_lag_ms <= 30000
         or type(max_pending_originals) is not int
         or not 1 <= max_pending_originals <= 1000
+        or type(experiment_reuse_producer_connections) is not bool
         or type(diagnose_pressure) is not bool
         or type(experiment_reuse_derived_connections) is not bool
         or type(max_source_raw_bytes) is not int
@@ -166,6 +168,8 @@ async def observe_forward_spot_research(
         (not offline and not allow_experimental_public_spool)
     ):
         raise PermissionError("derived connection reuse requires explicitly bounded research spool")
+    if experiment_reuse_producer_connections and (not offline or not spooled_in_session):
+        raise PermissionError("producer connection reuse requires offline spool benchmark")
     if diagnose_pressure and not spooled_in_session:
         raise PermissionError("pressure diagnostics require opt-in spool research")
     if spooled_in_session and (
@@ -241,10 +245,12 @@ async def observe_forward_spot_research(
         outbox = OfflineForwardSpotOutbox(
             root / "forward_outbox.sqlite", session_id=session_id,
             mode_provider=provider,
+            reuse_connection=experiment_reuse_producer_connections,
         )
         checkpoints = OfflineForwardSessionCheckpoints(
             root / "forward_checkpoints.sqlite",session_id=session_id,
             mode_provider=provider,
+            reuse_connection=experiment_reuse_producer_connections,
         )
         observed = dict.fromkeys(_TOPIC_COUNTS, 0)
         forwarded_trades = forwarded_books = pre_sync = 0
@@ -608,8 +614,13 @@ async def observe_forward_spot_research(
                     derived_db.close()
                 finally:
                     try:
-                        if lag_diagnostic is not None:
-                            lag_diagnostic.write(source_complete=completed)
+                        outbox.close()
+                    finally:
+                        try:
+                            checkpoints.close()
+                        finally:
+                            if lag_diagnostic is not None:
+                                lag_diagnostic.write(source_complete=completed)
                     finally:
                         try:
                             if pressure is not None:
