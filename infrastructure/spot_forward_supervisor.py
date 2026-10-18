@@ -29,6 +29,9 @@ from infrastructure.market_named_research_subscribers import OfflineNamedResearc
 from infrastructure.spot_forward_outbox import OfflineForwardSpotOutbox
 from infrastructure.spot_forward_checkpoints import OfflineForwardSessionCheckpoints
 from infrastructure.spot_forward_owner import exclusive_forward_owner
+from infrastructure.spot_forward_failure_diagnostics import (
+    safe_failure_code, failure_queue_peak,
+)
 from infrastructure.spot_forward_verified_research import (
     ForwardSpotResearchStatus, observe_forward_spot_research,
 )
@@ -423,17 +426,21 @@ async def run_forward_research_supervisor(
                 # Preserve explicit durable interrupted state for operators.
                 raise
             except Exception as exc:
-                failure=type(exc).__name__
-                if len(failure)>70 or not failure.isidentifier():
-                    failure="FORWARD_SOURCE_ERROR"
+                failure=safe_failure_code(exc)
+                failed_queue_peak=failure_queue_peak(exc)
+                failure_storage=_storage_bytes(output_dir)
                 finished=_clock()
                 with sqlite3.connect(db_path) as db:
                     db.execute("BEGIN IMMEDIATE")
                     db.execute("""
                         UPDATE forward_watch_attempt
-                        SET status='FAILED', finished_ms=?,failure_code=?
+                        SET status='FAILED', finished_ms=?,failure_code=?,
+                            queue_high_watermark=?,recorded_storage_bytes=?
                         WHERE iteration=? AND status='STARTED'
-                    """,(finished,failure,iteration))
+                    """,(
+                        finished,failure,failed_queue_peak,
+                        failure_storage,iteration,
+                    ))
                     active=db.execute("""
                         SELECT outage_id FROM forward_watch_outage
                         WHERE restored_ms IS NULL
