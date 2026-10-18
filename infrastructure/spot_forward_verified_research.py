@@ -104,6 +104,7 @@ async def observe_forward_spot_research(
     public_ws_idle_timeout_s: float = 30.0,
     public_lease: PinnedPublicSpotLease | None = None,
     spooled_in_session: bool = False,
+    allow_experimental_public_spool: bool = False,
     max_projector_lag_ms: int = 5000,
     max_pending_originals: int = 512,
     max_source_raw_bytes: int = 200_000_000,
@@ -130,6 +131,7 @@ async def observe_forward_spot_research(
         or not 0.1 <= public_ws_idle_timeout_s <= 120
         or (public_lease is not None and type(public_lease) is not PinnedPublicSpotLease)
         or type(spooled_in_session) is not bool
+        or type(allow_experimental_public_spool) is not bool
         or type(max_projector_lag_ms) is not int
         or not 100 <= max_projector_lag_ms <= 30000
         or type(max_pending_originals) is not int
@@ -148,7 +150,17 @@ async def observe_forward_spot_research(
         or (public_lease is not None and (offline or not allow_public_network))
     ):
         raise PermissionError("explicit and exclusive offline/real-public source mode required")
-    if spooled_in_session and not offline:
+    if spooled_in_session and (
+        queue_capacity != 128 or not persistent_receiver
+    ):
+        raise ValueError("live spool requires bounded 128 ingress and signed persistent receiver")
+    if allow_experimental_public_spool and (
+        not spooled_in_session or offline or not allow_public_network
+        or max_frames > 1000 or max_projector_lag_ms > 5000
+        or max_pending_originals > 512
+    ):
+        raise PermissionError("experimental public spool trial requires finite safe profile")
+    if spooled_in_session and not offline and not allow_experimental_public_spool:
         raise PermissionError("unreviewed public continuous spool is disabled")
     root = output_dir.resolve()
     if root != output_dir or root.parent.is_symlink():
