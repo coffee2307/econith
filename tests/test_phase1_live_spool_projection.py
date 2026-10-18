@@ -117,3 +117,41 @@ async def test_spool_rejects_old_projector_lag_without_relabeling(tmp_path,monke
         )
     assert (root/"original.sqlite").is_file()
     assert not (root/"forward_complete.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_crash_after_checkpoint_before_cursor_never_certifies_source(tmp_path,monkeypatch):
+    # Crash at a known cross-database boundary: receiver/derived/checkpoint
+    # have COMMITTED, source cursor has not. Never pretend it was atomic.
+    original=OfflineSpotProjectionCursor.advance
+    advanced=[0]
+    def injected_failure(self,record):
+        advanced[0]+=1
+        if advanced[0]==3:
+            raise RuntimeError("injected post-ACK pre-cursor crash")
+        return original(self,record)
+    monkeypatch.setattr(OfflineSpotProjectionCursor,"advance",injected_failure)
+    root=(tmp_path/"post_checkpoint").resolve()
+    with pytest.raises(Exception):
+        await observe_forward_spot_research(
+            output_dir=root,session_id="rec_post_checkpoint",
+            stream=source(_NOW()),snapshot_fetch=_snapshot,
+            max_frames=20,timeout_s=20,persistent_receiver=True,
+            spooled_in_session=True,
+        )
+    assert (root/"original.sqlite").is_file()
+    assert not (root/"forward_complete.json").exists()
+    with sqlite3.connect(root/"original.sqlite") as con:
+        assert con.execute(
+            "SELECT closed_at_ms FROM offline_spot_capture_sessions"
+        ).fetchone()[0] is not None
+    with sqlite3.connect(root/"projection_cursor.sqlite") as con:
+        cursor=con.execute(
+            "SELECT last_capture_id FROM spot_projection_cursor"
+        ).fetchone()[0]
+    with sqlite3.connect(root/"forward_checkpoints.sqlite") as con:
+        checkpoint_count=con.execute(
+            "SELECT COUNT(*) FROM forward_checkpoint"
+        ).fetchone()[0]
+    assert 0 <= cursor < advanced[0]
+    assert checkpoint_count>=1
