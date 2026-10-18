@@ -16,7 +16,7 @@ case "$MODE" in
   doctor)
     "$PYTHON" -m ci.phase1_operator_lab doctor "$@"
     ;;
-  quick|diagnostic|hour|day)
+  quick|diagnostic|load|hour|day)
     "$PYTHON" -m ci.phase1_operator_lab smoke \
       --allow-public-market-data --profile "$MODE" "$@"
     ;;
@@ -24,7 +24,7 @@ case "$MODE" in
     "$PYTHON" -m ci.phase1_operator_lab report "$@"
     ;;
   *)
-    echo "Usage: bash scripts/phase1-test.sh setup|doctor|quick|diagnostic|hour|day|report [args]" >&2
+    echo "Usage: bash scripts/phase1-test.sh setup|doctor|quick|diagnostic|load|hour|day|report [args]" >&2
     exit 2
     ;;
 esac
