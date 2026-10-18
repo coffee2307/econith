@@ -26,6 +26,7 @@ _TOPICS = ("md.ticker", "indicator.volume_delta", "indicator.obi")
 _ALLOWED_SOURCE = frozenset((
     "verified_closed_session_replay",
     "verified_sealed_public_microbatch",
+    "verified_forward_spot_shadow",
 ))
 _NAME = re.compile(r"^research_[a-z][a-z0-9_]{0,39}$")
 
