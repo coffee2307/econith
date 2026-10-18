@@ -157,7 +157,8 @@ async def start_verified_research_runtime(
 
     bus = EventBus(mode_provider=lambda: QuantMode.SIMULATION)
     publisher = bus.activate_verified_market_only(max_inflight=8)
-    pipeline = MarketDataPipeline(bus)
+    derived_publisher = bus.activate_verified_derived_only()
+    pipeline = MarketDataPipeline(bus, verified_derived_publisher=derived_publisher)
     pipeline.register()
     stats = {"md.ticker":0, "indicator.volume_delta":0,"indicator.obi":0}
     derived_ledger = OfflineDerivedResearchReceiptLedger(
