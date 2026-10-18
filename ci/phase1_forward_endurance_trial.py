@@ -30,6 +30,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--max-book-staleness-ms",type=int,default=2500)
     p.add_argument("--max-clock-offset-ms",type=int,default=3000)
     p.add_argument("--max-clock-rtt-ms",type=int,default=2000)
+    p.add_argument("--persistent-receiver",action="store_true")
     return p
 
 
@@ -69,6 +70,7 @@ async def run(args: argparse.Namespace) -> dict:
         timeout_s=args.timeout_s,pause_s=args.pause_s,
         max_total_storage_bytes=args.max_storage_mb*1_000_000,
         max_book_staleness_ms=args.max_book_staleness_ms,
+        persistent_receiver=args.persistent_receiver,
         clock_check=clock_check,
     )
     return asdict(result)
