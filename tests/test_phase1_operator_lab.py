@@ -155,6 +155,11 @@ def test_extended_operator_profiles_require_new_pinned_wss_per_segment(
     assert argv[argv.index("--output-dir")+1]==str(trial/"evidence")
     assert (argv[argv.index("--watch-hours")+1] if "--watch-hours" in argv
             else None)==watch_hours
+    if profile in ("hour","day"):
+        assert argv.count("--max-consecutive-clock-failures")==1
+        assert argv[argv.index("--max-consecutive-clock-failures")+1]=="3"
+    else:
+        assert "--max-consecutive-clock-failures" not in argv
     assert not any(
         keyword in argv for keyword in
         ("--enable-orders","REALITY","--api-key","--secret")
