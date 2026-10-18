@@ -57,6 +57,10 @@ class ForwardSupervisorStatus:
     peak_recorded_storage_bytes: int
     receiver_process_starts: int = 0
     max_receiver_ack_latency_ms: float = 0.0
+    planned_watch_duration_s: float | None = None
+    observed_watch_duration_s: float = 0.0
+    watch_target_reached: bool = False
+    unobserved_session_boundaries: int = 0
     historical_gaps_recovered: bool = False
     history_continuity_verified: bool = False
     continuous_live_market: bool = False
@@ -176,7 +180,9 @@ def _verify_one(root: Path, result: ForwardSpotResearchStatus) -> None:
         raise ForwardSupervisorError("original/outbox/receiver/derived proof diverged")
 
 
-def _initialize(root: Path) -> Path:
+def _initialize(root: Path, *, watch_duration_s: float | None = None,
+                planned_attempts: int = 3,
+                storage_ceiling_bytes: int = 100_000_000) -> Path:
     path = root / "forward_supervisor.sqlite"
     with sqlite3.connect(path) as db:
         db.execute("PRAGMA journal_mode=WAL")
@@ -206,10 +212,39 @@ def _initialize(root: Path) -> Path:
                 coverage_verified INTEGER NOT NULL DEFAULT 0 CHECK(coverage_verified=0)
             )
         """)
+        db.execute("""
+            CREATE TABLE forward_watch_plan (
+                singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                planned_watch_duration_s REAL,
+                attempts_ceiling INTEGER NOT NULL,
+                storage_ceiling_bytes INTEGER NOT NULL,
+                admitted_at_ms INTEGER NOT NULL,
+                completed_at_ms INTEGER,
+                completion_code TEXT
+            )
+        """)
+        db.execute("""
+            INSERT INTO forward_watch_plan
+            (singleton,planned_watch_duration_s,attempts_ceiling,
+             storage_ceiling_bytes,admitted_at_ms)
+            VALUES (1,?,?,?,?)
+        """,(watch_duration_s,planned_attempts,storage_ceiling_bytes,_clock()))
+        db.execute("""
+            CREATE TABLE forward_watch_unobserved_boundary (
+                boundary_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                previous_iteration INTEGER NOT NULL,
+                next_iteration INTEGER NOT NULL,
+                previous_finished_ms INTEGER NOT NULL,
+                next_started_ms INTEGER NOT NULL,
+                coverage_verified INTEGER NOT NULL DEFAULT 0 CHECK(coverage_verified=0),
+                UNIQUE(previous_iteration,next_iteration)
+            )
+        """)
     return path
 
 
-def _summarize(db_path: Path, root: Path) -> ForwardSupervisorStatus:
+def _summarize(db_path: Path, root: Path,
+               *, observed_watch_s: float = 0) -> ForwardSupervisorStatus:
     with sqlite3.connect(db_path) as db:
         attempts=db.execute("""
             SELECT COUNT(*), SUM(status='PASSED'),SUM(status='FAILED'),
@@ -225,9 +260,21 @@ def _summarize(db_path: Path, root: Path) -> ForwardSupervisorStatus:
             SELECT COUNT(*),COALESCE(SUM(restored_ms IS NULL),0)
             FROM forward_watch_outage
         """).fetchone()
+        boundary_count=db.execute("""
+            SELECT COUNT(*) FROM forward_watch_unobserved_boundary
+            WHERE coverage_verified=0
+        """).fetchone()[0]
+        plan=db.execute("""
+            SELECT planned_watch_duration_s,completion_code
+            FROM forward_watch_plan WHERE singleton=1
+        """).fetchone()
+    status=("INCOMPLETE" if attempts[3] else
+            "WATCH_TARGET_REACHED_WITH_UNKNOWN_GAPS" if
+            plan[1]=="TARGET_REACHED" else
+            "WATCH_ATTEMPT_CEILING_REACHED" if plan[0] is not None else
+            "FINISHED_BOUNDED_RESEARCH")
     return ForwardSupervisorStatus(
-        mode="SIMULATION",
-        state="FINISHED_BOUNDED_RESEARCH" if not attempts[3] else "INCOMPLETE",
+        mode="SIMULATION", state=status,
         attempts=attempts[0],accepted_sessions=attempts[1] or 0,
         failed_sessions=attempts[2] or 0,incomplete_attempts=attempts[3] or 0,
         outage_windows=outage[0],open_outages=outage[1],
@@ -236,6 +283,10 @@ def _summarize(db_path: Path, root: Path) -> ForwardSupervisorStatus:
         peak_recorded_storage_bytes=max(attempts[7],_storage_bytes(root)),
         receiver_process_starts=attempts[8],
         max_receiver_ack_latency_ms=attempts[9],
+        planned_watch_duration_s=plan[0],
+        observed_watch_duration_s=observed_watch_s,
+        watch_target_reached=plan[1]=="TARGET_REACHED",
+        unobserved_session_boundaries=boundary_count,
     )
 
 
@@ -246,6 +297,8 @@ async def run_forward_research_supervisor(
     max_total_storage_bytes: int = 100_000_000,
     max_book_staleness_ms: int = 2500,
     persistent_receiver: bool = False,
+    watch_duration_s: float | None = None,
+    _monotonic_s: Callable[[],float] | None = None,
     clock_check: Callable[[], Awaitable[bool]] | None = None,
     capture_factory: Callable[
         [Path,str,int], Awaitable[ForwardSpotResearchStatus]
@@ -263,9 +316,17 @@ async def run_forward_research_supervisor(
         not isinstance(output_dir,Path) or not output_dir.is_absolute()
         or output_dir.exists() or output_dir != output_dir.resolve()
         or output_dir.parent.is_symlink()
-        or type(attempts) is not int or not 1 <= attempts <= 16
+        or type(attempts) is not int or not 1 <= attempts <= (
+            4096 if watch_duration_s is not None else 16)
         or type(max_frames) is not int or not 10 <= max_frames <= 2000
-        or attempts*max_frames > 32000
+        or attempts*max_frames > (
+            4_096_000 if watch_duration_s is not None else 32000)
+        or (watch_duration_s is not None and (
+            type(watch_duration_s) not in (int,float)
+            or not 5 <= watch_duration_s <= 259200
+            or not persistent_receiver))
+        or (_monotonic_s is not None and (
+            not callable(_monotonic_s) or capture_factory is None))
         or type(timeout_s) not in (int,float) or not 5 <= timeout_s <= 120
         or type(pause_s) not in (int,float) or not 0 <= pause_s <= 30
         or type(max_total_storage_bytes) is not int
@@ -280,8 +341,14 @@ async def run_forward_research_supervisor(
     if capture_factory is not None and not callable(capture_factory):
         raise ValueError("capture factory must be callable")
     output_dir.mkdir(parents=True,exist_ok=False)
+    monotonic_fn=_monotonic_s or time.monotonic
+    start_monotonic=monotonic_fn()
     with exclusive_forward_owner(output_dir,role="CAPTURE"):
-        db_path = _initialize(output_dir)
+        db_path = _initialize(
+            output_dir,watch_duration_s=watch_duration_s,
+            planned_attempts=attempts,
+            storage_ceiling_bytes=max_total_storage_bytes,
+        )
         # Append-only session rows survive a hard process exit. Such an
         # interrupted run cannot be silently resumed over partial evidence.
         for iteration in range(1, attempts+1):
@@ -291,12 +358,29 @@ async def run_forward_research_supervisor(
             directory=output_dir/f"attempt_{iteration:03d}"
             started=_clock()
             with sqlite3.connect(db_path) as db:
+                db.execute("BEGIN IMMEDIATE")
+                previous=db.execute("""
+                    SELECT iteration,finished_ms FROM forward_watch_attempt
+                    WHERE iteration=? AND status IN ('PASSED','FAILED')
+                """,(iteration-1,)).fetchone()
+                if iteration>1 and previous is None:
+                    raise ForwardSupervisorError("previous source not durably closed")
+                if previous is not None:
+                    # Even successful successive source windows have unknowable
+                    # exchange observations between the two receipt clocks.
+                    db.execute("""
+                        INSERT INTO forward_watch_unobserved_boundary
+                        (previous_iteration,next_iteration,
+                         previous_finished_ms,next_started_ms,coverage_verified)
+                        VALUES (?,?,?,?,0)
+                    """,(previous[0],iteration,previous[1],started))
                 db.execute(
                     """INSERT INTO forward_watch_attempt
                     (iteration,session_id,started_ms,status)
                     VALUES (?,?,?,'STARTED')""",
                     (iteration,sid,started),
                 )
+                db.execute("COMMIT")
             try:
                 if clock_check is not None and await clock_check() is not True:
                     raise ForwardSupervisorError("public clock admission refused")
@@ -375,6 +459,27 @@ async def run_forward_research_supervisor(
                         WHERE restored_ms IS NULL
                     """,(finished,))
                     db.execute("COMMIT")
+            if watch_duration_s is not None and (
+                monotonic_fn()-start_monotonic >= watch_duration_s
+            ):
+                with sqlite3.connect(db_path) as db:
+                    db.execute("""
+                        UPDATE forward_watch_plan
+                        SET completion_code='TARGET_REACHED',completed_at_ms=?
+                        WHERE singleton=1
+                    """,(_clock(),))
+                break
             if iteration<attempts and pause_s:
                 await asyncio.sleep(pause_s)
-        return _summarize(db_path,output_dir)
+        if watch_duration_s is not None:
+            with sqlite3.connect(db_path) as db:
+                db.execute("""
+                    UPDATE forward_watch_plan
+                    SET completion_code=COALESCE(completion_code,'ATTEMPT_CEILING'),
+                        completed_at_ms=COALESCE(completed_at_ms,?)
+                    WHERE singleton=1
+                """,(_clock(),))
+        return _summarize(
+            db_path,output_dir,observed_watch_s=max(0.0,
+            monotonic_fn()-start_monotonic),
+        )
