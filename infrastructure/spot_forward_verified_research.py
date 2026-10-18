@@ -168,8 +168,12 @@ async def observe_forward_spot_research(
         (not offline and not allow_experimental_public_spool)
     ):
         raise PermissionError("derived connection reuse requires explicitly bounded research spool")
-    if experiment_reuse_producer_connections and (not offline or not spooled_in_session):
-        raise PermissionError("producer connection reuse requires offline spool benchmark")
+    if experiment_reuse_producer_connections and (
+        not spooled_in_session or
+        (not offline and not allow_experimental_public_spool)
+        or not experiment_reuse_derived_connections
+    ):
+        raise PermissionError("producer connection reuse requires separately opted-in bounded research profile")
     if diagnose_pressure and not spooled_in_session:
         raise PermissionError("pressure diagnostics require opt-in spool research")
     if spooled_in_session and (
