@@ -15,6 +15,7 @@ cross-DB atomicity between source capture, receiver and EventBus.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -80,6 +81,7 @@ async def observe_forward_spot_research(
     allow_public_network: bool = False, source: str = "offline_fixture",
     max_frames: int = 160, timeout_s: float = 45,
     queue_capacity: int = 128,
+    max_book_staleness_ms: int = 2500,
 ) -> ForwardSpotResearchStatus:
     """One real *in-session* research pass (no default startup/auto retry).
 
@@ -96,6 +98,8 @@ async def observe_forward_spot_research(
         or type(max_frames) is not int or not 10 <= max_frames <= 2000
         or type(timeout_s) not in (int, float) or not 5 <= timeout_s <= 120
         or type(queue_capacity) is not int or not 2 <= queue_capacity <= 8192
+        or type(max_book_staleness_ms) is not int
+        or not 100 <= max_book_staleness_ms <= 30000
     ):
         raise ValueError("invalid fresh, bounded forward research configuration")
     offline = stream is not None and snapshot_fetch is not None
@@ -169,6 +173,13 @@ async def observe_forward_spot_research(
             if shadow.book.status != "SYNCED":
                 pre_sync += 1
                 return
+            if (
+                shadow.book.available_at_ms is None
+                or now - shadow.book.available_at_ms > max_book_staleness_ms
+            ):
+                raise ForwardSpotResearchError(
+                    "stale synchronized book: no forward market admission"
+                )
             topic = "md.aggTrade"
             ordinal = forwarded_trades + 1
             view = None
@@ -198,7 +209,7 @@ async def observe_forward_spot_research(
             "source_record_id":source_record,
             "topic":topic,
             "source_available_at_ms":now,
-            "source_raw_sha256":__import__("hashlib").sha256(record.raw).hexdigest(),
+            "source_raw_sha256":hashlib.sha256(record.raw).hexdigest(),
             "verified_asof_book_id":view.last_update_id if view is not None else None,
             "full_verified_frame":raw,
         }
