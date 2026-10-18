@@ -91,7 +91,7 @@ async def test_spool_rejects_public_without_separate_approval(tmp_path):
         await observe_forward_spot_research(
             output_dir=root,session_id="rec_spool_public",
             allow_public_network=True,source="binance_public_simulation",
-            spooled_in_session=True,
+            spooled_in_session=True,persistent_receiver=True,
         )
     assert not root.exists()
 
