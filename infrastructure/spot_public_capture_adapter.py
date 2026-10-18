@@ -8,6 +8,7 @@ fault testing. No frame is published before a durable raw SQLite capture.
 from __future__ import annotations
 
 import asyncio
+from contextlib import nullcontext
 import json
 import secrets
 import time
@@ -66,6 +67,7 @@ class OptInSpotIngressAdapter:
         clock_ms: Callable[[], int] | None = None,
         queue_capacity: int = 128,
         snapshot_limit: int = 1000,
+        stage_profile=None,
     ) -> None:
         if not isinstance(journal, OfflineSpotCaptureJournal):
             raise ValueError("an immutable offline Spot capture journal is required")
@@ -80,6 +82,7 @@ class OptInSpotIngressAdapter:
         self.clock = clock_ms or (lambda: time.time_ns() // 1_000_000)
         self.queue_capacity = queue_capacity
         self.snapshot_limit = snapshot_limit
+        self.stage_profile = stage_profile
 
     def _clock(self) -> int:
         value = self.clock()
@@ -242,18 +245,23 @@ class OptInSpotIngressAdapter:
                         continue
                     if kind == "ws":
                         stream_kind = self._kind(value)
-                        committed_id = self.journal.record_ws(
-                            session_id, value, stream_kind=stream_kind,
-                            received_at_ms=received,
-                        )
+                        with (self.stage_profile.measure("source_sqlite_commit")
+                              if self.stage_profile else nullcontext()):
+                            committed_id = self.journal.record_ws(
+                                session_id, value, stream_kind=stream_kind,
+                                received_at_ms=received,
+                            )
                         # Callback is invoked only AFTER SQLite COMMIT and a
                         # fresh strict row/fingerprint/source verification.
                         # A slow verifier stalls the single writer; the
                         # bounded incoming FIFO aborts rather than dropping.
                         if on_persisted is not None:
-                            await on_persisted(
-                                self.journal.verify_captured_record(session_id, committed_id)
-                            )
+                            with (self.stage_profile.measure("source_verify")
+                                  if self.stage_profile else nullcontext()):
+                                verified = self.journal.verify_captured_record(
+                                    session_id, committed_id,
+                                )
+                            await on_persisted(verified)
                         captured_ws += 1
                         last_ms = received
                         if stream_kind == "depthUpdate" and not snapshot_started:
@@ -263,16 +271,21 @@ class OptInSpotIngressAdapter:
                             )
                     elif kind == "snapshot":
                         raw, requested = value
-                        committed_id = self.journal.record_snapshot(
-                            session_id, raw, rest_endpoint=rest_endpoint,
-                            request_symbol=self.symbol,
-                            request_started_at_ms=requested,
-                            received_at_ms=received,
-                        )
-                        if on_persisted is not None:
-                            await on_persisted(
-                                self.journal.verify_captured_record(session_id, committed_id)
+                        with (self.stage_profile.measure("source_sqlite_commit")
+                              if self.stage_profile else nullcontext()):
+                            committed_id = self.journal.record_snapshot(
+                                session_id, raw, rest_endpoint=rest_endpoint,
+                                request_symbol=self.symbol,
+                                request_started_at_ms=requested,
+                                received_at_ms=received,
                             )
+                        if on_persisted is not None:
+                            with (self.stage_profile.measure("source_verify")
+                                  if self.stage_profile else nullcontext()):
+                                verified = self.journal.verify_captured_record(
+                                    session_id, committed_id,
+                                )
+                            await on_persisted(verified)
                         captured_snapshots += 1
                         last_ms = received
                         snapshot_done = True
