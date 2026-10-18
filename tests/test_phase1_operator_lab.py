@@ -108,10 +108,12 @@ def test_operator_report_refuses_unknown_rewritten_outage_history(tmp_path):
             queue_high_watermark INTEGER,receiver_process_starts INTEGER,
             max_receiver_ack_latency_ms REAL)""")
         db.execute("""CREATE TABLE forward_watch_outage (
+            outage_id INTEGER PRIMARY KEY AUTOINCREMENT,
             opened_ms INTEGER,restored_ms INTEGER,last_failure_code TEXT,
             coverage_verified INTEGER)""")
         db.execute("INSERT INTO forward_watch_outage VALUES(1780000000000,NULL,'FAULT',1)")
         db.execute("""CREATE TABLE forward_watch_unobserved_boundary (
+            boundary_id INTEGER PRIMARY KEY AUTOINCREMENT,
             previous_iteration INTEGER,next_iteration INTEGER,
             coverage_verified INTEGER)""")
     with pytest.raises(ValueError,match="cannot be relabeled"):
