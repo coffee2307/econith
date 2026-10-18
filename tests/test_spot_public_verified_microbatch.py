@@ -115,6 +115,9 @@ async def test_two_verified_public_batches_deliver_only_after_independent_ack(tm
             "md.ticker":2,"indicator.volume_delta":2,"indicator.obi":1,
         }
         assert session["durable_derived_receipts"] == session["derived"]
+        assert session["named_research_subscriber_receipts"] == {
+            "research_audit":5, "research_monitor":5,
+        }
         assert session["research_consumer_receipts_durable"] is True
         assert session["unobserved_between_sessions"] is (i>0)
         assert (root/f"cycle_{i+1:02d}"/"chain_acceptance.json").exists()
@@ -123,6 +126,8 @@ async def test_two_verified_public_batches_deliver_only_after_independent_ack(tm
     assert progress["orders_submitted"] == 0
     assert progress["history_continuity_verified"] is False
     assert result["research_observer_receipts_durable"] is True
+    assert result["named_research_subscriber_receipts_durable"] is True
+    assert result["named_research_subscribers"] == 2
     assert result["other_eventbus_subscribers_durable"] is False
     from infrastructure.market_derived_research_receipts import (
         OfflineDerivedResearchReceiptLedger,
