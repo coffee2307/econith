@@ -301,3 +301,116 @@ async def test_two_forward_sessions_use_exactly_one_persistent_child_each(tmp_pa
     assert [x[0] for x in rows]==[1,1]
     assert all(x[1]>0 and x[2]==4 and x[3]>0 for x in rows)
     assert not (root/".forward_producer.lock").exists()
+
+
+@pytest.mark.asyncio
+async def test_hour_watch_clock_circuit_opens_after_three_consecutive_preflights(tmp_path):
+    from infrastructure.spot_public_capture_adapter import SpotTransportError
+    from ci.phase1_operator_lab import inspect_trial
+    trial=(tmp_path/"clock_circuit").resolve()
+    output=trial/"evidence"
+    clock_attempts=[]
+    opened=[]
+
+    async def denied_public_time():
+        clock_attempts.append(len(clock_attempts)+1)
+        raise SpotTransportError(
+            "public exchange clock TLS connection timeout",
+            reason="CLOCK_PREFLIGHT_CONNECT_TIMEOUT",
+        )
+
+    async def no_socket(directory,sid,iteration):
+        opened.append(iteration)
+        raise AssertionError("connection forbidden on failed clock gate")
+
+    result=await run_forward_research_supervisor(
+        output_dir=output,allow_public_network=True,
+        attempts=2048,max_frames=20,timeout_s=20,
+        watch_duration_s=3600.0,persistent_receiver=True,
+        max_consecutive_clock_failures=3,
+        clock_check=denied_public_time,capture_factory=no_socket,
+    )
+    assert len(clock_attempts)==3
+    assert opened==[]
+    assert result.attempts==3
+    assert result.state=="NETWORK_PREFLIGHT_CIRCUIT_OPEN"
+    assert result.failed_sessions==3
+    assert result.accepted_sessions==0
+    assert result.incomplete_attempts==0
+    assert result.outage_windows==1
+    assert result.open_outages==1
+    assert result.unobserved_session_boundaries==2
+    assert result.orders_submitted==0
+    assert result.watch_target_reached is False
+    assert not (output/".forward_producer.lock").exists()
+    with _db(output) as conn:
+        assert conn.execute("""
+            SELECT completion_code,completed_at_ms FROM forward_watch_plan
+        """).fetchone()[0]=="NETWORK_PREFLIGHT_CIRCUIT_OPEN"
+        rows=conn.execute("""
+            SELECT iteration,status,failure_code
+            FROM forward_watch_attempt ORDER BY iteration
+        """).fetchall()
+    assert rows==[
+        (i,"FAILED","SPOT_TRANSPORT_CLOCK_PREFLIGHT_CONNECT_TIMEOUT")
+        for i in (1,2,3)
+    ]
+    report=inspect_trial(trial)
+    assert report["verdict"]=="FAILED_OR_QUARANTINED_SOURCE"
+    assert report["completion_code"]=="NETWORK_PREFLIGHT_CIRCUIT_OPEN"
+    assert report["failed"]==3 and report["incomplete"]==0
+    assert report["open_outages"]==1
+    assert report["gap_free_history_verified"] is False
+
+
+@pytest.mark.asyncio
+async def test_network_circuit_counts_only_consecutive_preflight_failures(tmp_path):
+    from infrastructure.spot_public_capture_adapter import SpotTransportError
+    root=(tmp_path/"clock_reset").resolve()
+    attempted=0
+    async def preflight():
+        nonlocal attempted
+        attempted+=1
+        if attempted==2:
+            raise SpotTransportError(
+                "other transport error",reason="WS_READ_FAILED",
+            )
+        raise SpotTransportError(
+            "public clock HTTP timeout",
+            reason="CLOCK_PREFLIGHT_CONNECT_TIMEOUT",
+        )
+    async def never_capture(directory,sid,iteration):
+        raise AssertionError("no transport for failed preflight")
+    result=await run_forward_research_supervisor(
+        output_dir=root,allow_public_network=True,
+        attempts=100,max_frames=20,timeout_s=20,
+        watch_duration_s=3600.0,persistent_receiver=True,
+        max_consecutive_clock_failures=3,
+        clock_check=preflight,capture_factory=never_capture,
+    )
+    # 1 clock failure, then unrelated failure resets counter,
+    # then 3 consecutive clock failures -> stop at attempt 5.
+    assert attempted==5
+    assert result.attempts==5
+    assert result.failed_sessions==5
+    assert result.incomplete_attempts==0
+    assert result.state=="NETWORK_PREFLIGHT_CIRCUIT_OPEN"
+
+
+def test_hour_network_circuit_requires_watch_and_bounded_threshold(tmp_path):
+    from ci.phase1_forward_endurance_trial import parser,validate
+    base=["--allow-public-market-data",
+          "--output-dir",str((tmp_path/"trial").resolve()),
+          "--persistent-receiver","--single-socket","--attempts","5",
+          "--max-frames","20"]
+    for extra in (
+        ["--max-consecutive-clock-failures","3"],
+        ["--watch-hours","1.0","--max-consecutive-clock-failures","1"],
+        ["--watch-hours","1.0","--max-consecutive-clock-failures","11"],
+    ):
+        with pytest.raises(ValueError,match="invalid bounded"):
+            validate(parser().parse_args(base+extra))
+    good=parser().parse_args(
+        base+["--watch-hours","1.0","--max-consecutive-clock-failures","3"]
+    )
+    validate(good)
