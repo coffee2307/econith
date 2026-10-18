@@ -28,6 +28,9 @@ from infrastructure.preprocessing.pipeline import MarketDataPipeline
 from infrastructure.market_derived_research_receipts import (
     OfflineDerivedResearchReceiptLedger,
 )
+from infrastructure.market_named_research_subscribers import (
+    OfflineNamedResearchSubscriber,
+)
 from infrastructure.spot_capture_replay import OfflineSpotCaptureReplayer
 from infrastructure.spot_ingress_capture import OfflineSpotCaptureJournal
 from infrastructure.spot_incremental_shadow import (
@@ -97,6 +100,15 @@ async def observe_verified_public_batches(
     derived_ledger = OfflineDerivedResearchReceiptLedger(
         root / "derived_consumer_receipts.sqlite", mode_provider=mode,
     )
+    named_subscribers = [
+        OfflineNamedResearchSubscriber(
+            root / (name + ".sqlite"), name=name,
+            expected_source="verified_sealed_public_microbatch",
+            mode_provider=mode,
+        ) for name in ("research_audit", "research_monitor")
+    ]
+    for subscriber in named_subscribers:
+        subscriber.register(bus)
     pending = asyncio.Event()
 
     async def observe(event: Event) -> None:
@@ -278,6 +290,10 @@ async def observe_verified_public_batches(
                 raise VerifiedPublicResearchError(
                     "durable derived-consumer receipts incomplete or inconsistent"
                 )
+            named_proofs = [
+                subscriber.verify(sid, wanted)
+                for subscriber in named_subscribers
+            ]
             # Also refuse legacy publication even with a forged source label.
             try:
                 await bus.publish(
@@ -298,6 +314,9 @@ async def observe_verified_public_batches(
                 "receiver_receipts": proof["independent_receiver_receipt_count"],
                 "derived": emitted,
                 "durable_derived_receipts": durable_derived,
+                "named_research_subscriber_receipts": {
+                    item.name: item.durable_receipts for item in named_proofs
+                },
                 "research_consumer_receipts_durable": True,
                 "historical_replay_only": True,
                 "history_continuity_verified": False,
@@ -335,6 +354,8 @@ async def observe_verified_public_batches(
             "orders_submitted":0,
             "receiver_scope":"HMAC_AUTHENTICATED_LOCAL_SUBPROCESS_PIPE_ONLY",
             "research_observer_receipts_durable": True,
+            "named_research_subscriber_receipts_durable": True,
+            "named_research_subscribers": len(named_subscribers),
             "other_eventbus_subscribers_durable": False,
             "post_commit_incremental_shadow_passed": (
                 capture_once is None and len(incremental_proofs) >= cycles
