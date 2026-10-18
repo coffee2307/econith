@@ -99,14 +99,20 @@ async def test_supervisor_never_accepts_unbacked_or_forged_session_receipt(tmp_p
             orders_submitted=0,queue_high_watermark=1,
         )
 
-    state=await run_forward_research_supervisor(
-        output_dir=root,allow_public_network=True,attempts=1,
-        max_frames=20,capture_factory=fabricated,
-    )
-    assert state.accepted_sessions==0
-    assert state.failed_sessions==1
-    assert state.open_outages==1
-    assert not state.history_continuity_verified
+    with pytest.raises(ForwardSupervisorError,match="incomplete independent durable evidence"):
+        await run_forward_research_supervisor(
+            output_dir=root,allow_public_network=True,attempts=1,
+            max_frames=20,capture_factory=fabricated,
+        )
+    # Evidence-integrity faults stop the supervisor, while a durable
+    # FAILED/outage row documents the rejected claim for operator review.
+    with _db(root) as db:
+        assert db.execute(
+            "SELECT status FROM forward_watch_attempt"
+        ).fetchone()[0]=="FAILED"
+        assert db.execute(
+            "SELECT COUNT(*) FROM forward_watch_outage WHERE restored_ms IS NULL"
+        ).fetchone()[0]==1
     with _db(root) as db:
         reason=db.execute(
             "SELECT failure_code FROM forward_watch_attempt"
@@ -254,5 +260,9 @@ async def test_receiver_receipt_fingerprint_tamper_rejected_after_success(tmp_pa
                 FROM offline_independent_projection_receipts
             )
         """,("0"*64,))
-    with pytest.raises(ForwardSupervisorError,match="independent receipt"):
+    # Source-owned receiver revalidation rejects altered canonical receipts
+    # even earlier than the supervisor's independent envelope identity gate.
+    from infrastructure.market_cross_process_delivery import CrossProcessDeliveryError
+    with pytest.raises((CrossProcessDeliveryError,ForwardSupervisorError),
+                       match="fingerprint|receipt"):
         _verify_one(root/"attempt_001",captured["status"])
