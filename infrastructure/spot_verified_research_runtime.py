@@ -275,6 +275,20 @@ async def start_verified_research_runtime(
             pass
         else:
             raise VerifiedResearchRuntimeError("legacy publisher could bypass guarded bus")
+        try:
+            await bus.publish(
+                "md.ticker", source="verified_closed_session_replay",
+                verified_session_id=session_id,
+                verified_source_record_id=f"{session_id}:aggTrade:forged",
+                verified_source_ordinal=1,
+                verified_source_available_at_ms=book.available_at_ms,
+            )
+        except RawMarketAdmissionDenied:
+            pass
+        else:
+            raise VerifiedResearchRuntimeError(
+                "untrusted derived topic could bypass guarded research pipeline"
+            )
     except Exception:
         await bus.stop()
         raise
