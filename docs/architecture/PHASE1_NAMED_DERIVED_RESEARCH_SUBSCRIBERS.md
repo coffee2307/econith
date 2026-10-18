@@ -77,9 +77,13 @@ from the prior `durable_derived_research_receipts`.
 
 **Explicitly unverified:** arbitrary EventBus subscribers remain non-durable;
 these two names are only restricted research projections, not side effects.
-A caller can still publish other derived topics in the general-purpose bus,
-so full derived publisher capability isolation needs an independent reviewed
-change. No continuity is inferred between finite Spot capture sessions,
+The **opt-in verified-only research graphs** additionally activate the
+`VerifiedDerivedPublisher` capability fence. Direct `EventBus.publish`
+to the three derived market topics is now rejected there, even with forged
+source labels and IDs. Only `MarketDataPipeline` with its explicit capability
+may publish these derived topics. This is a process-local capability, not
+cryptographic proof against compromised code inside the same process. The
+default/legacy general-purpose EventBus remains unchanged. No continuity is inferred between finite Spot capture sessions,
 and a sealed final depth snapshot is not relabeled historical during the
 preceding trade sequence. Continuous live ingestion, backpressure/soak,
 multi-asset OHLCV/funding/vintage-source expansion, default runtime migration,
