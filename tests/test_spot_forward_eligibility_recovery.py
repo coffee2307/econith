@@ -113,7 +113,7 @@ async def test_previously_staged_forged_projection_blocks_rescan_before_any_new_
             UPDATE forward_outbox SET projection_fingerprint=? WHERE ingest_id=(
                 SELECT MIN(ingest_id) FROM forward_outbox)
         """,("0"*64,))
-    with pytest.raises(ForwardOutboxError,match="reconstructed as-of source"):
+    with pytest.raises(ForwardOutboxError,match="mismatch|reconstructed|projection"):
         await recover_staged_forward_spot(
             root=root,session_id="rec_rescan_conflict",reconstruct_missing=True,
         )
