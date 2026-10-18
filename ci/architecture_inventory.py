@@ -233,6 +233,9 @@ def main(argv: list[str] | None = None) -> int:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(inventory, indent=2), encoding="utf-8")
     print(json.dumps(overview, indent=2))
+    if inventory["errors"]:
+        # CI must name invalid files/lines; a mere count makes failures opaque.
+        print(json.dumps({"parse_errors": inventory["errors"]}, indent=2))
     return 1 if inventory["errors"] else 0
 
 
