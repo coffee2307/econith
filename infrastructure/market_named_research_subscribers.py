@@ -55,6 +55,7 @@ class OfflineNamedResearchSubscriber:
         name: str,
         expected_source: str,
         mode_provider: Callable[[], QuantMode],
+        reuse_connection: bool = False,
     ) -> None:
         if type(name) is not str or not _NAME.fullmatch(name):
             raise NamedResearchSubscriberError("invalid named research consumer identity")
@@ -89,6 +90,7 @@ class OfflineNamedResearchSubscriber:
         self._mode_provider = mode_provider
         self._ledger = OfflineDerivedResearchReceiptLedger(
             self.path, mode_provider=mode_provider,
+            reuse_connection=reuse_connection,
         )
         with self._ledger._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -134,6 +136,9 @@ class OfflineNamedResearchSubscriber:
         )
         if result.replayed:
             self.replayed_receipts += 1
+
+    def close(self) -> None:
+        self._ledger.close()
 
     def register(self, bus: EventBus) -> None:
         if self._registered:
