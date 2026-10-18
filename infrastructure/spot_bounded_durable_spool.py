@@ -121,6 +121,7 @@ async def capture_then_replay_sealed_spool(
         root=root, session_id=session_id,
         max_envelopes=2000, reconstruct_missing=True,
         max_book_staleness_ms=max_book_staleness_ms,
+        persistent_receiver=True,
     )
     if (
         not delivered.source_session_closed
