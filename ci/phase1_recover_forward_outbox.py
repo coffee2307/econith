@@ -22,6 +22,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--output-dir",required=True,type=Path)
     p.add_argument("--session-id",required=True)
     p.add_argument("--max-envelopes",type=int,default=2000)
+    p.add_argument("--reconstruct-missing",action="store_true")
+    p.add_argument("--max-book-staleness-ms",type=int,default=2500)
     return p
 
 
@@ -36,6 +38,8 @@ def validate(args: argparse.Namespace) -> None:
         or len(args.session_id) > 48
         or type(args.max_envelopes) is not int
         or not 1 <= args.max_envelopes <= 2000
+        or type(args.max_book_staleness_ms) is not int
+        or not 100 <= args.max_book_staleness_ms <= 30000
     ):
         raise ValueError("invalid bounded recovery scope")
 
@@ -47,6 +51,8 @@ def main(argv: list[str] | None = None) -> int:
         report=asyncio.run(recover_staged_forward_spot(
             root=args.output_dir,session_id=args.session_id,
             max_envelopes=args.max_envelopes,
+            reconstruct_missing=args.reconstruct_missing,
+            max_book_staleness_ms=args.max_book_staleness_ms,
         ))
     except Exception as exc:
         print("PHASE1_STAGED_RECOVERY_DENIED: "+type(exc).__name__,file=sys.stderr)
