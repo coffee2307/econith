@@ -95,3 +95,47 @@ Explicit follow-up work:
   application paths before verified-only cutover.
 
 **Overall institutional Phase 1 remains OPEN.**
+
+
+## Follow-up correction: atomic capture-source inventory and owner fence (2026-10-18)
+
+At HEAD `05c4dc87a29ae32c1d87091c4bd7203dec38520d`,
+`OfflineSpotCaptureJournal(forward_capture_audit=True)` now inserts an
+`offline_forward_capture_intents` row **inside the SAME SQLite
+transaction as each immutable original record**. Source-write failure,
+intent-write failure or database-full errors roll back both. The
+`verify_forward_capture_inventory` method compares every raw record
+with its source-intent ID, kind, receipt time and SHA-256, and
+independently re-reads the original bytes. The forward runtime requires
+the entire captured source inventory to match its transport/shadow
+record counts before successful certification.
+
+`exclusive_forward_owner` now guards the **entire opt-in forward
+research run** and **manual recovery** in the same evidence root via an
+atomic OS create-exclusive lock; a concurrent recovery cannot attach
+to an active source. A hard process exit leaves an orphan lock that
+requires deliberate operator investigation before another attempt.
+This is a local host ownership fence, not an HA distributed leader lease.
+
+**Important distinction:** the atomic capture-intent record is an
+inventory of *every received raw frame*, not an already-approved,
+book-synchronized derived `ProjectionEnvelope`. A crash can still
+occur between atomic original+inventory COMMIT and the later eligibility
+calculation / producer outbox STAGE. All such raw rows are **discoverable
+and auditable** from the immutable source inventory, but the currently
+approved staged-only recovery DOES NOT automatically reconstruct and
+certify previously unstaged forward effects. It continues to report
+`source_coverage_certified=false`, `session_certified=false`.
+
+New tests assert intent INSERT errors roll back the original source
+record, tampered/missing inventory blocks certification, competing
+producers/recovery fail closed, orphan locks cannot be silently stolen
+and an operator-reviewed recovery remains idempotent.
+
+**Final same-commit CI evidence:** [CI #39099273369](https://github.com/coffee2307/econith/actions/runs/39099273369)
+(699 passed, 1 skipped), [Docker images #39099273358](https://github.com/coffee2307/econith/actions/runs/39099273358)
+and [container smoke #39099273351](https://github.com/coffee2307/econith/actions/runs/39099273351) all succeeded.
+
+This is a meaningful correction to the previous raw→outbox gap,
+**not** certification of 24/7 Binance data availability, lossless
+feed completeness, multi-asset history or the default runtime migration.
