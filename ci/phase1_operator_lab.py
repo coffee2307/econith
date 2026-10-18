@@ -27,6 +27,8 @@ from pathlib import Path
 _PROFILES={
     "quick":{"attempts":3,"max_frames":160,"timeout_s":45,
              "max_storage_mb":100,"watch_hours":None},
+    "diagnostic":{"attempts":3,"max_frames":500,"timeout_s":120,
+             "max_storage_mb":150,"watch_hours":None},
     "hour":{"attempts":2048,"max_frames":1000,"timeout_s":120,
             "max_storage_mb":1800,"watch_hours":1.0},
     "day":{"attempts":2048,"max_frames":2000,"timeout_s":120,
@@ -271,12 +273,12 @@ def run_smoke(*,allow_public:bool,profile:str,
     # reproducible market-data acceptance test. Quick remains opt-in,
     # but Hour/Day require a conservative local RAM headroom preflight.
     if (
-        profile in ("hour","day")
+        profile in ("diagnostic","hour","day")
         and health["ram_available_gib"] is not None
         and health["ram_available_gib"] < 1.5
     ):
         raise RuntimeError(
-            "insufficient free RAM for Hour/Day: at least 1.5 GiB "
+            "insufficient free RAM for Diagnostic/Hour/Day: at least 1.5 GiB "
             "available required; free memory or use a CPU VPS"
         )
     base=(evidence_base or _default_evidence_base()).expanduser().resolve()
