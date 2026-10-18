@@ -242,6 +242,29 @@ class OfflineForwardSpotOutbox:
                     db.execute("ROLLBACK")
                 raise
 
+    def completed_item(self, envelope: ProjectionEnvelope) -> ForwardOutboxItem:
+        """Indexed proof of one exact producer/independent receiver ACK.
+
+        The authorizing receiver ACK and derived subscriber commits happen
+        before this read. Whole-prefix/source/observer proofs are still
+        mandatory at sealed session close; this cannot replace them.
+        """
+        self._validate(envelope)
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT * FROM forward_outbox WHERE ingest_id=?",
+                (envelope.ingest_id,),
+            ).fetchone()
+        if row is None:
+            raise ForwardOutboxError("missing durable acknowledged event")
+        item = self._item(row)
+        expected = OfflineIndependentProjectionReceiver._receipt_id(envelope)
+        if (item.envelope != envelope
+            or item.status != "DERIVED_ACKED"
+            or item.receiver_receipt_id != expected):
+            raise ForwardOutboxError("event has no complete independently bound ACK")
+        return item
+
     def items(self) -> list[ForwardOutboxItem]:
         self._simulation()
         with self._connect() as db:
