@@ -106,6 +106,7 @@ async def observe_forward_spot_research(
     spooled_in_session: bool = False,
     max_projector_lag_ms: int = 5000,
     max_pending_originals: int = 512,
+    max_source_raw_bytes: int = 200_000_000,
 ) -> ForwardSpotResearchStatus:
     """One real *in-session* research pass (no default startup/auto retry).
 
@@ -133,6 +134,8 @@ async def observe_forward_spot_research(
         or not 100 <= max_projector_lag_ms <= 30000
         or type(max_pending_originals) is not int
         or not 1 <= max_pending_originals <= 1000
+        or type(max_source_raw_bytes) is not int
+        or not 1024 <= max_source_raw_bytes <= 200_000_000
     ):
         raise ValueError("invalid fresh, bounded forward research configuration")
     offline = stream is not None and snapshot_fetch is not None
@@ -211,6 +214,8 @@ async def observe_forward_spot_research(
         receiver_ack_max_ms = 0.0
         peak_pending_originals = 0
         highest_lag_ms = 0
+        published_before_source_close = False
+        source_spool_bytes = 0
         receiver_client = (PersistentHmacResearchReceiver(receiver_db)
                            if persistent_receiver else None)
         async def derived_observer(event: Event) -> None:
@@ -230,12 +235,15 @@ async def observe_forward_spot_research(
             bus.subscribe(topic, derived_observer)
 
         async def forward(record: CapturedSpotRecord) -> None:
-            nonlocal forwarded_trades, forwarded_books, pre_sync, last_book_id, admitted, receiver_ack_max_ms, highest_lag_ms
-            if spooled_in_session:
-                lag_ms = (time.time_ns() // 1_000_000) - record.received_at_ms
-                if lag_ms < -1000 or lag_ms > max_projector_lag_ms:
-                    raise ForwardSpotResearchError("projector source delivery lag exceeded")
-                highest_lag_ms = max(highest_lag_ms, lag_ms)
+            nonlocal forwarded_trades, forwarded_books, pre_sync, last_book_id, admitted, receiver_ack_max_ms, highest_lag_ms, published_before_source_close
+            def enforce_live_age() -> None:
+                nonlocal highest_lag_ms
+                if spooled_in_session:
+                    lag_ms = (time.time_ns() // 1_000_000) - record.received_at_ms
+                    if lag_ms < -1000 or lag_ms > max_projector_lag_ms:
+                        raise ForwardSpotResearchError("projector source delivery lag exceeded")
+                    highest_lag_ms = max(highest_lag_ms, lag_ms)
+            enforce_live_age()
             before = shadow.trades
             # Source COMMIT and independent disk re-read BEFORE any receiver IPC
             # or EventBus publish. On any error the capture adapter ends the session.
@@ -326,6 +334,9 @@ async def observe_forward_spot_research(
                 raise ForwardSpotResearchError("independent authenticated receiver ACK missing")
             with trace("outbox_receiver_ack"):
                 outbox.ack_receiver(envelope, confirmations[0])
+            # Signed receiver ACK may take time: recheck freshness just
+            # BEFORE any protected EventBus publication, not only at dequeue.
+            enforce_live_age()
             # ONLY the approved read-only pipeline/observers run on this bus.
             # Subscription completion alone is never a durable external ACK.
             with trace("eventbus_publish"):
@@ -340,6 +351,8 @@ async def observe_forward_spot_research(
                     verified_source_available_at_ms=now,
                     receiver_receipt_id=confirmations[0].receipt_id,
                 )
+            if spooled_in_session and not capture_closed:
+                published_before_source_close = True
             with trace("derived_subscriber_wait"):
                 await bus.wait_verified_idle(timeout_s=15)
             # Handler completion is not itself durable. Advance after BOTH
@@ -368,8 +381,11 @@ async def observe_forward_spot_research(
         projector_task: asyncio.Task | None = None
 
         async def capture_spool_input(record: CapturedSpotRecord) -> None:
-            nonlocal latest_original, peak_pending_originals
+            nonlocal latest_original, peak_pending_originals, source_spool_bytes
             assert ingress_shadow is not None
+            source_spool_bytes += len(record.raw)
+            if source_spool_bytes > max_source_raw_bytes:
+                raise ForwardSpotResearchError("durable original spool byte capacity exceeded")
             await ingress_shadow.observe(record)
             if record.capture_id != latest_original + 1:
                 raise ForwardSpotResearchError("source spool original ordinal gap")
@@ -496,7 +512,9 @@ async def observe_forward_spot_research(
                 named_derived_receipts=sum(x.durable_receipts for x in independent),
                 book_final_update_id=proof.book_last_update_id,
                 all_receipts_independent=True, research_only=True,
-                publication_in_session=True, session_complete=True,
+                publication_in_session=(published_before_source_close
+                                        if spooled_in_session else True),
+                session_complete=True,
                 history_continuity_verified=False, continuous_live_market=False,
                 execution_started=False, orders_submitted=0,
                 queue_high_watermark=result.queue_high_watermark,
