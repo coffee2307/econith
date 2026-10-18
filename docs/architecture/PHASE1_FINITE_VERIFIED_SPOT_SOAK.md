@@ -78,6 +78,11 @@ artifacts. Reopening a checkpoint rechecks every committed round's hashes,
 source IDs and scope, and rejects foreign, partial or uncommitted directories.
 If interruption occurs while writing a `.pending` manifest, recover manually:
 no automated inference of successful producer or subscriber ACK is permitted.
+An exclusive `.verified_soak.lock` prevents concurrent operators or two
+resume processes from writing the same manifest. Normal exits release the lock;
+a hard OS process kill leaves an orphan lock, intentionally requiring manual
+inspection of the prior capture/checkpoint before any new run. Never delete
+an orphan lock while another supervisor is operating on that root.
 
 ## Coverage and open Phase 1 gates
 
