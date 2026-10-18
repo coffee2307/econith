@@ -43,6 +43,12 @@ ModeProvider = Callable[[], QuantMode]
 # Explicitly raw market topics used by today's unverified Spot publisher.
 # Do not include md.ticker: it is a derived event of MarketDataPipeline.
 _VERIFIED_ONLY_RAW_TOPICS = frozenset(("md.aggTrade", "md.depth"))
+_VERIFIED_ONLY_DERIVED_TOPICS = frozenset((
+    "md.ticker", "indicator.volume_delta", "indicator.obi",
+))
+_VERIFIED_DERIVED_SOURCES = frozenset((
+    "verified_closed_session_replay", "verified_sealed_public_microbatch",
+))
 
 
 class RawMarketAdmissionDenied(RuntimeError):
@@ -86,6 +92,22 @@ class VerifiedMarketPublisher:
         await self._bus._publish_verified_market_confirmed(
             topic, self._token, timeout_s=timeout_s, **payload,
         )
+
+class VerifiedDerivedPublisher:
+    """In-process capability for the reviewed verified research pipeline ONLY.
+
+    Identity is enforced inside EventBus, and immutable-original admission
+    still belongs to the upstream source gate. Not a cryptographic permission
+    boundary against arbitrary malicious code running inside this process.
+    """
+
+    def __init__(self, bus: "EventBus", token: object) -> None:
+        self._bus = bus
+        self._token = token
+
+    async def publish(self, topic: str, **payload: Any) -> None:
+        await self._bus._publish_verified_derived(topic, self._token, **payload)
+
 
 # --- governance domains ------------------------------------------------------
 # Handlers with no domain are ungoverned (default). Execution / order-routing
@@ -135,6 +157,7 @@ class EventBus:
         self._mode_provider: ModeProvider = mode_provider or current_mode
         self._gate_log_at: dict[str, float] = {}
         self._verified_market_token: object | None = None
+        self._verified_derived_token: object | None = None
         self._verified_slots: asyncio.Semaphore | None = None
         self._verified_pending: set[asyncio.Future[None]] = set()
         self._verified_dispatch_errors: list[str] = []
@@ -175,6 +198,47 @@ class EventBus:
         # caller's wait has timed out and its outcome is unknown.
         self._verified_slots = asyncio.Semaphore(max_inflight)
         return VerifiedMarketPublisher(self, self._verified_market_token)
+
+    def activate_verified_derived_only(self) -> VerifiedDerivedPublisher:
+        """Before starting, fence the three reviewed research-derived topics.
+
+        Opt-in separately from the raw publisher. Legacy/default EventBus
+        remains unchanged, including non-protected use of these topics.
+        """
+        if (
+            self._mode_provider() is not QuantMode.SIMULATION
+            or self._verified_market_token is None
+            or self._verified_derived_token is not None
+            or self._running or not self._queue.empty()
+        ):
+            raise RawMarketAdmissionDenied(
+                "verified derived fence requires fresh protected SIMULATION bus"
+            )
+        self._verified_derived_token = object()
+        return VerifiedDerivedPublisher(self, self._verified_derived_token)
+
+    async def _publish_verified_derived(
+        self, topic: str, token: object, **payload: Any,
+    ) -> None:
+        # The only caller entrusted with this capability is the actual
+        # MarketDataPipeline subscribed to the guarded raw publisher graph.
+        # A source label without the capability is NEVER an admission proof.
+        fields = (
+            "verified_session_id", "verified_source_record_id",
+            "verified_source_ordinal", "verified_source_available_at_ms",
+        )
+        if (
+            self._mode_provider() is not QuantMode.SIMULATION
+            or self._verified_derived_token is None
+            or token is not self._verified_derived_token
+            or topic not in _VERIFIED_ONLY_DERIVED_TOPICS
+            or payload.get("source") not in _VERIFIED_DERIVED_SOURCES
+            or any(k not in payload for k in fields)
+        ):
+            raise RawMarketAdmissionDenied(
+                "unverified derived research publisher or incomplete source lineage"
+            )
+        await self._queue.put(Event(topic=topic, payload=payload))
 
     async def _publish_verified_market(
         self, topic: str, token: object, **payload: Any,
@@ -272,10 +336,14 @@ class EventBus:
     async def publish(self, topic: str, **payload: Any) -> None:
         if (
             self._verified_market_token is not None
-            and topic in _VERIFIED_ONLY_RAW_TOPICS
+            and (
+                topic in _VERIFIED_ONLY_RAW_TOPICS
+                or (self._verified_derived_token is not None
+                    and topic in _VERIFIED_ONLY_DERIVED_TOPICS)
+            )
         ):
             raise RawMarketAdmissionDenied(
-                "direct raw market EventBus publication blocked: "
+                "direct protected market EventBus publication blocked: "
                 "verified publisher capability required"
             )
         await self._queue.put(Event(topic=topic, payload=payload))
