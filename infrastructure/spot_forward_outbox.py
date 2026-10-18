@@ -46,6 +46,7 @@ class OfflineForwardSpotOutbox:
     def __init__(
         self, path: Path, *, session_id: str,
         mode_provider: Callable[[], QuantMode],
+        reuse_connection: bool = False,
     ) -> None:
         if (
             not isinstance(path, Path)
@@ -56,7 +57,11 @@ class OfflineForwardSpotOutbox:
             or mode_provider() is not QuantMode.SIMULATION
         ):
             raise ForwardOutboxError("invalid SIMULATION forward outbox identity")
+        if type(reuse_connection) is not bool:
+            raise ForwardOutboxError("invalid producer connection reuse flag")
         self.path = path.resolve()
+        self._reuse_connection = reuse_connection
+        self._session_connection: sqlite3.Connection | None = None
         self.session_id = session_id
         self._mode_provider = mode_provider
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -103,11 +108,34 @@ class OfflineForwardSpotOutbox:
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
-        db = sqlite3.connect(self.path, isolation_level=None, timeout=10)
+        if self._reuse_connection:
+            if self._session_connection is None:
+                self._session_connection = sqlite3.connect(
+                    self.path,isolation_level=None,timeout=10,
+                )
+                self._session_connection.row_factory=sqlite3.Row
+                self._session_connection.execute("PRAGMA busy_timeout=10000")
+            if self._session_connection.in_transaction:
+                raise ForwardOutboxError("unfinished producer outbox transaction")
+            yield self._session_connection
+        else:
+            db=sqlite3.connect(self.path,isolation_level=None,timeout=10)
+            try:
+                db.row_factory=sqlite3.Row
+                db.execute("PRAGMA busy_timeout=10000")
+                yield db
+            finally:
+                db.close()
+
+    def close(self) -> None:
+        db=self._session_connection
+        if db is None:
+            return
+        self._session_connection=None
         try:
-            db.row_factory = sqlite3.Row
-            db.execute("PRAGMA busy_timeout=10000")
-            yield db
+            if db.in_transaction:
+                db.rollback()
+                raise ForwardOutboxError("uncommitted producer outbox transaction on close")
         finally:
             db.close()
 
