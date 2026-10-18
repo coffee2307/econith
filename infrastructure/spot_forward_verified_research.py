@@ -44,8 +44,9 @@ from infrastructure.preprocessing.pipeline import MarketDataPipeline
 from infrastructure.spot_incremental_shadow import IncrementalSpotShadowValidator
 from infrastructure.spot_ingress_capture import CapturedSpotRecord, OfflineSpotCaptureJournal
 from infrastructure.spot_public_capture_adapter import (
-    OptInSpotIngressAdapter, SpotTransportResult,
+    OptInSpotIngressAdapter, SpotTransportResult, _PUBLIC_WS, _PUBLIC_REST,
 )
+from infrastructure.spot_public_pinned_lease import PinnedPublicSpotLease
 
 _TOPIC_COUNTS = ("md.ticker", "indicator.volume_delta", "indicator.obi")
 _SOURCE = "verified_forward_spot_shadow"
@@ -94,6 +95,7 @@ async def observe_forward_spot_research(
     max_book_staleness_ms: int = 2500,
     persistent_receiver: bool = False,
     public_ws_idle_timeout_s: float = 30.0,
+    public_lease: PinnedPublicSpotLease | None = None,
 ) -> ForwardSpotResearchStatus:
     """One real *in-session* research pass (no default startup/auto retry).
 
@@ -115,6 +117,7 @@ async def observe_forward_spot_research(
         or type(persistent_receiver) is not bool
         or type(public_ws_idle_timeout_s) not in (int,float)
         or not 0.1 <= public_ws_idle_timeout_s <= 120
+        or (public_lease is not None and type(public_lease) is not PinnedPublicSpotLease)
     ):
         raise ValueError("invalid fresh, bounded forward research configuration")
     offline = stream is not None and snapshot_fetch is not None
@@ -124,6 +127,7 @@ async def observe_forward_spot_research(
         or (not offline and allow_public_network is not True)
         or (offline and source != "offline_fixture")
         or (not offline and source != "binance_public_simulation")
+        or (public_lease is not None and (offline or not allow_public_network))
     ):
         raise PermissionError("explicit and exclusive offline/real-public source mode required")
     root = output_dir.resolve()
@@ -313,6 +317,20 @@ async def observe_forward_spot_research(
                     stream, snapshot_fetch, session_id=session_id, source=source,
                     max_frames=max_frames, timeout_s=timeout_s,
                     on_persisted=forward,
+                )
+            elif public_lease is not None:
+                # A verified-public lease is established only by the pinned
+                # TLS connector, never by an arbitrary injected fixture.
+                public_lease.ensure_open()
+                public_lease.segments_started += 1
+                result = await adapter.capture_open_stream(
+                    public_lease.stream, public_lease.snapshot,
+                    session_id=session_id, source="binance_public_simulation",
+                    ws_endpoint=_PUBLIC_WS, rest_endpoint=_PUBLIC_REST,
+                    max_frames=max_frames, timeout_s=timeout_s,
+                    on_persisted=forward,
+                    idle_timeout_s=public_ws_idle_timeout_s,
+                    require_frame_limit=True,
                 )
             else:
                 result = await adapter.capture_public_once(
