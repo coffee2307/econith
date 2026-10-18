@@ -31,12 +31,12 @@ document, not an altered percentage.
 | P1-02 | Source availability, lineage, authenticated independently owned source/receiver ACK | 15 | 15 | PASS in bounded research trials |
 | P1-03 | Raw+derived publisher fences, primary/audit/monitor separately durable read-only projections | 15 | 15 | PASS in opt-in SIMULATION graph |
 | P1-04 | Atomic source intent, original-as-of eligible event rescan, outbox ACKs, crash recovery and process fencing | 15 | 14 | PARTIAL: external host crash acceptance outstanding |
-| P1-05 | Sustained continuous protected ingress, reconnect/catch-up, bounded backlog, long-duration host soak | 15 | 5 | PARTIAL: finite forward trials with durable outage accounting; continuous/long-duration unproven |
+| P1-05 | Sustained continuous protected ingress, reconnect/catch-up, bounded backlog, long-duration host soak | 15 | 7 | PARTIAL: persistent local authenticated receiver, finite trials and outage ledger; continuous/long-duration unproven |
 | P1-06 | Reviewed default-app source cutover, no legacy data bypass and fully isolated execution | 10 | 3 | PARTIAL: isolated opt-in forward ASGI preview only; default still legacy |
 | P1-07 | Original dataset coverage beyond BTCUSDT and real operator-certified 24–72h continuity/quality evidence | 10 | 0 | BLOCKED: no current-HEAD external soak or full dataset matrix |
-| **TOTAL** | | **100** | **72** | **Phase 1 remains OPEN** |
+| **TOTAL** | | **100** | **74** | **Phase 1 remains OPEN** |
 
-**72% is a conservative, explicitly subjective weighted engineering
+**74% is a conservative, explicitly subjective weighted engineering
 estimate.** The *certified institutional Phase 1 exit score is not this percentage*:
 all mandatory gate rows must be PASS before 100% can be stated. Neither
 a source label nor simulated forward data authorizes orders. Existing
@@ -163,3 +163,29 @@ The original institutional Phase 1 exit decision is still **OPEN**;
 no new denominator or 100%-completion claim is introduced. See
 `PHASE1_FORWARD_OUTAGE_ENDURANCE_TRIAL_20261018.md` for
 operator instructions and explicit risks.
+
+## Bounded persistent authenticated receiver — incremental evidence
+
+`infrastructure/market_persistent_hmac_receiver.py` and the private
+`ci/phase1_persistent_receiver_worker.py` replace one-shot
+**per-event subprocess startup** with ONE HMAC-authenticated independent
+local SQLite receiver process per *finite opt-in research session*.
+Signed ordered requests/ACKs carry strict monotonic sequence IDs, per
+process ephemeral 256-bit keys, original immutable source fingerprints
+and independently COMMITted receipt IDs. A process crash never becomes
+a success ACK; outbox/source-bound replay remains mandatory.
+
+The opt-in `--persistent-receiver` flag is available for the bounded
+manual `ci.phase1_forward_endurance_trial` command. The frozen default
+`main.py` source and existing one-shot mode are unchanged. Tests
+exercise real multi-message receiver PID reuse, replay/MAC denial,
+process kill, uncertain ACK recovery and forward subscriber accounting.
+Supervisor evidence stores number of worker process starts and measured
+max per-request ACK latency, not invented production throughput.
+
+Provisional P1-05 credit rises from 5 to **7/15**, for
+**74/100 total engineering evidence**. Continuous 24/7 validated source,
+real-network soak, load/RAM/disk/tail-latency acceptance, legacy default
+cutover and broad market-data coverage are still unaccepted. Full Phase 1
+stays OPEN and Draft PR #28 stays unmerged. See
+`PHASE1_PERSISTENT_HMAC_RECEIVER_20261018.md`.
