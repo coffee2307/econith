@@ -165,3 +165,61 @@ async def test_checkpoint_source_identity_must_not_be_rebound(tmp_path):
             root/"forward_checkpoints.sqlite",
             session_id=sid,mode_provider=lambda:QuantMode.REALITY,
         )
+
+
+@pytest.mark.asyncio
+async def test_live_checkpoint_does_not_rescan_entire_outbox_per_event(
+    tmp_path,monkeypatch,
+):
+    from infrastructure.spot_forward_outbox import OfflineForwardSpotOutbox
+    from tests.test_spot_forward_verified_research import (
+        frame,trade,depth,
+    )
+    n={"outbox_scans":0,"chain_scans":0,"single_checks":0}
+    old_items=OfflineForwardSpotOutbox.items
+    old_prefix=OfflineForwardSessionCheckpoints.verified_prefix
+    old_single=OfflineForwardSpotOutbox.completed_item
+
+    def full_items(self):
+        n["outbox_scans"]+=1
+        return old_items(self)
+
+    def full_prefix(self,items):
+        n["chain_scans"]+=1
+        return old_prefix(self,items)
+
+    def indexed_item(self,envelope):
+        n["single_checks"]+=1
+        return old_single(self,envelope)
+
+    monkeypatch.setattr(OfflineForwardSpotOutbox,"items",full_items)
+    monkeypatch.setattr(OfflineForwardSessionCheckpoints,"verified_prefix",full_prefix)
+    monkeypatch.setattr(OfflineForwardSpotOutbox,"completed_item",indexed_item)
+    now=_NOW()
+
+    async def many_frames():
+        yield frame(trade(499,now))
+        yield frame(depth(100,102,now))
+        await asyncio.sleep(0.15)
+        yield frame(trade(500,now))
+        yield frame(depth(103,103,now))
+        for tid in range(501,536):
+            yield frame(trade(tid,now))
+
+    result=await observe_forward_spot_research(
+        output_dir=(tmp_path/"linear_live").resolve(),
+        session_id="rec_linear_live",stream=many_frames(),
+        snapshot_fetch=snapshot,max_frames=60,timeout_s=40,
+        persistent_receiver=True,
+    )
+    assert result.forward_checkpoints==result.receiver_receipts>=35
+    assert n["single_checks"]==result.forward_checkpoints
+    # Former hot path called outbox.items() + verified_prefix() several
+    # times PER ACK, producing O(N^2) historical rechecks during WSS.
+    # New path checks one indexed ACK per event, then seals all history.
+    assert n["outbox_scans"]<=2
+    assert n["chain_scans"]<=2
+    assert check((tmp_path/"linear_live").resolve(),"rec_linear_live"
+                 ).verified_prefix(durable(
+                     (tmp_path/"linear_live").resolve(),"rec_linear_live"
+                 )).checkpointed_events==result.forward_checkpoints
