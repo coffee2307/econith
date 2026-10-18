@@ -49,6 +49,7 @@ class ResearchReplayStatus:
     observed_volume_deltas: int
     observed_orderbook_imbalance: int
     durable_derived_research_receipts: int
+    replayed_derived_research_receipts: int
     original_bytes_read_only: bool
     local_receiver_authenticated: bool
     historical_replay_only: bool
@@ -70,12 +71,27 @@ class VerifiedSpotResearchRuntime:
 
 async def start_verified_research_runtime(
     *, original_db: Path, session_id: str, output_dir: Path,
+    derived_receipt_db: Path | None = None,
 ) -> VerifiedSpotResearchRuntime:
     """Start a read-only subscriber graph only after durable source/ACK proof.
 
     A fresh output dir and closed real/fixture capture are required.
-    No callbacks/routes with execution permissions are installed.
+    When derived_receipt_db is supplied it MUST be an existing observer
+    ledger from an earlier aborted/completed run, independent of fresh
+    scratch proof DBs. This is an explicit research recovery option; it
+    does NOT enable any external EventBus callback or live trade.
     """
+    if derived_receipt_db is not None:
+        if (
+            not isinstance(derived_receipt_db, Path)
+            or not derived_receipt_db.is_absolute()
+            or not derived_receipt_db.is_file()
+            or derived_receipt_db.resolve() == original_db.resolve()
+            or derived_receipt_db.resolve().is_relative_to(output_dir.resolve())
+        ):
+            raise VerifiedResearchRuntimeError(
+                "recovery requires an existing independent derived observer ledger"
+            )
     args = Namespace(
         source_db=original_db,
         output_dir=output_dir,
@@ -128,15 +144,16 @@ async def start_verified_research_runtime(
     pipeline.register()
     stats = {"md.ticker":0, "indicator.volume_delta":0,"indicator.obi":0}
     derived_ledger = OfflineDerivedResearchReceiptLedger(
-        output_dir / "derived_consumer_receipts.sqlite",
+        derived_receipt_db or output_dir / "derived_consumer_receipts.sqlite",
         mode_provider=lambda: QuantMode.SIMULATION,
     )
+    replayed_receipts = {"count": 0}
     all_observed = asyncio.Event()
 
     async def observed(event: Event) -> None:
         if event.payload.get("source") != "verified_closed_session_replay":
             raise VerifiedResearchRuntimeError("derived signal lacks approved replay provenance")
-        derived_ledger.accept(
+        acknowledgement = derived_ledger.accept(
             topic=event.topic,
             session_id=event.payload["verified_session_id"],
             ordinal=event.payload["verified_source_ordinal"],
@@ -144,6 +161,8 @@ async def start_verified_research_runtime(
             source_available_at_ms=event.payload["verified_source_available_at_ms"],
             projection=event.payload,
         )
+        if acknowledgement.replayed:
+            replayed_receipts["count"] += 1
         stats[event.topic] += 1
         if (
             stats["md.ticker"] == len(replay.trades)
@@ -245,6 +264,7 @@ async def start_verified_research_runtime(
             observed_volume_deltas=stats["indicator.volume_delta"],
             observed_orderbook_imbalance=stats["indicator.obi"],
             durable_derived_research_receipts=sum(durable_receipts.values()),
+            replayed_derived_research_receipts=replayed_receipts["count"],
             original_bytes_read_only=True,
             local_receiver_authenticated=True,
             historical_replay_only=True,
