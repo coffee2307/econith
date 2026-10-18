@@ -25,6 +25,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--max-frames", type=int, default=160)
     p.add_argument("--timeout-s", type=float, default=45)
     p.add_argument("--queue-capacity", type=int, default=128)
+    p.add_argument("--max-book-staleness-ms", type=int, default=2500)
     p.add_argument("--max-clock-offset-ms", type=int, default=3000)
     p.add_argument("--max-clock-rtt-ms", type=int, default=2000)
     return p
@@ -42,6 +43,8 @@ def validate(args: argparse.Namespace) -> None:
         or not 5 <= args.timeout_s <= 120
         or type(args.queue_capacity) is not int
         or not 2 <= args.queue_capacity <= 8192
+        or type(args.max_book_staleness_ms) is not int
+        or not 100 <= args.max_book_staleness_ms <= 30000
         or type(args.max_clock_offset_ms) is not int
         or not 100 <= args.max_clock_offset_ms <= 10000
         or type(args.max_clock_rtt_ms) is not int
@@ -64,6 +67,7 @@ async def run(args: argparse.Namespace) -> dict:
         max_frames=args.max_frames,
         timeout_s=args.timeout_s,
         queue_capacity=args.queue_capacity,
+        max_book_staleness_ms=args.max_book_staleness_ms,
     )
     return {
         "acceptance":"RESEARCH_FORWARD_SINGLE_SESSION_ONLY",
