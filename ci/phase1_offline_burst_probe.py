@@ -115,6 +115,13 @@ async def probe(root: Path, *, frames: int, spacing_ms: float,
                                   if sealed_spool else status.queue_high_watermark),
                     "sealed_only_not_live":sealed_spool,
                     "synthetic_only":True,"orders_submitted":0}
+            if sealed_spool:
+                result.update({
+                    "capture_elapsed_s":status.capture_elapsed_s,
+                    "sealed_replay_elapsed_s":status.replay_elapsed_s,
+                    "original_raw_bytes":status.raw_source_bytes,
+                    "checkpoint_count":status.checkpoints,
+                })
             code=0
     finally:
         if old is None:
