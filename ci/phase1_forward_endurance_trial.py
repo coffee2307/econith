@@ -23,6 +23,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--allow-public-market-data",action="store_true")
     p.add_argument("--output-dir",type=Path,required=True)
     p.add_argument("--attempts",type=int,default=3)
+    p.add_argument("--watch-hours",type=float,default=None,
+                   help="Operator-duration trial (max 72h); use with --persistent-receiver")
     p.add_argument("--max-frames",type=int,default=160)
     p.add_argument("--timeout-s",type=float,default=45)
     p.add_argument("--pause-s",type=float,default=1)
@@ -40,9 +42,15 @@ def validate(args: argparse.Namespace) -> None:
     if (
         not isinstance(args.output_dir,Path)
         or not args.output_dir.is_absolute() or args.output_dir.exists()
-        or type(args.attempts) is not int or not 1 <= args.attempts <= 16
+        or type(args.attempts) is not int
+        or not 1 <= args.attempts <= (4096 if args.watch_hours is not None else 16)
         or type(args.max_frames) is not int or not 10 <= args.max_frames <= 2000
-        or args.attempts*args.max_frames>32000
+        or args.attempts*args.max_frames>(
+            4_096_000 if args.watch_hours is not None else 32000)
+        or (args.watch_hours is not None and (
+            type(args.watch_hours) is not float
+            or not (5/3600) <= args.watch_hours <= 72
+            or not args.persistent_receiver))
         or type(args.timeout_s) not in (int,float) or not 5 <= args.timeout_s <= 120
         or type(args.pause_s) not in (int,float) or not 0 <= args.pause_s <= 30
         or type(args.max_storage_mb) is not int or not 2 <= args.max_storage_mb <= 2000
@@ -71,6 +79,7 @@ async def run(args: argparse.Namespace) -> dict:
         max_total_storage_bytes=args.max_storage_mb*1_000_000,
         max_book_staleness_ms=args.max_book_staleness_ms,
         persistent_receiver=args.persistent_receiver,
+        watch_duration_s=(args.watch_hours*3600 if args.watch_hours is not None else None),
         clock_check=clock_check,
     )
     return asdict(result)
@@ -87,7 +96,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     print(json.dumps(status,sort_keys=True,allow_nan=False))
     if (
-        status["incomplete_attempts"] or status["failed_sessions"]
+        (args.watch_hours is not None and not status["watch_target_reached"])
+        or status["incomplete_attempts"] or status["failed_sessions"]
         or not status["accepted_sessions"] or status["open_outages"]
     ):
         return 2
