@@ -28,7 +28,8 @@ def _safe_store(path:Path,report:dict)->None:
     )
 
 
-async def matrix(root:Path,*,frames:int,max_lag_ms:int)->dict:
+async def matrix(root:Path,*,frames:int,max_lag_ms:int,
+                 reuse_derived_connections:bool=False)->dict:
     started=time.monotonic()
     results=[]
     for i in range(1,4):
@@ -38,8 +39,11 @@ async def matrix(root:Path,*,frames:int,max_lag_ms:int)->dict:
             # Check disk remaining before every fresh session, fail closed.
             if shutil.disk_usage(root).free < 2_000_000_000:
                 raise RuntimeError("public spool disk budget insufficient")
-            passed=await run(path,frames=frames,timeout_s=120.0,
-                             max_lag_ms=max_lag_ms)
+            public_run_args = dict(frames=frames,timeout_s=120.0,
+                                   max_lag_ms=max_lag_ms)
+            if reuse_derived_connections:
+                public_run_args["reuse_derived_connections"]=True
+            passed=await run(path,**public_run_args)
             item={
                 "iteration":i,"status":"PASSED",
                 "originals":passed["original_records"],
@@ -65,6 +69,7 @@ async def matrix(root:Path,*,frames:int,max_lag_ms:int)->dict:
         "failed":3-passed_count,
         "frames_per_attempt":frames,
         "lag_budget_ms":max_lag_ms,
+        "derived_connection_reuse_experimental":reuse_derived_connections,
         "duration_s":round(time.monotonic()-started,3),
         "verdict":("PASSED_FINITE_PUBLIC_SPOOL_3X1000_RESEARCH_ONLY"
                    if passed_count==3 and frames==1000
@@ -84,6 +89,8 @@ def main(argv:list[str]|None=None)->int:
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--allow-public-market-data",action="store_true")
     p.add_argument("--accept-experimental-spool",action="store_true")
+    p.add_argument("--reuse-derived-connections",action="store_true",
+                   help="optional reviewed A/B mode; does not alter production runtime")
     p.add_argument("--output-dir",type=Path,required=True)
     p.add_argument("--frames",type=int,default=1000)
     p.add_argument("--max-lag-ms",type=int,default=5000)
@@ -97,6 +104,7 @@ def main(argv:list[str]|None=None)->int:
     a.output_dir.mkdir(parents=True,exist_ok=False)
     report=asyncio.run(matrix(
         a.output_dir,frames=a.frames,max_lag_ms=a.max_lag_ms,
+        reuse_derived_connections=a.reuse_derived_connections,
     ))
     print(json.dumps({
         "verdict":report["verdict"],"passed":report["passed"],
