@@ -31,12 +31,12 @@ document, not an altered percentage.
 | P1-02 | Source availability, lineage, authenticated independently owned source/receiver ACK | 15 | 15 | PASS in bounded research trials |
 | P1-03 | Raw+derived publisher fences, primary/audit/monitor separately durable read-only projections | 15 | 15 | PASS in opt-in SIMULATION graph |
 | P1-04 | Atomic source intent, original-as-of eligible event rescan, outbox ACKs, crash recovery and process fencing | 15 | 14 | PARTIAL: external host crash acceptance outstanding |
-| P1-05 | Sustained continuous protected ingress, reconnect/catch-up, bounded backlog, long-duration host soak | 15 | 9 | PARTIAL: strict real-public socket EOF/idle fault admission, persistent HMAC receiver and gap ledger; true continuous source and 24h host evidence absent |
+| P1-05 | Sustained continuous protected ingress, reconnect/catch-up, bounded backlog, long-duration host soak | 15 | 10 | PARTIAL: in-session original/HMAC/derived chained checkpoints and liveness guards; true continuous source and 24h host evidence absent |
 | P1-06 | Reviewed default-app source cutover, no legacy data bypass and fully isolated execution | 10 | 3 | PARTIAL: isolated opt-in forward ASGI preview only; default still legacy |
 | P1-07 | Original dataset coverage beyond BTCUSDT and real operator-certified 24–72h continuity/quality evidence | 10 | 0 | BLOCKED: no current-HEAD external soak or full dataset matrix |
-| **TOTAL** | | **100** | **76** | **Phase 1 remains OPEN** |
+| **TOTAL** | | **100** | **77** | **Phase 1 remains OPEN** |
 
-**76% is a conservative, explicitly subjective weighted engineering
+**77% is a conservative, explicitly subjective weighted engineering
 estimate.** The *certified institutional Phase 1 exit score is not this percentage*:
 all mandatory gate rows must be PASS before 100% can be stated. Neither
 a source label nor simulated forward data authorizes orders. Existing
@@ -231,3 +231,23 @@ turn repeated bounded captures into uninterrupted 24/7 verified
 market data and does not substitute for the operator-authorized
 24–72h real-network acceptance. See
 `PHASE1_PUBLIC_SOCKET_LIVENESS_GATES_20261018.md`.
+
+## Durable live forward event checkpoints — 2026-10-18
+
+`infrastructure/spot_forward_checkpoints.py` establishes an immutable
+SHA-256 chain in a distinct WAL/FULL ledger at each eligible forward
+event, *during the OPEN source session*, but only after original
+COMMIT, producer outbox HMAC receiver ACK and all three durable
+research observers have passed. After bounded source completion, a
+supervisor independently reopens and compares the checkpoint's
+source-bound prefix and digest against final source/outbox evidence.
+The existing manually fenced recovery validates all old checkpoints
+and reconciles only a missing crash suffix; modified hashes, missing
+interior entries and source identity substitutions fail closed.
+
+This earns a **provisional** P1-05 evidence-credit point from 9 to
+10/15, total **77/100 engineering completeness**, only if final HEAD
+CI succeeds. No counter here or in the runtime certifies missing
+public exchange history, an uninterrupted source, 24–72h network soak
+or reviewed default `main.py` cutover. See
+`PHASE1_DURABLE_LIVE_FORWARD_CHECKPOINTS_20261018.md`.
