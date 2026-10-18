@@ -9,7 +9,6 @@ EventBus handlers durable or turn EventBus into a transaction coordinator.
 """
 from __future__ import annotations
 
-import asyncio
 import re
 import sqlite3
 from dataclasses import dataclass
@@ -56,7 +55,6 @@ class OfflineNamedResearchSubscriber:
         name: str,
         expected_source: str,
         mode_provider: Callable[[], QuantMode],
-        parallel_delivery: bool = False,
     ) -> None:
         if type(name) is not str or not _NAME.fullmatch(name):
             raise NamedResearchSubscriberError("invalid named research consumer identity")
@@ -86,9 +84,6 @@ class OfflineNamedResearchSubscriber:
                 raise NamedResearchSubscriberError(
                     "named research identity/source policy mismatch"
                 )
-        if type(parallel_delivery) is not bool:
-            raise NamedResearchSubscriberError("invalid observer scheduling mode")
-        self.parallel_delivery = parallel_delivery
         self.name = name
         self.expected_source = expected_source
         self._mode_provider = mode_provider
@@ -129,7 +124,7 @@ class OfflineNamedResearchSubscriber:
             raise RuntimeError("named research consumer changed out of SIMULATION")
         if event.topic not in _TOPICS or event.payload.get("source") != self.expected_source:
             raise NamedResearchSubscriberError("unverified source in named research subscriber")
-        arguments = dict(
+        result = self._ledger.accept(
             topic=event.topic,
             session_id=event.payload["verified_session_id"],
             ordinal=event.payload["verified_source_ordinal"],
@@ -137,12 +132,6 @@ class OfflineNamedResearchSubscriber:
             source_available_at_ms=event.payload["verified_source_available_at_ms"],
             projection=event.payload,
         )
-        # Experimental research-only scheduling: await the full durable
-        # SQLite COMMIT before EventBus confirmation; never fire-and-forget.
-        if self.parallel_delivery:
-            result = await asyncio.to_thread(self._ledger.accept, **arguments)
-        else:
-            result = self._ledger.accept(**arguments)
         if result.replayed:
             self.replayed_receipts += 1
 
