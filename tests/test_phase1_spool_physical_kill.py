@@ -11,6 +11,7 @@ import subprocess
 import sys
 
 from core.mode import QuantMode
+from ci.phase1_spool_forensic_inspect import inspect
 from infrastructure.spot_ingress_capture import OfflineSpotCaptureJournal
 from infrastructure.spot_projection_durable_cursor import OfflineSpotProjectionCursor
 from infrastructure.spot_forward_owner import (
@@ -87,4 +88,11 @@ asyncio.run(observe_forward_spot_research(
         session_id="rec_real_hard_exit",
     )
     assert reopened.read_verified().last_capture_id==cursor
+    audit=inspect(root)
+    assert audit["inspection_status"]=="ORPHAN_FENCE_REQUIRES_OPERATOR_REVIEW"
+    assert audit["originals_not_projected"]==src-cursor
+    assert audit["orphan_owner_fence_present"]
+    assert audit["source_continuity_certified"] is False
+    assert audit["receiver_hmac_cryptography_certified_by_this_inspector"] is False
+    assert audit["mutations_performed"] is False
     # Evidence and orphan marker are intentionally NOT cleaned in this test.
