@@ -157,11 +157,14 @@ class OptInSpotIngressAdapter:
         snapshot_task: asyncio.Task[None] | None = None
 
         async def _queue(kind: str, data: Any, ts: int) -> None:
-            # No await between receipt stamping and enqueue. Under overload,
-            # abort; never silently remove/replace an earlier original frame.
+            nonlocal high_watermark
+            # Observe depth on enqueue, not just dequeue; a fully saturated
+            # reader could fail before the writer ever sees its true peak.
             try:
                 fifo.put_nowait((kind, data, ts))
+                high_watermark = max(high_watermark, fifo.qsize())
             except asyncio.QueueFull as exc:
+                high_watermark = max(high_watermark, self.queue_capacity)
                 raise SpotTransportError(
                     "ingress backpressure overflow: abort session",
                     reason="QUEUE_BACKPRESSURE",
@@ -298,10 +301,15 @@ class OptInSpotIngressAdapter:
                 state.depth_status, state.book.last_update_id,
             )
         except TimeoutError as exc:
-            raise SpotTransportError(
+            timeout_error = SpotTransportError(
                 "capture timed out, session invalid",
                 reason="CAPTURE_TIMEOUT",
-            ) from exc
+            )
+            timeout_error.ingress_queue_high_watermark = high_watermark
+            raise timeout_error from exc
+        except SpotCaptureError as exc:
+            exc.ingress_queue_high_watermark = high_watermark
+            raise
         finally:
             for task in (reader, snapshot_task):
                 if task is not None and not task.done():
