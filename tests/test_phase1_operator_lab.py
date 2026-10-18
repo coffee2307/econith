@@ -136,6 +136,7 @@ def test_operator_lab_script_explicitly_never_enables_order_routes():
 
 @pytest.mark.parametrize("profile,frames,watch_hours",[
     ("diagnostic","500",None),
+    ("load","1000",None),
     ("hour","1000","1.0"),
     ("day","2000","24.0"),
 ])
@@ -184,3 +185,28 @@ def test_quick_stays_bounded_and_does_not_claim_fresh_long_watch(tmp_path):
             profile="hour",trial=__import__("pathlib").Path("relative"),
             python_executable="python-3.12",
         )
+
+
+def test_load_operator_profile_is_bounded_and_no_duration_certificate(tmp_path):
+    config=lab._PROFILES["load"]
+    assert config=={
+        "attempts":3,"max_frames":1000,"timeout_s":120,
+        "max_storage_mb":200,"watch_hours":None,
+    }
+    trial=(tmp_path/"load_trial").resolve()
+    argv=lab._profile_launch_argv(
+        profile="load",trial=trial,python_executable="python-3.12",
+    )
+    assert "--watch-hours" not in argv
+    assert "--max-consecutive-clock-failures" not in argv
+    assert "--fresh-socket-per-segment" in argv
+    assert argv[argv.index("--attempts")+1]=="3"
+    assert argv[argv.index("--max-frames")+1]=="1000"
+    assert argv[argv.index("--max-storage-mb")+1]=="200"
+    windows=(__import__("pathlib").Path(__file__).resolve().parents[1]/
+             "scripts/phase1-test.ps1").read_text(encoding="utf-8")
+    linux=(__import__("pathlib").Path(__file__).resolve().parents[1]/
+           "scripts/phase1-test.sh").read_text(encoding="utf-8")
+    assert '"Load"' in windows and "--profile load" in windows
+    assert "diagnostic|load|hour" in linux
+    assert "setup|doctor|quick|diagnostic|load|hour" in linux
