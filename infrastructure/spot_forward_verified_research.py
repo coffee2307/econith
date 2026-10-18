@@ -36,6 +36,7 @@ from infrastructure.spot_forward_outbox import OfflineForwardSpotOutbox
 from infrastructure.spot_forward_checkpoints import OfflineForwardSessionCheckpoints
 from infrastructure.spot_forward_owner import exclusive_forward_owner
 from infrastructure.spot_forward_stage_profile import BoundedStageProfiler
+from infrastructure.spot_projection_durable_cursor import OfflineSpotProjectionCursor
 from infrastructure.market_persistent_hmac_receiver import PersistentHmacResearchReceiver
 from infrastructure.market_derived_research_receipts import (
     OfflineDerivedResearchReceiptLedger,
@@ -86,6 +87,9 @@ class ForwardSpotResearchStatus:
     max_receiver_ack_latency_ms: float = 0.0
     forward_checkpoints: int = 0
     forward_checkpoint_sha256: str | None = None
+    spool_original_cursor: int = 0
+    max_projector_lag_ms: int = 0
+    max_spool_pending_originals: int = 0
 
 
 async def observe_forward_spot_research(
@@ -99,6 +103,9 @@ async def observe_forward_spot_research(
     persistent_receiver: bool = False,
     public_ws_idle_timeout_s: float = 30.0,
     public_lease: PinnedPublicSpotLease | None = None,
+    spooled_in_session: bool = False,
+    max_projector_lag_ms: int = 5000,
+    max_pending_originals: int = 512,
 ) -> ForwardSpotResearchStatus:
     """One real *in-session* research pass (no default startup/auto retry).
 
@@ -121,6 +128,11 @@ async def observe_forward_spot_research(
         or type(public_ws_idle_timeout_s) not in (int,float)
         or not 0.1 <= public_ws_idle_timeout_s <= 120
         or (public_lease is not None and type(public_lease) is not PinnedPublicSpotLease)
+        or type(spooled_in_session) is not bool
+        or type(max_projector_lag_ms) is not int
+        or not 100 <= max_projector_lag_ms <= 30000
+        or type(max_pending_originals) is not int
+        or not 1 <= max_pending_originals <= 1000
     ):
         raise ValueError("invalid fresh, bounded forward research configuration")
     offline = stream is not None and snapshot_fetch is not None
@@ -133,6 +145,8 @@ async def observe_forward_spot_research(
         or (public_lease is not None and (offline or not allow_public_network))
     ):
         raise PermissionError("explicit and exclusive offline/real-public source mode required")
+    if spooled_in_session and not offline:
+        raise PermissionError("unreviewed public continuous spool is disabled")
     root = output_dir.resolve()
     if root != output_dir or root.parent.is_symlink():
         raise ValueError("forward research evidence root must be absolute and unaliased")
@@ -153,6 +167,17 @@ async def observe_forward_spot_research(
         )
         shadow = IncrementalSpotShadowValidator(
             journal, session_id=session_id, source=source,
+        )
+        ingress_shadow = (
+            IncrementalSpotShadowValidator(
+                journal, session_id=session_id, source=source,
+            ) if spooled_in_session else None
+        )
+        spool_cursor = (
+            OfflineSpotProjectionCursor(
+                root / "projection_cursor.sqlite",
+                journal=journal, session_id=session_id,
+            ) if spooled_in_session else None
         )
         bus = EventBus(mode_provider=provider)
         publisher = bus.activate_verified_market_only(max_inflight=1)
@@ -184,6 +209,8 @@ async def observe_forward_spot_research(
         last_book_id: int | None = None
         admitted = 0
         receiver_ack_max_ms = 0.0
+        peak_pending_originals = 0
+        highest_lag_ms = 0
         receiver_client = (PersistentHmacResearchReceiver(receiver_db)
                            if persistent_receiver else None)
         async def derived_observer(event: Event) -> None:
@@ -203,7 +230,12 @@ async def observe_forward_spot_research(
             bus.subscribe(topic, derived_observer)
 
         async def forward(record: CapturedSpotRecord) -> None:
-            nonlocal forwarded_trades, forwarded_books, pre_sync, last_book_id, admitted, receiver_ack_max_ms
+            nonlocal forwarded_trades, forwarded_books, pre_sync, last_book_id, admitted, receiver_ack_max_ms, highest_lag_ms
+            if spooled_in_session:
+                lag_ms = (time.time_ns() // 1_000_000) - record.received_at_ms
+                if lag_ms < -1000 or lag_ms > max_projector_lag_ms:
+                    raise ForwardSpotResearchError("projector source delivery lag exceeded")
+                highest_lag_ms = max(highest_lag_ms, lag_ms)
             before = shadow.trades
             # Source COMMIT and independent disk re-read BEFORE any receiver IPC
             # or EventBus publish. On any error the capture adapter ends the session.
@@ -329,15 +361,59 @@ async def observe_forward_spot_research(
                 forwarded_books += 1
                 last_book_id = view.last_update_id
 
+        signal = asyncio.Event()
+        latest_original = 0
+        advanced_original = 0
+        capture_closed = False
+        projector_task: asyncio.Task | None = None
+
+        async def capture_spool_input(record: CapturedSpotRecord) -> None:
+            nonlocal latest_original, peak_pending_originals
+            assert ingress_shadow is not None
+            await ingress_shadow.observe(record)
+            if record.capture_id != latest_original + 1:
+                raise ForwardSpotResearchError("source spool original ordinal gap")
+            latest_original = record.capture_id
+            backlog = latest_original - advanced_original
+            peak_pending_originals = max(peak_pending_originals, backlog)
+            if backlog > max_pending_originals:
+                raise ForwardSpotResearchError("source spool pending capacity exceeded")
+            signal.set()
+            if projector_task is not None and projector_task.done():
+                projector_task.result()
+
+        async def project_committed_originals() -> None:
+            nonlocal advanced_original
+            assert spool_cursor is not None
+            start = spool_cursor.read_verified()
+            if start.last_capture_id != 0:
+                raise ForwardSpotResearchError("live spool refuses resumed source generation")
+            while True:
+                await signal.wait()
+                signal.clear()
+                while advanced_original < latest_original:
+                    capture_id = advanced_original + 1
+                    raw_record = journal.verify_captured_record(session_id, capture_id)
+                    await forward(raw_record)
+                    state = spool_cursor.advance(raw_record)
+                    advanced_original = state.last_capture_id
+                if capture_closed:
+                    return
+
         await bus.start()
         try:
             if receiver_client is not None:
                 await receiver_client.start()
+            if spooled_in_session:
+                projector_task = asyncio.create_task(
+                    project_committed_originals(), name="spot-durable-spool-projector",
+                )
+            callback = capture_spool_input if spooled_in_session else forward
             if offline:
                 result = await adapter.capture_open_stream(
                     stream, snapshot_fetch, session_id=session_id, source=source,
                     max_frames=max_frames, timeout_s=timeout_s,
-                    on_persisted=forward,
+                    on_persisted=callback,
                 )
             elif public_lease is not None:
                 # A verified-public lease is established only by the pinned
@@ -349,7 +425,7 @@ async def observe_forward_spot_research(
                     session_id=session_id, source="binance_public_simulation",
                     ws_endpoint=_PUBLIC_WS, rest_endpoint=_PUBLIC_REST,
                     max_frames=max_frames, timeout_s=timeout_s,
-                    on_persisted=forward,
+                    on_persisted=callback,
                     idle_timeout_s=public_ws_idle_timeout_s,
                     require_frame_limit=True,
                 )
@@ -357,9 +433,19 @@ async def observe_forward_spot_research(
                 result = await adapter.capture_public_once(
                     allow_network=True, session_id=session_id,
                     max_frames=max_frames, timeout_s=timeout_s,
-                    on_persisted=forward,
+                    on_persisted=callback,
                     idle_timeout_s=public_ws_idle_timeout_s,
                 )
+            if spooled_in_session:
+                capture_closed = True
+                signal.set()
+                assert projector_task is not None and ingress_shadow is not None
+                await asyncio.wait_for(projector_task, timeout=timeout_s)
+                ingress_proof = ingress_shadow.finish(result)
+                if ingress_proof.verified_original_records != latest_original:
+                    raise ForwardSpotResearchError("ingress spool source seal mismatch")
+                if spool_cursor is None or spool_cursor.read_verified().last_capture_id != latest_original:
+                    raise ForwardSpotResearchError("durable spool original cursor incomplete")
             proof = shadow.finish(result)
             wanted = {
                 "md.ticker": forwarded_trades,
@@ -421,8 +507,14 @@ async def observe_forward_spot_research(
                 max_receiver_ack_latency_ms=receiver_ack_max_ms,
                 forward_checkpoints=checkpoint_proof.checkpointed_events,
                 forward_checkpoint_sha256=checkpoint_proof.tail_sha256,
+                spool_original_cursor=advanced_original,
+                max_projector_lag_ms=highest_lag_ms,
+                max_spool_pending_originals=peak_pending_originals,
             )
         finally:
+            if projector_task is not None and not projector_task.done():
+                projector_task.cancel()
+                await asyncio.gather(projector_task, return_exceptions=True)
             try:
                 if receiver_client is not None:
                     await receiver_client.close()
