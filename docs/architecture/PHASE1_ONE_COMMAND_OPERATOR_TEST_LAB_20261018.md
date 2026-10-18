@@ -84,6 +84,38 @@ Optionally set `-OutputBase "D:\ECONITH-Evidence"` on Doctor and
 Quick to use a drive with adequate free SSD space. It must be outside
 the repository and accessible to the operator.
 
+## Intermediate load test (after a verified Diagnostic PASS, before Hour)
+
+The operator's **public Binance REST clock preflight 5/5 PASS** on
+2026-10-18 measured RTT **579–797ms** and exchange-local clock
+offset **267–384ms** (thresholds 2000ms and 3000ms). These five
+successful calls over a short period do NOT disprove the earlier
+1-hour attempt's seven clock `ConnectTimeout` failures. Likewise,
+the operator's 3×500-frame Diagnostic PASS did NOT prevent a
+128/128 FIFO overflow in a later 1000-frame Hour segment.
+
+To isolate this exact **load/throughput** dimension without consuming
+a full hour's attempts, the reviewed `Load` profile runs **3×1000
+WebSocket frames**, each with a fresh verified public WSS, fresh REST
+snapshot, a single child HMAC receiver and full sealed source/outbox/
+derived/checkpoint evidence. Each attempt has a 120s timeout; overall
+evidence is capped at 200 MB. It requires >=1.5 GiB available RAM.
+It creates a new timestamped evidence folder outside Git and must
+be invoked explicitly:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\phase1-test.ps1 -Mode Doctor
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\phase1-test.ps1 -Mode Load
+```
+
+Do NOT rerun repeatedly on transport failure, and do NOT change
+the FIFO limit 128 or 10s source freshness to force PASS. Review the
+result's queue high watermark, failed attempt diagnostics, RAM,
+outages, unknown segment boundaries and ACK counts. Even 3/3 Load
+PASS is three bounded sessions, NOT 1-hour continuous capture,
+no proof of gap-free Binance venue history, and no trading approval.
+The previously failed Hour evidence remains immutable.
+
 ## Linux / CPU-only VPS / optional RunPod CPU instance
 
 Ubuntu 24.04 with Python 3.12, git, a normal unprivileged login, two
