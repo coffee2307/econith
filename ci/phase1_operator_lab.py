@@ -303,6 +303,8 @@ def run_smoke(*,allow_public:bool,profile:str,
         "--max-storage-mb",str(profile_data["max_storage_mb"]),
         "--ws-idle-timeout-s","15",
     ]
+    if profile=="diagnostic":
+        argv.append("--fresh-socket-per-segment")
     if profile_data["watch_hours"] is not None:
         argv+=["--watch-hours",str(profile_data["watch_hours"])]
     (trial/"launch.json").write_text(
