@@ -26,9 +26,10 @@ from infrastructure.market_delivery_cursor import OfflineMarketProjectionCursor
 from infrastructure.market_projection_inbox import OfflineMarketProjectionInbox
 from infrastructure.market_cross_process_delivery import (
     OfflineIndependentProjectionReceiver, OfflineCrossProcessProjectionSender,
+    ProjectionEnvelope, CrossProcessDeliveryError,
 )
 from ci.phase1_authenticated_receiver_ipc import (
-    accept_via_authenticated_subprocess,
+    accept_batch_via_authenticated_subprocess, _MAX_BATCH_SIZE,
 )
 
 _PART = "phase1_offline_verified_chain"
@@ -124,6 +125,9 @@ def run(opts: argparse.Namespace) -> dict:
         inbox = OfflineMarketProjectionInbox(cursor)
         sender = OfflineCrossProcessProjectionSender(inbox)
         now = as_of_ms + 1000
+        # Commit every verified source-bound projection before building a
+        # bounded authenticated receiver batch. Nothing is source-ACKed by a
+        # queue write, a staged projection, or a partially committed batch.
         for index in range(len(replay.trades)):
             tick = now + index * 10
             claim = cursor.claim_next("indicator", now_ms=tick)
@@ -137,16 +141,53 @@ def run(opts: argparse.Namespace) -> dict:
                     "research_only": True,
                 }, now_ms=tick,
             )
-            receipt = sender.deliver_once(
-                "indicator", "risk",
-                receiver_accept=(
-                    (lambda env, at=tick: accept_via_authenticated_subprocess(
-                        env, receiver_db=receiver_path, now_ms=at,
+        projections = cursor.projections("indicator")
+        if len(projections) != len(replay.trades):
+            raise ValueError("durable verified source projection count changed")
+
+        # A fresh independent Python receiver per bounded chunk, not per
+        # trade. Each row still has a distinct receiver-owned SQLite COMMIT,
+        # receipt ID and separately fenced producer ACK.
+        accepted_by_ingest = {}
+        process_invocations = 0
+        if opts.authenticated_subprocess:
+            for start in range(0, len(projections), _MAX_BATCH_SIZE):
+                chunk = projections[start:start + _MAX_BATCH_SIZE]
+                envelopes = []
+                for p in chunk:
+                    serial, digest = cursor._serialize(p.value)
+                    envelopes.append(ProjectionEnvelope(
+                        "indicator", "risk", p.ingest_id, p.event_id,
+                        p.available_at_ms, serial, digest,
                     ))
-                    if opts.authenticated_subprocess else
-                    (lambda env, at=tick: receiver.accept(env, now_ms=at))
-                ),
-                now_ms=tick,
+                receipts = accept_batch_via_authenticated_subprocess(
+                    envelopes, receiver_db=receiver_path,
+                    now_ms=now + start * 10,
+                )
+                process_invocations += 1
+                for e, r in zip(envelopes, receipts):
+                    accepted_by_ingest[e.ingest_id] = (e, r)
+
+        for index, projection in enumerate(projections):
+            tick = now + index * 10
+            if opts.authenticated_subprocess:
+                approved_envelope, approved_receipt = accepted_by_ingest[
+                    projection.ingest_id
+                ]
+
+                def authenticated_result(envelope, *, expected=approved_envelope,
+                                         receipt=approved_receipt):
+                    if envelope != expected:
+                        raise CrossProcessDeliveryError(
+                            "source claim diverged after receiver batch COMMIT"
+                        )
+                    return receipt
+
+                accept = authenticated_result
+            else:
+                accept = lambda env, at=tick: receiver.accept(env, now_ms=at)
+            receipt = sender.deliver_once(
+                "indicator", "risk", receiver_accept=accept, now_ms=tick,
             )
             if receipt is None:
                 raise ValueError("receiver did not acknowledge a durable projection")
@@ -185,6 +226,10 @@ def run(opts: argparse.Namespace) -> dict:
             "cross_process_authenticated_transport": bool(
                 opts.authenticated_subprocess
             ),
+            "authenticated_receiver_batch_limit": (
+                _MAX_BATCH_SIZE if opts.authenticated_subprocess else 0
+            ),
+            "authenticated_receiver_process_invocations": process_invocations,
             "transport_scope": (
                 "HMAC_AUTHENTICATED_LOCAL_SUBPROCESS_PIPE_ONLY"
                 if opts.authenticated_subprocess else
