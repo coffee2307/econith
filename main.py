@@ -92,6 +92,25 @@ components: dict[str, object] = {}
 async def lifespan(app: FastAPI):
     # Refuse a false verified-only configuration before DB/engine/network startup.
     ingress_policy = enforce_verified_only_spot_ingress()
+    if ingress_policy == "verified_forward_preview":
+        # Explicit read-only PUBLIC forward research, one finite capture only.
+        # No engine, CCXT, order bridge, legacy streamer, or mutation routes.
+        from pathlib import Path
+        from infrastructure.spot_verified_forward_preview_runtime import (
+            start_verified_forward_preview,
+        )
+        preview = await start_verified_forward_preview(
+            output_dir=Path(os.environ["ECONITH_SPOT_FORWARD_PREVIEW_OUTPUT_DIR"]),
+        )
+        components["verified_research_runtime"] = preview
+        app.state.verified_only_research = True
+        try:
+            yield
+        finally:
+            app.state.verified_only_research = False
+            await preview.close()
+            components.clear()
+        return
     if ingress_policy == "verified_only":
         # Dedicated finite, original-byte-backed SIMULATION research runtime.
         # Important: engine, CCXT, order bridge, macro providers and legacy
