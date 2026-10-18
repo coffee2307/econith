@@ -74,7 +74,7 @@ def test_persistent_sequence_and_mac_replay_proof(tmp_path):
         decode_response(response.strip(),key,1,[a],1780000000300)
     with pytest.raises(AuthenticatedReceiptIPCError,match="replayed"):
         decode_response(response.strip(),key,2,[],1780000000300)
-    with pytest.raises(AuthenticatedReceiptIPCError,match="duplicate"):
+    with pytest.raises(AuthenticatedReceiptIPCError,match="invalid bounded"):
         encode_request(key,1,[a,a],1780000000300)
 
 
