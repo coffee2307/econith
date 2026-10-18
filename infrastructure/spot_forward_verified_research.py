@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
+from contextlib import nullcontext
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -33,6 +35,7 @@ from infrastructure.market_delivery_cursor import OfflineMarketProjectionCursor
 from infrastructure.spot_forward_outbox import OfflineForwardSpotOutbox
 from infrastructure.spot_forward_checkpoints import OfflineForwardSessionCheckpoints
 from infrastructure.spot_forward_owner import exclusive_forward_owner
+from infrastructure.spot_forward_stage_profile import BoundedStageProfiler
 from infrastructure.market_persistent_hmac_receiver import PersistentHmacResearchReceiver
 from infrastructure.market_derived_research_receipts import (
     OfflineDerivedResearchReceiptLedger,
@@ -135,12 +138,18 @@ async def observe_forward_spot_research(
         raise ValueError("forward research evidence root must be absolute and unaliased")
     root.mkdir(parents=True, exist_ok=False)
     with exclusive_forward_owner(root, role="CAPTURE"):
+        # Explicit research-only diagnostic. No venue/source admission changes.
+        profiler = (BoundedStageProfiler(root / "stage_latency.json")
+                    if os.environ.get("ECONITH_PHASE1_STAGE_PROFILE") == "1" else None)
+        trace = profiler.measure if profiler else lambda _stage: nullcontext()
+        completed = False
         provider = lambda: QuantMode.SIMULATION
         journal = OfflineSpotCaptureJournal(
             root / "original.sqlite", mode_provider=provider, forward_capture_audit=True,
         )
         adapter = OptInSpotIngressAdapter(
             journal, symbol="BTCUSDT", queue_capacity=queue_capacity,
+            stage_profile=profiler,
         )
         shadow = IncrementalSpotShadowValidator(
             journal, session_id=session_id, source=source,
@@ -198,7 +207,8 @@ async def observe_forward_spot_research(
             before = shadow.trades
             # Source COMMIT and independent disk re-read BEFORE any receiver IPC
             # or EventBus publish. On any error the capture adapter ends the session.
-            await shadow.observe(record)
+            with trace("shadow_verify"):
+                await shadow.observe(record)
             now = record.received_at_ms
             if record.kind == "aggTrade":
                 if shadow.trades == before:
@@ -258,21 +268,23 @@ async def observe_forward_spot_research(
             )
             # Stage immutable source-bound intent durably BEFORE IPC. If the
             # child COMMITs then this process dies, exact recovery can retry it.
-            outbox.stage(envelope)
+            with trace("outbox_stage"):
+                outbox.stage(envelope)
             # Both modes require an independent SQLite COMMIT and HMAC-bound
             # receipt before publishing. Persistent mode reuses one child
             # across the finite session, never across source identities.
             ipc_start = time.monotonic()
-            if receiver_client is None:
-                confirmations = await asyncio.to_thread(
-                    accept_batch_via_authenticated_subprocess,
-                    [envelope], receiver_db=receiver_db,
-                    now_ms=max(time.time_ns() // 1_000_000, now),
-                )
-            else:
-                confirmations = await receiver_client.accept_batch(
-                    [envelope], now_ms=max(time.time_ns() // 1_000_000, now),
-                )
+            with trace("receiver_hmac_ack"):
+                if receiver_client is None:
+                    confirmations = await asyncio.to_thread(
+                        accept_batch_via_authenticated_subprocess,
+                        [envelope], receiver_db=receiver_db,
+                        now_ms=max(time.time_ns() // 1_000_000, now),
+                    )
+                else:
+                    confirmations = await receiver_client.accept_batch(
+                        [envelope], now_ms=max(time.time_ns() // 1_000_000, now),
+                    )
             receiver_ack_max_ms = max(
                 receiver_ack_max_ms, (time.monotonic()-ipc_start)*1000,
             )
@@ -280,31 +292,36 @@ async def observe_forward_spot_research(
                 OfflineIndependentProjectionReceiver._receipt_id(envelope)
             ):
                 raise ForwardSpotResearchError("independent authenticated receiver ACK missing")
-            outbox.ack_receiver(envelope, confirmations[0])
+            with trace("outbox_receiver_ack"):
+                outbox.ack_receiver(envelope, confirmations[0])
             # ONLY the approved read-only pipeline/observers run on this bus.
             # Subscription completion alone is never a durable external ACK.
-            await publisher.publish_raw_confirmed(
-                topic, frame=raw,
-                **({"symbol":"BTCUSDT"} if topic == "md.depth" else {}),
-                source=_SOURCE, historical_replay=False, forward_research=True,
-                available_at_ms=now,
-                verified_session_id=session_id,
-                verified_source_record_id=source_record,
-                verified_source_ordinal=ordinal,
-                verified_source_available_at_ms=now,
-                receiver_receipt_id=confirmations[0].receipt_id,
-            )
-            await bus.wait_verified_idle(timeout_s=15)
+            with trace("eventbus_publish"):
+                await publisher.publish_raw_confirmed(
+                    topic, frame=raw,
+                    **({"symbol":"BTCUSDT"} if topic == "md.depth" else {}),
+                    source=_SOURCE, historical_replay=False, forward_research=True,
+                    available_at_ms=now,
+                    verified_session_id=session_id,
+                    verified_source_record_id=source_record,
+                    verified_source_ordinal=ordinal,
+                    verified_source_available_at_ms=now,
+                    receiver_receipt_id=confirmations[0].receipt_id,
+                )
+            with trace("derived_subscriber_wait"):
+                await bus.wait_verified_idle(timeout_s=15)
             # Handler completion is not itself durable. Advance after BOTH
             # independent receiver and derived-ledger counts are visible.
-            outbox.ack_derived(envelope)
+            with trace("outbox_derived_ack"):
+                outbox.ack_derived(envelope)
             # The source session is STILL OPEN: durable independently tied
             # producer/receiver/derived ACK proof is checkpointed per event.
-            checkpoints.append_live(
-                envelope,
-                completed_item=outbox.completed_item(envelope),
-                expected_ordinal=admitted+1,
-            )
+            with trace("checkpoint_commit"):
+                checkpoints.append_live(
+                    envelope,
+                    completed_item=outbox.completed_item(envelope),
+                    expected_ordinal=admitted+1,
+                )
             admitted += 1
             if topic == "md.aggTrade":
                 forwarded_trades += 1
@@ -381,6 +398,7 @@ async def observe_forward_spot_research(
                     pass
                 else:
                     raise ForwardSpotResearchError("protected forward EventBus bypass")
+            completed = True
             return ForwardSpotResearchStatus(
                 mode="SIMULATION", session_id=session_id,
                 original_records=proof.verified_original_records,
@@ -405,6 +423,11 @@ async def observe_forward_spot_research(
                 forward_checkpoint_sha256=checkpoint_proof.tail_sha256,
             )
         finally:
-            if receiver_client is not None:
-                await receiver_client.close()
-            await bus.stop()
+            try:
+                if receiver_client is not None:
+                    await receiver_client.close()
+                await bus.stop()
+            finally:
+                if profiler is not None:
+                    # Original source/ACK ledgers are NOT touched by diagnostics.
+                    profiler.write(completed=completed)
