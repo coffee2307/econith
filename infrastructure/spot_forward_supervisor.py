@@ -27,6 +27,7 @@ from infrastructure.market_cross_process_delivery import OfflineIndependentProje
 from infrastructure.market_derived_research_receipts import OfflineDerivedResearchReceiptLedger
 from infrastructure.market_named_research_subscribers import OfflineNamedResearchSubscriber
 from infrastructure.spot_forward_outbox import OfflineForwardSpotOutbox
+from infrastructure.spot_forward_checkpoints import OfflineForwardSessionCheckpoints
 from infrastructure.spot_forward_owner import exclusive_forward_owner
 from infrastructure.spot_forward_verified_research import (
     ForwardSpotResearchStatus, observe_forward_spot_research,
@@ -104,6 +105,7 @@ def _verify_one(root: Path, result: ForwardSpotResearchStatus) -> None:
     required = [
         "original.sqlite", "forward_outbox.sqlite",
         "independent_receiver.sqlite", "derived.sqlite",
+        "forward_checkpoints.sqlite",
         "research_audit.sqlite", "research_monitor.sqlite",
     ]
     if any(
@@ -123,6 +125,14 @@ def _verify_one(root: Path, result: ForwardSpotResearchStatus) -> None:
         session_id=result.session_id,mode_provider=provider,
     )
     intents = outbox.verify_source(original,source_session_id=result.session_id)
+    checkpoint = OfflineForwardSessionCheckpoints(
+        root/"forward_checkpoints.sqlite",session_id=result.session_id,
+        mode_provider=provider,
+    ).verified_prefix(intents)
+    if (checkpoint.checkpointed_events != len(intents)
+        or result.forward_checkpoints != checkpoint.checkpointed_events
+        or result.forward_checkpoint_sha256 != checkpoint.tail_sha256):
+        raise ForwardSupervisorError("live forward checkpoint diverges from outbox")
     receiver = OfflineIndependentProjectionReceiver(
         root/"independent_receiver.sqlite",mode_provider=provider,
     )
