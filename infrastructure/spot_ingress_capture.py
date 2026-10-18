@@ -503,6 +503,57 @@ class OfflineSpotCaptureJournal:
             ))
         return result
 
+
+    def verify_forward_capture_inventory(
+        self, session_id: str, *, limit: int = 5000,
+    ) -> list[CapturedSpotRecord]:
+        """Audit every raw capture against same-COMMIT forward source intent.
+
+        A matching intent only proves raw inclusion and immutable provenance;
+        it does NOT imply the row was eligible for downstream publication.
+        """
+        self._simulation_only()
+        self._part(session_id, "session_id")
+        if not self.forward_capture_audit:
+            raise SpotCaptureError("forward source intent audit was not enabled")
+        if type(limit) is not int or not 1 <= limit <= 5000:
+            raise SpotCaptureError("invalid bounded forward source audit limit")
+        with self._connect() as conn:
+            rows = conn.execute("""
+                SELECT r.capture_id,r.kind,r.received_at_ms,r.sha256,
+                       a.capture_id AS intent_id,
+                       a.session_id AS intent_session,
+                       a.kind AS intent_kind,
+                       a.received_at_ms AS intent_available,
+                       a.sha256 AS intent_sha
+                  FROM offline_spot_capture_records AS r
+                  LEFT JOIN offline_forward_capture_intents AS a
+                    ON a.capture_id=r.capture_id
+                 WHERE r.session_id=?
+                 ORDER BY r.capture_id LIMIT ?
+            """, (session_id, limit + 1)).fetchall()
+            extras = conn.execute("""
+                SELECT COUNT(*) FROM offline_forward_capture_intents AS a
+                LEFT JOIN offline_spot_capture_records AS r
+                  ON r.capture_id=a.capture_id
+                WHERE a.session_id=? AND
+                   (r.capture_id IS NULL OR r.session_id<>a.session_id)
+            """, (session_id,)).fetchone()[0]
+        if len(rows) > limit or extras:
+            raise SpotCaptureError("forward capture inventory exceeds limit or has orphan rows")
+        verified = []
+        for row in rows:
+            if (
+                row["intent_id"] != row["capture_id"]
+                or row["intent_session"] != session_id
+                or row["intent_kind"] != row["kind"]
+                or row["intent_available"] != row["received_at_ms"]
+                or row["intent_sha"] != row["sha256"]
+            ):
+                raise SpotCaptureError("atomic forward source intent missing or altered")
+            verified.append(self.verify_captured_record(session_id, row["capture_id"]))
+        return verified
+
     def verify_captured_record(
         self, session_id: str, capture_id: int,
     ) -> CapturedSpotRecord:
