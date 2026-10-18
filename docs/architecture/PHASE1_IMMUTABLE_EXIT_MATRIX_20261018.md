@@ -31,13 +31,13 @@ document, not an altered percentage.
 | P1-02 | Source availability, lineage, authenticated independently owned source/receiver ACK | 15 | 15 | PASS in bounded research trials |
 | P1-03 | Raw+derived publisher fences, primary/audit/monitor separately durable read-only projections | 15 | 15 | PASS in opt-in SIMULATION graph |
 | P1-04 | Atomic source intent, original-as-of eligible event rescan, outbox ACKs, crash recovery and process fencing | 15 | 14 | PARTIAL: external host crash acceptance outstanding |
-| P1-05 | Sustained continuous protected ingress, reconnect/catch-up, bounded backlog, long-duration host soak | 15 | 3 | PARTIAL: finite samples and in-session research prototype only |
+| P1-05 | Sustained continuous protected ingress, reconnect/catch-up, bounded backlog, long-duration host soak | 15 | 5 | PARTIAL: finite forward trials with durable outage accounting; continuous/long-duration unproven |
 | P1-06 | Reviewed default-app source cutover, no legacy data bypass and fully isolated execution | 10 | 3 | PARTIAL: isolated opt-in forward ASGI preview only; default still legacy |
 | P1-07 | Original dataset coverage beyond BTCUSDT and real operator-certified 24–72h continuity/quality evidence | 10 | 0 | BLOCKED: no current-HEAD external soak or full dataset matrix |
-| **TOTAL** | | **100** | **70** | **Phase 1 remains OPEN** |
+| **TOTAL** | | **100** | **72** | **Phase 1 remains OPEN** |
 
-**70% is a conservative, explicitly subjective weighted engineering
-estimate.** The *certified institutional Phase 1 exit score is not 65%*:
+**72% is a conservative, explicitly subjective weighted engineering
+estimate.** The *certified institutional Phase 1 exit score is not this percentage*:
 all mandatory gate rows must be PASS before 100% can be stated. Neither
 a source label nor simulated forward data authorizes orders. Existing
 real public Binance operator observations belong to earlier commits
@@ -142,3 +142,24 @@ default cutover and full dataset coverage remain the dominant
 unaccepted obligations. See
 `PHASE1_FORWARD_RESCAN_ASGI_PREVIEW_20261018.md` for reproducible
 offline-test scope and operator instructions.
+
+## Forward outage/endurance supervision — incremental bounded evidence
+
+`infrastructure/spot_forward_supervisor.py` and manually opted-in
+`ci/phase1_forward_endurance_trial.py` now supervise a bounded set of
+**individually sealed forward source sessions** with real SQLite
+`STARTED/PASSED/FAILED` attempt state, auditable outage opening and
+restoration, a new REST book/snapshot after failure, exact receiver-to-source
+HMAC receipts and research observer ACK checks. The status captures per-run
+queue high-watermark and disk bytes. An orphan owner lock and interrupted
+attempt `STARTED` state require human review, never invented automatic
+source continuity.
+
+This is NOT a genuine uninterrupted continuous feed, a persistent receiving
+service or a real-host endurance acceptance. Even repeated clean trials have
+unobserved market intervals. The evidence credit on P1-05 rises from
+3 to **5 out of 15**, giving **72/100 provisional engineering points**.
+The original institutional Phase 1 exit decision is still **OPEN**;
+no new denominator or 100%-completion claim is introduced. See
+`PHASE1_FORWARD_OUTAGE_ENDURANCE_TRIAL_20261018.md` for
+operator instructions and explicit risks.
