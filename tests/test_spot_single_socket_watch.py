@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 from contextlib import asynccontextmanager
 
 import pytest
@@ -186,3 +187,99 @@ async def test_fake_lease_type_rejected_before_any_forward_acceptance(tmp_path):
     assert result.supervisor.failed_sessions==1
     assert result.public_socket_starts==0
     assert result.public_tls_lease_established_by_trusted_connector is False
+
+
+@pytest.mark.asyncio
+async def test_diagnostic_fresh_public_socket_per_segment_never_reuses_unobserved_frames(
+    tmp_path,
+):
+    now=_NOW()
+    sockets=[
+        PublicSocketFixture(segment(now,500)),
+        PublicSocketFixture(segment(now,3500)),
+    ]
+    connections=[]
+    snapshots=[]
+    async def clock_check():return True
+    status=await run_single_socket_forward_watch(
+        output_dir=(tmp_path/"fresh_diagnostic").resolve(),
+        allow_public_market_data=True,
+        attempts=2,max_frames=10,timeout_s=20,
+        fresh_socket_per_segment=True,clock_check=clock_check,
+        _lease_factory=lease_factory_for(sockets,connections,snapshot_log=snapshots),
+    )
+    assert status.supervisor.accepted_sessions==2
+    assert status.supervisor.failed_sessions==0
+    assert status.public_socket_starts==2
+    assert status.successful_socket_reuses==0
+    assert status.discarded_broken_sockets==0
+    assert status.supervisor.unobserved_session_boundaries==1
+    assert status.no_unobserved_market_gaps_certified is False
+    assert snapshots==[1,1]
+    assert [sock.reads for sock,_ in connections]==[10,10]
+    assert all(sock.closed is False for sock,_ in connections)
+
+
+@pytest.mark.asyncio
+async def test_failed_clock_preflight_closes_previous_socket_and_does_not_replay_stale_queued_frames(
+    tmp_path,
+):
+    import httpx
+    now=_NOW()
+    # Without the fix, iteration 3 consumes 10 old frames from socket 1
+    # after iteration 2's failed HTTP clock check, and incorrectly attempts
+    # to reuse a lease left open while nobody was reading from its WSS.
+    first=PublicSocketFixture(
+        segment(now,500)+segment(now-20000,2500)
+    )
+    second=PublicSocketFixture(segment(now,9000))
+    sockets=[first,second]
+    connections=[]
+    snapshots=[]
+    calls={"clock":0}
+    async def clock_check():
+        calls["clock"]+=1
+        if calls["clock"]==2:
+            raise httpx.ConnectTimeout("public time endpoint unavailable")
+        return True
+    status=await run_single_socket_forward_watch(
+        output_dir=(tmp_path/"clock_outage").resolve(),
+        allow_public_market_data=True,attempts=3,
+        max_frames=10,timeout_s=20,
+        clock_check=clock_check,
+        _lease_factory=lease_factory_for(sockets,connections,snapshot_log=snapshots),
+    )
+    assert calls["clock"]==3
+    assert status.supervisor.accepted_sessions==2
+    assert status.supervisor.failed_sessions==1
+    assert status.supervisor.open_outages==0
+    assert status.supervisor.outage_windows==1
+    assert status.supervisor.unobserved_session_boundaries==2
+    assert status.public_socket_starts==2
+    assert status.successful_socket_reuses==0
+    assert status.discarded_broken_sockets==1
+    assert first.reads==10  # the stale remainder was NEVER read
+    assert second.reads==10
+    assert snapshots==[1,1]
+    with sqlite3.connect(
+        (tmp_path/"clock_outage"/"forward_supervisor.sqlite")
+    ) as db:
+        failures=db.execute("""
+            SELECT failure_code FROM forward_watch_attempt
+            WHERE status='FAILED'
+        """).fetchall()
+    assert failures==[("SPOT_TRANSPORT_CLOCK_PREFLIGHT_CONNECT_TIMEOUT",)]
+
+
+def test_fresh_socket_cli_requires_explicit_pinned_persistent_public_mode(tmp_path):
+    from ci.phase1_forward_endurance_trial import parser,validate
+    base=["--allow-public-market-data","--output-dir",str((tmp_path/"e").resolve()),
+          "--attempts","2","--max-frames","20"]
+    invalid=parser().parse_args(base+["--fresh-socket-per-segment"])
+    with pytest.raises(ValueError,match="unsafe"):
+        validate(invalid)
+    valid=parser().parse_args(
+        base+["--persistent-receiver","--single-socket","--fresh-socket-per-segment"]
+    )
+    validate(valid)
+    assert valid.fresh_socket_per_segment is True
