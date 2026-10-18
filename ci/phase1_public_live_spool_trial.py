@@ -39,7 +39,11 @@ async def run(root:Path,*,frames:int,timeout_s:float,max_lag_ms:int,
         or not result.all_receipts_independent or result.orders_submitted
         or result.spool_original_cursor!=result.original_records
         or result.queue_high_watermark>=128
-        or result.max_projector_lag_ms>max_lag_ms):
+        or result.max_projector_lag_ms>max_lag_ms
+        or result.projector_age_samples!=result.receiver_receipts
+        or result.projector_p99_admission_age_upper_ms is None
+        or result.projector_min_headroom_ms is None
+        or result.projector_min_headroom_ms<0):
         raise RuntimeError("bounded public spool research proof incomplete")
     return {
         **asdict(result),
