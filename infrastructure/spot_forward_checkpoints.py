@@ -17,6 +17,8 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from contextlib import contextmanager
+from typing import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -117,11 +119,15 @@ class OfflineForwardSessionCheckpoints:
                 db.execute("ROLLBACK")
                 raise
 
-    def _db(self) -> sqlite3.Connection:
+    @contextmanager
+    def _db(self) -> Iterator[sqlite3.Connection]:
         db=sqlite3.connect(self.path,isolation_level=None,timeout=10)
-        db.row_factory=sqlite3.Row
-        db.execute("PRAGMA busy_timeout=10000")
-        return db
+        try:
+            db.row_factory=sqlite3.Row
+            db.execute("PRAGMA busy_timeout=10000")
+            yield db
+        finally:
+            db.close()
 
     def _sim(self):
         if self._mode_provider() is not QuantMode.SIMULATION:
