@@ -30,6 +30,7 @@ from infrastructure.market_cross_process_delivery import (
     OfflineIndependentProjectionReceiver, ProjectionEnvelope,
 )
 from infrastructure.market_delivery_cursor import OfflineMarketProjectionCursor
+from infrastructure.spot_forward_outbox import OfflineForwardSpotOutbox
 from infrastructure.market_derived_research_receipts import (
     OfflineDerivedResearchReceiptLedger,
 )
@@ -140,6 +141,10 @@ async def observe_forward_spot_research(
     for consumer in named:
         consumer.register(bus)
     receiver_db = root / "independent_receiver.sqlite"
+    outbox = OfflineForwardSpotOutbox(
+        root / "forward_outbox.sqlite", session_id=session_id,
+        mode_provider=provider,
+    )
     observed = dict.fromkeys(_TOPIC_COUNTS, 0)
     forwarded_trades = forwarded_books = pre_sync = 0
     last_book_id: int | None = None
@@ -223,6 +228,9 @@ async def observe_forward_spot_research(
             projection_json=body,
             projection_fingerprint=digest,
         )
+        # Stage immutable source-bound intent durably BEFORE IPC. If the
+        # child COMMITs then this process dies, exact recovery can retry it.
+        outbox.stage(envelope)
         # An actual fresh OS child owns the independent receiver SQLite.
         # Signing verifies the EXACT ordered envelope/receipt identity.
         confirmations = await asyncio.to_thread(
@@ -234,6 +242,7 @@ async def observe_forward_spot_research(
             OfflineIndependentProjectionReceiver._receipt_id(envelope)
         ):
             raise ForwardSpotResearchError("independent authenticated receiver ACK missing")
+        outbox.ack_receiver(envelope, confirmations[0])
         # ONLY the approved read-only pipeline/observers run on this bus.
         # Subscription completion alone is never a durable external ACK.
         await publisher.publish_raw_confirmed(
@@ -248,6 +257,9 @@ async def observe_forward_spot_research(
             receiver_receipt_id=confirmations[0].receipt_id,
         )
         await bus.wait_verified_idle(timeout_s=15)
+        # Handler completion is not itself durable. Advance after BOTH
+        # independent receiver and derived-ledger counts are visible.
+        outbox.ack_derived(envelope)
         admitted += 1
         if topic == "md.aggTrade":
             forwarded_trades += 1
@@ -290,6 +302,9 @@ async def observe_forward_spot_research(
             or result.websocket_frames + result.snapshot_captures != proof.verified_original_records
         ):
             raise ForwardSpotResearchError("source/receiver forward admission mismatch")
+        saved = outbox.verify_source(journal, source_session_id=session_id)
+        if len(saved) != admitted or any(x.status != "DERIVED_ACKED" for x in saved):
+            raise ForwardSpotResearchError("producer outbox/consumer ACK mismatch")
         # A forged legacy raw/derived producer is still barred from this bus.
         for topic in ("md.aggTrade", "md.ticker"):
             try:
