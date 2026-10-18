@@ -84,6 +84,8 @@ def _verify_one(root: Path, result: ForwardSpotResearchStatus) -> None:
         or result.history_continuity_verified
         or result.execution_started
         or result.orders_submitted != 0
+        or result.queue_high_watermark < 0
+        or result.queue_high_watermark > 128
         or result.original_records <= 0
         or result.forwarded_trades <= 0
         or result.forwarded_books <= 0
@@ -325,7 +327,8 @@ async def run_forward_research_supervisor(
                         WHERE iteration=? AND status='STARTED'
                     """,(
                         finished,result.original_records,
-                        result.receiver_receipts,0,size,iteration,
+                        result.receiver_receipts,result.queue_high_watermark,
+                        size,iteration,
                     ))
                     db.execute("""
                         UPDATE forward_watch_outage SET restored_ms=?
