@@ -48,8 +48,9 @@ class SealedSpoolResearchReport:
 
 async def capture_then_replay_sealed_spool(
     *, output_dir: Path, session_id: str,
-    stream: AsyncIterable[str | bytes],
-    snapshot_fetch: Callable[[str, int], Awaitable[str | bytes]],
+    stream: AsyncIterable[str | bytes] | None = None,
+    snapshot_fetch: Callable[[str, int], Awaitable[str | bytes]] | None = None,
+    allow_public_network: bool = False,
     max_frames: int = 240, timeout_s: float = 120,
     queue_capacity: int = 128,
     max_book_staleness_ms: int = 2500,
@@ -74,9 +75,14 @@ async def capture_then_replay_sealed_spool(
         or not 100 <= max_book_staleness_ms <= 30000
         or type(max_source_raw_bytes) is not int
         or not 1024 <= max_source_raw_bytes <= 200_000_000
-        or not callable(snapshot_fetch) or stream is None
+        or type(allow_public_network) is not bool
+        or ((stream is None) != (snapshot_fetch is None))
+        or (stream is None and allow_public_network is not True)
+        or (stream is not None and allow_public_network is not False)
+        or (snapshot_fetch is not None and not callable(snapshot_fetch))
     ):
-        raise ValueError("invalid bounded, new, offline spool scope")
+        raise ValueError("invalid bounded, new, exclusive spool source scope")
+    offline = stream is not None
     root = output_dir
     root.mkdir(parents=True, exist_ok=False)
     provider = lambda: QuantMode.SIMULATION
@@ -88,7 +94,8 @@ async def capture_then_replay_sealed_spool(
         journal, symbol="BTCUSDT", queue_capacity=queue_capacity,
     )
     shadow = IncrementalSpotShadowValidator(
-        journal, session_id=session_id, source="offline_fixture",
+        journal, session_id=session_id,
+        source=("offline_fixture" if offline else "binance_public_simulation"),
     )
     # Source-first: original+atomic intent COMMIT, bounded byte quota, and
     # strict as-of verification are the ONLY capture callback work.
@@ -103,11 +110,20 @@ async def capture_then_replay_sealed_spool(
         await shadow.observe(record)
 
     capture_started = time.monotonic()
-    capture = await adapter.capture_open_stream(
-        stream, snapshot_fetch, session_id=session_id,
-        source="offline_fixture", max_frames=max_frames,
-        timeout_s=timeout_s, on_persisted=source_only,
-    )
+    if offline:
+        capture = await adapter.capture_open_stream(
+            stream, snapshot_fetch, session_id=session_id,
+            source="offline_fixture", max_frames=max_frames,
+            timeout_s=timeout_s, on_persisted=source_only,
+        )
+    else:
+        # Public-only pinned WSS/REST, explicit caller policy. The operator
+        # CLI independently requires public time preflight BEFORE this call.
+        capture = await adapter.capture_public_once(
+            allow_network=True, session_id=session_id,
+            max_frames=max_frames, timeout_s=timeout_s,
+            on_persisted=source_only,
+        )
     capture_elapsed_s = time.monotonic() - capture_started
     source_proof = shadow.finish(capture)
     if source_proof.verified_original_records != (
