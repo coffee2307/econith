@@ -17,6 +17,14 @@ _ALLOWED_TRANSPORT=frozenset({
     "UNEXPECTED_STREAM", "TRANSPORT_ERROR",
     "CLOCK_PREFLIGHT_CONNECT_TIMEOUT",
 })
+_SPOOL_REASON={
+    "projector source delivery lag exceeded":"FORWARD_PROJECTOR_SOURCE_LAG",
+    "source spool pending capacity exceeded":"FORWARD_PROJECTOR_BACKLOG_CAPACITY",
+    "durable original spool byte capacity exceeded":"FORWARD_SOURCE_SPOOL_BYTE_CAPACITY",
+    "durable spool original cursor incomplete":"FORWARD_PROJECTOR_CURSOR_INCOMPLETE",
+    "source spool original ordinal gap":"FORWARD_PROJECTOR_ORIGINAL_ORDER",
+    "live spool refuses resumed source generation":"FORWARD_PROJECTOR_RESTART_REFUSED",
+}
 _CAPTURE_REASON={
     "source event is stale versus receipt":"SOURCE_EVENT_STALE",
     "source event is future-dated versus receipt":"SOURCE_EVENT_FUTURE",
@@ -40,6 +48,10 @@ def safe_failure_code(exc: Exception) -> str:
         if current is None or id(current) in seen:
             break
         seen.add(id(current))
+        if type(current).__name__ == "ForwardSpotResearchError":
+            code=_SPOOL_REASON.get(str(current))
+            if code is not None:
+                return code
         if isinstance(current,SpotTransportError):
             reason=current.reason
             if reason in _ALLOWED_TRANSPORT:
