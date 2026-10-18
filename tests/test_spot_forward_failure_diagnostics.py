@@ -152,10 +152,10 @@ def test_operator_ram_samples_and_failed_queue_are_in_readonly_report(tmp_path):
             previous_iteration INTEGER,next_iteration INTEGER,
             coverage_verified INTEGER)""")
     (root/"host_resources.jsonl").write_text(
-        "\\n".join([
+        "\n".join([
             '{"available_ram_gib":1.3}',
             '{"available_ram_gib":0.6}',
-        ])+"\\n",
+        ])+"\n",
         encoding="utf-8",
     )
     report=lab.inspect_trial(root)
