@@ -78,7 +78,8 @@ async def _source(frames: int, spacing_ms: float):
 
 async def probe(root: Path, *, frames: int, spacing_ms: float,
                 sealed_spool: bool = False,
-                live_spool: bool = False) -> int:
+                live_spool: bool = False,
+                experiment_reuse_derived_connections: bool = False) -> int:
     old = os.environ.get("ECONITH_PHASE1_STAGE_PROFILE")
     os.environ["ECONITH_PHASE1_STAGE_PROFILE"] = "1"
     started = time.monotonic()
@@ -101,6 +102,7 @@ async def probe(root: Path, *, frames: int, spacing_ms: float,
                     spooled_in_session=live_spool,
                     max_projector_lag_ms=5000,
                     max_pending_originals=512,
+                    experiment_reuse_derived_connections=experiment_reuse_derived_connections,
                 )
         except Exception as exc:
             # No raw payloads, paths or child secrets in outputs.
@@ -153,6 +155,8 @@ def main() -> int:
     p.add_argument("--output-dir",type=Path,required=True)
     p.add_argument("--frames",type=int,default=240)
     p.add_argument("--spacing-ms",type=float,default=3.0)
+    p.add_argument("--reuse-derived-connections",action="store_true",
+                   help="OFFLINE ONLY: independent durable observer SQLite connection reuse A/B")
     group = p.add_mutually_exclusive_group()
     group.add_argument("--sealed-spool",action="store_true",
                    help="Source-first append then sealed historical replay, NOT live")
@@ -163,10 +167,13 @@ def main() -> int:
         or type(a.frames) is not int or not 10<=a.frames<=1000
         or not 0<=a.spacing_ms<=200):
         p.error("refusing non-fresh or unsafe bounded offline configuration")
+    if a.reuse_derived_connections and not a.live_spool:
+        p.error("derived connection reuse requires explicit offline in-session spool")
     return asyncio.run(probe(a.output_dir,frames=a.frames,
                              spacing_ms=a.spacing_ms,
                              sealed_spool=a.sealed_spool,
-                             live_spool=a.live_spool))
+                             live_spool=a.live_spool,
+                             experiment_reuse_derived_connections=a.reuse_derived_connections))
 
 
 if __name__=="__main__":
