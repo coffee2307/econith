@@ -417,7 +417,7 @@ async def test_public_policy_detects_stalled_websocket_after_book_source_commit(
         yield raw(depth())
         await stop.wait()
         yield raw(trade())
-    with pytest.raises(SpotTransportError,match="TimeoutError|WS_IDLE_TIMEOUT|idle"):
+    with pytest.raises(SpotTransportError,match="stopped delivering market evidence"):
         await adapter.capture_open_stream(
             stalled(),rest,session_id="idle_source",
             max_frames=20,timeout_s=5,
