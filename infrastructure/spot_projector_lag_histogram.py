@@ -85,7 +85,8 @@ class BoundedProjectorLag:
 
     def write(self, *, source_complete: bool) -> None:
         # A fresh attempt-specific diagnostics file, never the source ledger.
-        self.file.open("x", encoding="utf-8").write(
-            json.dumps(self.summary(source_complete=source_complete),
-                       sort_keys=True, indent=2, allow_nan=False) + "\n"
-        )
+        with self.file.open("x", encoding="utf-8") as out:
+            out.write(
+                json.dumps(self.summary(source_complete=source_complete),
+                           sort_keys=True, indent=2, allow_nan=False) + "\n"
+            )
