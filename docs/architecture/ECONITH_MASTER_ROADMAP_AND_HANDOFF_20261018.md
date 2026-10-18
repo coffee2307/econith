@@ -147,3 +147,18 @@ ECONITH ưu tiên trở thành **nền tảng nghiên cứu định lượng, d�
 - Leak audit: [../audits/QUANT_TEMPORAL_LEAKAGE_20261017.md](../audits/QUANT_TEMPORAL_LEAKAGE_20261017.md)
 
 **Update discipline:** Sau mỗi phase hoặc PR thay đổi đáng kể, ghi exact base/head/commit, CI run links, tests pass/fail, number of true source files vs dependency deletions, recorded evidence, unresolved blockers, và trạng thái Draft. Không cho phần trăm chủ quan thay thế acceptance criteria.
+
+
+## VII. Latest verified Phase 1 handoff — 2026-10-18 (after Load profiling)
+
+This addendum supersedes the older Phase 1 operational snapshot above, **not** the original Phase 0–10 scope or the frozen exit-gate denominator.
+
+- Confirmed same failure class **twice** on independent real Binance public `Load` operator runs: three × 1,000 WS frames, **2 PASSED / 1 FAILED**, source queue saturated **128/128**. The second, instrumented run (new evidence root `20261018T164057Z_load_0eb97efa`) measured per-stage latency *also on the FAILED attempt*. All failed-source originals remain quarantined, not certified.
+- Real instrumented attempt queue peaks: **119/128, 128/128, 52/128**. Exactly 2,002 originals and **1,988 receiver ACKs from the two PASSED sources**; failed attempt had 870 original rows and 864 partial forward stages, excluded from acceptance. No exchange orders.
+- Offline source-compatible benchmark corroborates the causal mechanism: 240 frames at 3 ms interval fail closed at 128/128, while the same structure at 60 ms reaches 241 originals/239 ACKs and queue peak 2/128. Single capture consumer blocks on a series of durable source/outbox/HMAC/derived/checkpoint work per eligible original.
+- A/B experiment parallelizing three independent research derived-ledger commits via threads was **slower end-to-end** and completely reverted. This demonstrates why optimizing one metric (`EventBus.publish`) alone is insufficient.
+- New `infrastructure/spot_forward_stage_profile.py` offers bounded aggregate diagnostic timing only on explicit operator `Load` trials; report regeneration shows per-attempt top stages but does NOT alter verdict or source evidence. Offline benchmark entrypoint `ci.phase1_offline_burst_probe` makes the failure reproducible on a lightweight CPU host.
+- **Critical next engineering increment** is reviewed **source-first durable spool and restart-recoverable projection separation** with explicit delivery-lag/freshness and disk quota. Safeguard 128-frame ingress, FULL SQLite durability, generation-fenced ownership, independently authenticated receiver, named derived receipt integrity and UNKNOWN history gaps. Do not restart Hour/Day until controlled real Load acceptance is re-proven after a justified design change.
+- Full institutional Phase 1 **OPEN**, prior provisional **80/100 engineering estimate unchanged**. In addition to backpressure, remaining P1-04/05/06/07 gates include physical failure acceptance, genuinely continuous verified ingress, default legacy→verified-only cutover, multi-symbol/OHLCV/conditional source coverage, and long real operator soak. Never mark 100% from 2/3 Load or green CI.
+
+**Authoritative incident record:** [PHASE1_BACKPRESSURE_ROOT_CAUSE_20261018.md](PHASE1_BACKPRESSURE_ROOT_CAUSE_20261018.md). **Original gate matrix:** [PHASE1_IMMUTABLE_EXIT_MATRIX_20261018.md](PHASE1_IMMUTABLE_EXIT_MATRIX_20261018.md). Operator evidence stays outside Git at `F:\ECONITH-Phase1-Evidence`; no original captures have been uploaded or rewritten. PR #28 remains DRAFT, no production/REALITY/capital permission.
