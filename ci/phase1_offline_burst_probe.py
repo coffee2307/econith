@@ -75,9 +75,13 @@ async def _source(frames: int, spacing_ms: float):
             await asyncio.sleep(0)
 
 
-async def probe(root: Path, *, frames: int, spacing_ms: float) -> int:
+async def probe(root: Path, *, frames: int, spacing_ms: float,
+                parallel_observers: bool = False) -> int:
     old = os.environ.get("ECONITH_PHASE1_STAGE_PROFILE")
+    old_parallel = os.environ.get("ECONITH_PHASE1_PARALLEL_OBSERVERS")
     os.environ["ECONITH_PHASE1_STAGE_PROFILE"] = "1"
+    os.environ["ECONITH_PHASE1_PARALLEL_OBSERVERS"] = (
+        "1" if parallel_observers else "0")
     started = time.monotonic()
     try:
         try:
@@ -107,6 +111,11 @@ async def probe(root: Path, *, frames: int, spacing_ms: float) -> int:
             os.environ.pop("ECONITH_PHASE1_STAGE_PROFILE",None)
         else:
             os.environ["ECONITH_PHASE1_STAGE_PROFILE"]=old
+        if old_parallel is None:
+            os.environ.pop("ECONITH_PHASE1_PARALLEL_OBSERVERS",None)
+        else:
+            os.environ["ECONITH_PHASE1_PARALLEL_OBSERVERS"]=old_parallel
+    result["parallel_observers_experimental"] = parallel_observers
     result["elapsed_s"]=round(time.monotonic()-started,2)
     profiler=root/"stage_latency.json"
     if profiler.is_file():
@@ -120,13 +129,16 @@ def main() -> int:
     p.add_argument("--output-dir",type=Path,required=True)
     p.add_argument("--frames",type=int,default=240)
     p.add_argument("--spacing-ms",type=float,default=3.0)
+    p.add_argument("--parallel-observers",action="store_true",
+                   help="Compare durable observer thread-offload, offline only")
     a=p.parse_args()
     if (not a.output_dir.is_absolute() or a.output_dir.exists()
         or type(a.frames) is not int or not 10<=a.frames<=1000
         or not 0<=a.spacing_ms<=200):
         p.error("refusing non-fresh or unsafe bounded offline configuration")
     return asyncio.run(probe(a.output_dir,frames=a.frames,
-                             spacing_ms=a.spacing_ms))
+                             spacing_ms=a.spacing_ms,
+                             parallel_observers=a.parallel_observers))
 
 
 if __name__=="__main__":
