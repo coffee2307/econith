@@ -69,3 +69,17 @@ async def test_spool_refuses_reuse_and_unsafe_capacity(tmp_path):
             max_frames=30, queue_capacity=129,
         )
     assert not second.exists()
+
+
+@pytest.mark.asyncio
+async def test_source_spool_budget_fail_closed_before_any_receiver_effect(tmp_path):
+    root=(tmp_path/"small_quota").resolve()
+    with pytest.raises(RuntimeError,match="spool byte budget exceeded"):
+        await capture_then_replay_sealed_spool(
+            output_dir=root,session_id="rec_quota_exceeded",
+            stream=_source(30,3),snapshot_fetch=_snapshot,
+            max_frames=30,timeout_s=30,max_source_raw_bytes=1024,
+        )
+    assert (root/"original.sqlite").is_file()
+    assert not (root/"independent_receiver.sqlite").exists()
+    assert not (root/"forward_outbox.sqlite").exists()
