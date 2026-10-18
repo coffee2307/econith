@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 from infrastructure.spot_forward_verified_research import observe_forward_spot_research
+from infrastructure.spot_forward_failure_diagnostics import safe_failure_code, failure_queue_peak
 
 
 def _now() -> int:
@@ -90,6 +91,8 @@ async def probe(root: Path, *, frames: int, spacing_ms: float) -> int:
         except Exception as exc:
             # No raw payloads, paths or child secrets in outputs.
             result={"result":"QUARANTINED", "failure_class":type(exc).__name__,
+                    "failure_code":safe_failure_code(exc),
+                    "queue_peak_on_failure":failure_queue_peak(exc),
                     "synthetic_only":True,"orders_submitted":0}
             code=2
         else:
