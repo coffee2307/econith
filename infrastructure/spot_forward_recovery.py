@@ -24,6 +24,7 @@ from infrastructure.market_derived_research_receipts import OfflineDerivedResear
 from infrastructure.market_named_research_subscribers import OfflineNamedResearchSubscriber
 from infrastructure.preprocessing.pipeline import MarketDataPipeline
 from infrastructure.spot_forward_outbox import OfflineForwardSpotOutbox, ForwardOutboxError
+from infrastructure.spot_forward_eligibility import rescan_forward_eligibility
 from infrastructure.spot_forward_owner import exclusive_forward_owner
 from infrastructure.spot_ingress_capture import OfflineSpotCaptureJournal
 
@@ -40,6 +41,8 @@ class ForwardStagedRecoveryReport:
     independent_named_receipts: int
     outbox_derived_acked: int
     source_session_closed: bool
+    reconstructed_missing_intents: int = 0
+    original_eligibility_rescan_verified: bool = False
     source_coverage_certified: bool = False
     session_certified: bool = False
     execution_started: bool = False
@@ -49,12 +52,17 @@ class ForwardStagedRecoveryReport:
 async def recover_staged_forward_spot(
     *, root: Path, session_id: str,
     max_envelopes: int = 2000,
+    reconstruct_missing: bool = False,
+    max_book_staleness_ms: int = 2500,
 ) -> ForwardStagedRecoveryReport:
     """Operator-invoked proof for staged rows; never resumes raw capture."""
     if (
         not isinstance(root, Path) or not root.is_absolute()
         or not root.is_dir() or root != root.resolve()
         or type(max_envelopes) is not int or not 1 <= max_envelopes <= 2000
+        or type(reconstruct_missing) is not bool
+        or type(max_book_staleness_ms) is not int
+        or not 100 <= max_book_staleness_ms <= 30000
     ):
         raise ForwardOutboxError("unsafe bounded forward recovery directory")
     with exclusive_forward_owner(root, role="STAGED_RECOVERY"):
@@ -79,16 +87,42 @@ async def recover_staged_forward_spot(
         outbox = OfflineForwardSpotOutbox(
             ledger_path, session_id=session_id, mode_provider=provider,
         )
-        items = outbox.verify_source(journal, source_session_id=session_id)
-        if len(items) > max_envelopes:
-            raise ForwardOutboxError("staged recovery exceeds bounded resource limit")
         with journal._connect() as db:
             session = db.execute(
-                "SELECT closed_at_ms FROM offline_spot_capture_sessions WHERE session_id=?",
+                "SELECT closed_at_ms,source FROM offline_spot_capture_sessions WHERE session_id=?",
                 (session_id,),
             ).fetchone()
         if session is None:
             raise ForwardOutboxError("original captured session missing")
+        rebuilt = 0
+        if reconstruct_missing:
+            # Validate the entire original prefix and every pre-existing
+            # immutable envelope BEFORE adding any missing intents.
+            scan = await rescan_forward_eligibility(
+                journal, session_id=session_id, source=session["source"],
+                max_originals=min(5000, max_envelopes + 500),
+                max_book_staleness_ms=max_book_staleness_ms,
+            )
+            candidates = {e.ingest_id:e for e in scan.envelopes}
+            if len(candidates) > max_envelopes:
+                raise ForwardOutboxError("reconstructed intent capacity exceeded")
+            existing = outbox.items()
+            if any(
+                old.envelope.ingest_id not in candidates
+                or old.envelope != candidates[old.envelope.ingest_id]
+                for old in existing
+            ):
+                raise ForwardOutboxError(
+                    "staged intent differs from independently reconstructed as-of source"
+                )
+            already = {row.envelope.ingest_id for row in existing}
+            for envelope in scan.envelopes:
+                if envelope.ingest_id not in already:
+                    outbox.stage(envelope)
+                    rebuilt += 1
+        items = outbox.verify_source(journal, source_session_id=session_id)
+        if len(items) > max_envelopes:
+            raise ForwardOutboxError("staged recovery exceeds bounded resource limit")
         named = [
             OfflineNamedResearchSubscriber(
                 root / (name + ".sqlite"), name=name,
@@ -183,6 +217,8 @@ async def recover_staged_forward_spot(
                 independent_named_receipts=sum(x.durable_receipts for x in named_proofs),
                 outbox_derived_acked=len(items),
                 source_session_closed=session["closed_at_ms"] is not None,
+                reconstructed_missing_intents=rebuilt,
+                original_eligibility_rescan_verified=reconstruct_missing,
             )
         finally:
             await bus.stop()
