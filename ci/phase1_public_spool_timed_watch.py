@@ -245,7 +245,8 @@ async def timed_watch(
     report["watch_elapsed_s"]=round(elapsed,3)
     report["passed_segments"]=count
     report["failed_or_incomplete_segments"]=len(report["segments"])-count
-    report["target_reached"]=(elapsed>=policy.min_watch_s
+    report["target_reached"]=(report["verdict"]=="STARTED_NOT_CERTIFIED"
+                              and elapsed>=policy.min_watch_s
                               and elapsed<=policy.max_watch_s
                               and count==len(report["segments"]) and count>0)
     if report["target_reached"] and report["verdict"]=="STARTED_NOT_CERTIFIED":
