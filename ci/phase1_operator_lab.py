@@ -226,7 +226,60 @@ def inspect_trial(trial_dir:Path) -> dict:
     else:
         result["operator_host_ram_min_available_gib"]=None
         result["operator_host_resource_samples"]=0
+    result["stage_profile_diagnostics"] = _read_bounded_stage_profiles(
+        trial_dir, attempts,
+    )
     return result
+
+
+def _read_bounded_stage_profiles(trial_dir: Path, attempts: list) -> list[dict]:
+    """Optional timing is advisory; never an accepted-source certificate."""
+    profiles = []
+    for attempt in attempts:
+        index = attempt[0]
+        path = trial_dir / "evidence" / f"attempt_{index:03d}" / "stage_latency.json"
+        if not path.is_file() or path.is_symlink():
+            continue
+        try:
+            if path.stat().st_size > 128_000:
+                continue
+            body = json.loads(path.read_text(encoding="utf-8"))
+            if (body.get("schema") != "econith-phase1-stage-latency-v1"
+                or body.get("diagnostic_not_source_evidence") is not True
+                or body.get("raw_event_contents_recorded") is not False
+                or not isinstance(body.get("stages"), dict)):
+                continue
+            summaries = []
+            for name, row in body["stages"].items():
+                if (not isinstance(name, str) or len(name) > 64
+                    or not isinstance(row, dict)):
+                    continue
+                total, p95, samples = (
+                    row.get("total_ms"), row.get("p95_ms"), row.get("samples")
+                )
+                if (type(total) not in (int, float)
+                    or type(p95) not in (int, float)
+                    or type(samples) is not int
+                    or not 1 <= samples <= 4096
+                    or not 0 <= total <= 10_000_000
+                    or not 0 <= p95 <= 120_000):
+                    continue
+                summaries.append({
+                    "stage": name, "samples": samples,
+                    "total_ms": round(total, 3),
+                    "p95_ms": round(p95, 3),
+                })
+            profiles.append({
+                "iteration": index, "attempt_status": attempt[2],
+                "source_complete_in_profiler": body.get("source_complete") is True,
+                "diagnostic_only": True,
+                "top_stages_by_total_ms": sorted(
+                    summaries, key=lambda item: item["total_ms"], reverse=True
+                )[:6],
+            })
+        except (OSError, ValueError, TypeError, UnicodeError):
+            continue
+    return profiles
 
 
 def _write_report(trial_dir:Path,summary:dict) -> None:
@@ -248,6 +301,8 @@ def _write_report(trial_dir:Path,summary:dict) -> None:
         f"- Error codes: {summary['failure_classes']}",
         f"- Minimum sampled host RAM available: {summary.get('operator_host_ram_min_available_gib')} GiB",
         f"- Maximum observed receiver ACK latency: {summary['max_receiver_ack_latency_ms']} ms",
+        f"- Stage-profile segments (aggregate timing only): {len(summary.get('stage_profile_diagnostics', []))}",
+        "- Stage timings never certify original market coverage.",
         f"- Operator time target completed: {summary['completion_code']}",
         "",
         "**Not certified:** gap-free market history, truly continuous public feed,",
