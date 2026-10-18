@@ -38,6 +38,7 @@ from infrastructure.spot_forward_owner import exclusive_forward_owner
 from infrastructure.spot_forward_stage_profile import BoundedStageProfiler
 from infrastructure.spot_projection_durable_cursor import OfflineSpotProjectionCursor
 from infrastructure.spot_projector_lag_histogram import BoundedProjectorLag
+from infrastructure.spot_spool_pressure_diagnostics import BoundedSpoolPressure
 from infrastructure.market_persistent_hmac_receiver import PersistentHmacResearchReceiver
 from infrastructure.market_derived_research_receipts import (
     OfflineDerivedResearchReceiptLedger,
@@ -115,6 +116,7 @@ async def observe_forward_spot_research(
     max_pending_originals: int = 512,
     max_source_raw_bytes: int = 200_000_000,
     experiment_reuse_derived_connections: bool = False,
+    diagnose_pressure: bool = False,
 ) -> ForwardSpotResearchStatus:
     """One real *in-session* research pass (no default startup/auto retry).
 
@@ -143,6 +145,7 @@ async def observe_forward_spot_research(
         or not 100 <= max_projector_lag_ms <= 30000
         or type(max_pending_originals) is not int
         or not 1 <= max_pending_originals <= 1000
+        or type(diagnose_pressure) is not bool
         or type(experiment_reuse_derived_connections) is not bool
         or type(max_source_raw_bytes) is not int
         or not 1024 <= max_source_raw_bytes <= 200_000_000
@@ -163,6 +166,8 @@ async def observe_forward_spot_research(
         (not offline and not allow_experimental_public_spool)
     ):
         raise PermissionError("derived connection reuse requires explicitly bounded research spool")
+    if diagnose_pressure and not spooled_in_session:
+        raise PermissionError("pressure diagnostics require opt-in spool research")
     if spooled_in_session and (
         queue_capacity != 128 or not persistent_receiver
     ):
@@ -182,9 +187,12 @@ async def observe_forward_spot_research(
     with exclusive_forward_owner(root, role="CAPTURE"):
         # Explicit research-only diagnostic. No venue/source admission changes.
         profiler = (BoundedStageProfiler(root / "stage_latency.json")
-                    if os.environ.get("ECONITH_PHASE1_STAGE_PROFILE") == "1" else None)
+                    if (os.environ.get("ECONITH_PHASE1_STAGE_PROFILE") == "1"
+                        or diagnose_pressure) else None)
         trace = profiler.measure if profiler else lambda _stage: nullcontext()
         completed = False
+        pressure = (BoundedSpoolPressure(root / "spool_pressure.json")
+                    if diagnose_pressure else None)
         lag_diagnostic = (
             BoundedProjectorLag(root / 'projector_lag.json', age_budget_ms=max_projector_lag_ms)
             if spooled_in_session else None
@@ -386,6 +394,8 @@ async def observe_forward_spot_research(
                 )
             if admission_lag_ms is not None and lag_diagnostic is not None:
                 lag_diagnostic.admit(admission_lag_ms)
+            if pressure is not None:
+                pressure.published(admission_lag_ms)
             if spooled_in_session and not capture_closed:
                 published_before_source_close = True
             with trace("derived_subscriber_wait"):
@@ -402,6 +412,8 @@ async def observe_forward_spot_research(
                     completed_item=outbox.completed_item(envelope),
                     expected_ordinal=admitted+1,
                 )
+            if pressure is not None:
+                pressure.checkpoint()
             admitted += 1
             if topic == "md.aggTrade":
                 forwarded_trades += 1
@@ -426,6 +438,8 @@ async def observe_forward_spot_research(
                 raise ForwardSpotResearchError("source spool original ordinal gap")
             latest_original = record.capture_id
             backlog = latest_original - advanced_original
+            if pressure is not None:
+                pressure.raw(backlog)
             peak_pending_originals = max(peak_pending_originals, backlog)
             if lag_diagnostic is not None:
                 lag_diagnostic.pending(backlog)
@@ -450,6 +464,8 @@ async def observe_forward_spot_research(
                     await forward(raw_record)
                     state = spool_cursor.advance(raw_record)
                     advanced_original = state.last_capture_id
+                    if pressure is not None:
+                        pressure.projected()
                 if capture_closed:
                     return
 
@@ -595,6 +611,10 @@ async def observe_forward_spot_research(
                         if lag_diagnostic is not None:
                             lag_diagnostic.write(source_complete=completed)
                     finally:
-                        if profiler is not None:
-                            # Diagnostic output is not source/ACK evidence.
-                            profiler.write(completed=completed)
+                        try:
+                            if pressure is not None:
+                                pressure.write(source_complete=completed)
+                        finally:
+                            if profiler is not None:
+                                # Diagnostic output is not source/ACK evidence.
+                                profiler.write(completed=completed)
