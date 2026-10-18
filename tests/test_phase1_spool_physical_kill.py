@@ -26,7 +26,8 @@ def _count(path,sql):
         return db.execute(sql).fetchone()[0]
 
 
-def test_os_hard_exit_after_checkpoint_blocks_unreviewed_restart(tmp_path):
+@pytest.mark.parametrize("cached_producer", [False, True])
+def test_os_hard_exit_after_checkpoint_blocks_unreviewed_restart(tmp_path,cached_producer):
     root=(tmp_path/"physical_hard_exit").resolve()
     program=r'''
 import asyncio,os,sqlite3,sys
@@ -54,10 +55,11 @@ asyncio.run(observe_forward_spot_research(
     persistent_receiver=True,spooled_in_session=True,
     experiment_reuse_derived_connections=True,
     max_projector_lag_ms=5000,
+    experiment_reuse_producer_connections=bool(int(sys.argv[2])),
 ))
 '''
     result=subprocess.run(
-        [sys.executable,"-c",program,str(root)],
+        [sys.executable,"-c",program,str(root),str(int(cached_producer))],
         capture_output=True,text=True,timeout=60,
     )
     assert result.returncode==47, result.stderr[-1200:]
