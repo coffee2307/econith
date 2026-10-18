@@ -32,6 +32,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--max-book-staleness-ms",type=int,default=2500)
     p.add_argument("--max-clock-offset-ms",type=int,default=3000)
     p.add_argument("--max-clock-rtt-ms",type=int,default=2000)
+    p.add_argument("--ws-idle-timeout-s",type=float,default=30.0)
     p.add_argument("--persistent-receiver",action="store_true")
     return p
 
@@ -58,6 +59,8 @@ def validate(args: argparse.Namespace) -> None:
         or not 100 <= args.max_book_staleness_ms <= 30000
         or type(args.max_clock_offset_ms) is not int
         or not 100 <= args.max_clock_offset_ms <= 10000
+        or type(args.ws_idle_timeout_s) is not float
+        or not 0.1 <= args.ws_idle_timeout_s <= 120
         or type(args.max_clock_rtt_ms) is not int
         or not 50 <= args.max_clock_rtt_ms <= 5000
     ):
@@ -79,6 +82,7 @@ async def run(args: argparse.Namespace) -> dict:
         max_total_storage_bytes=args.max_storage_mb*1_000_000,
         max_book_staleness_ms=args.max_book_staleness_ms,
         persistent_receiver=args.persistent_receiver,
+        public_ws_idle_timeout_s=args.ws_idle_timeout_s,
         watch_duration_s=(args.watch_hours*3600 if args.watch_hours is not None else None),
         clock_check=clock_check,
     )
