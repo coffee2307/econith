@@ -152,8 +152,11 @@ async def observe_forward_spot_research(
         or (public_lease is not None and (offline or not allow_public_network))
     ):
         raise PermissionError("explicit and exclusive offline/real-public source mode required")
-    if experiment_reuse_derived_connections and (not offline or not spooled_in_session):
-        raise PermissionError("unreviewed derived connection reuse requires offline spool experiment")
+    if experiment_reuse_derived_connections and (
+        not spooled_in_session or
+        (not offline and not allow_experimental_public_spool)
+    ):
+        raise PermissionError("derived connection reuse requires explicitly bounded research spool")
     if spooled_in_session and (
         queue_capacity != 128 or not persistent_receiver
     ):
