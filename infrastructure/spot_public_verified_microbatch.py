@@ -305,6 +305,20 @@ async def observe_verified_public_batches(
                 pass
             else:
                 raise VerifiedPublicResearchError("legacy market publisher bypassed protected bus")
+            try:
+                await bus.publish(
+                    "md.ticker", source="verified_sealed_public_microbatch",
+                    verified_session_id=sid,
+                    verified_source_record_id=f"{sid}:aggTrade:forged",
+                    verified_source_ordinal=1,
+                    verified_source_available_at_ms=book.available_at_ms,
+                )
+            except RawMarketAdmissionDenied:
+                pass
+            else:
+                raise VerifiedPublicResearchError(
+                    "untrusted derived topic bypassed protected bus"
+                )
             sessions.append({
                 "cycle": cycle + 1,
                 "session_id": sid,
