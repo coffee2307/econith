@@ -52,6 +52,8 @@ jobs:
           name: phase0-architecture-${{ github.run_id }}
           path: /tmp/econith-phase0-architecture.json
           retention-days: 30
+      - name: Verified Spot startup boundary audit (fail closed, legacy still default)
+        run: python -m ci.phase1_default_source_boundary_audit
       - name: First-party tests
         run: python -m pytest tests/ -q --tb=short
       - name: Deploy gate unit smoke
