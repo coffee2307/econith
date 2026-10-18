@@ -119,19 +119,19 @@ async def test_crash_after_derived_outbox_ack_reconciles_only_missing_suffix(
 ):
     root=(tmp_path/"before_checkpoint").resolve()
     sid="rec_checkpoint_crash"
-    original=OfflineForwardSessionCheckpoints.append
+    original=OfflineForwardSessionCheckpoints.append_live
 
     def crash_before_checkpoint(self,*a,**kw):
         raise RuntimeError("injected crash before checkpoint COMMIT")
 
-    monkeypatch.setattr(OfflineForwardSessionCheckpoints,"append",crash_before_checkpoint)
+    monkeypatch.setattr(OfflineForwardSessionCheckpoints,"append_live",crash_before_checkpoint)
     with pytest.raises(RuntimeError,match="before checkpoint"):
         await observe_forward_spot_research(
             output_dir=root,session_id=sid,
             stream=source(_NOW()),snapshot_fetch=snapshot,
             max_frames=20,timeout_s=20,persistent_receiver=True,
         )
-    monkeypatch.setattr(OfflineForwardSessionCheckpoints,"append",original)
+    monkeypatch.setattr(OfflineForwardSessionCheckpoints,"append_live",original)
     assert check(root,sid).verified_prefix(durable(root,sid)).checkpointed_events==0
     assert durable(root,sid)[0].status=="DERIVED_ACKED"
     report=await recover_staged_forward_spot(
