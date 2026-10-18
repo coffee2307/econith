@@ -17,6 +17,7 @@ import asyncio
 from argparse import Namespace
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Mapping
 
 from core.event_bus import Event, EventBus, RawMarketAdmissionDenied
 from core.mode import QuantMode
@@ -27,6 +28,11 @@ from infrastructure.preprocessing.pipeline import MarketDataPipeline
 from infrastructure.market_derived_research_receipts import (
     OfflineDerivedResearchReceiptLedger,
 )
+from infrastructure.market_named_research_subscribers import (
+    OfflineNamedResearchSubscriber, checked_named_recovery_paths,
+)
+
+_NAMED_RESEARCH_CONSUMERS = ("research_audit", "research_monitor")
 
 
 class VerifiedResearchRuntimeError(RuntimeError):
@@ -50,6 +56,9 @@ class ResearchReplayStatus:
     observed_orderbook_imbalance: int
     durable_derived_research_receipts: int
     replayed_derived_research_receipts: int
+    durable_named_research_receipts: int
+    replayed_named_research_receipts: int
+    named_research_subscribers: int
     original_bytes_read_only: bool
     local_receiver_authenticated: bool
     historical_replay_only: bool
@@ -72,6 +81,7 @@ class VerifiedSpotResearchRuntime:
 async def start_verified_research_runtime(
     *, original_db: Path, session_id: str, output_dir: Path,
     derived_receipt_db: Path | None = None,
+    named_receipt_dbs: Mapping[str, Path] | None = None,
 ) -> VerifiedSpotResearchRuntime:
     """Start a read-only subscriber graph only after durable source/ACK proof.
 
@@ -92,6 +102,13 @@ async def start_verified_research_runtime(
             raise VerifiedResearchRuntimeError(
                 "recovery requires an existing independent derived observer ledger"
             )
+    named_paths = checked_named_recovery_paths(
+        output_dir=output_dir, original_db=original_db,
+        primary_receipts=(
+            derived_receipt_db or output_dir / "derived_consumer_receipts.sqlite"
+        ),
+        names=_NAMED_RESEARCH_CONSUMERS, recovery=named_receipt_dbs,
+    )
     args = Namespace(
         source_db=original_db,
         output_dir=output_dir,
@@ -147,6 +164,15 @@ async def start_verified_research_runtime(
         derived_receipt_db or output_dir / "derived_consumer_receipts.sqlite",
         mode_provider=lambda: QuantMode.SIMULATION,
     )
+    named_subscribers = [
+        OfflineNamedResearchSubscriber(
+            named_paths[name], name=name,
+            expected_source="verified_closed_session_replay",
+            mode_provider=lambda: QuantMode.SIMULATION,
+        ) for name in _NAMED_RESEARCH_CONSUMERS
+    ]
+    for consumer in named_subscribers:
+        consumer.register(bus)
     replayed_receipts = {"count": 0}
     all_observed = asyncio.Event()
 
@@ -233,6 +259,10 @@ async def start_verified_research_runtime(
             raise VerifiedResearchRuntimeError(
                 "derived consumer observation lacks durable source-bound ACK"
             )
+        named_proofs = [
+            subscriber.verify(session_id, wanted_receipts)
+            for subscriber in named_subscribers
+        ]
         # A direct legacy publisher is forbidden after activation, irrespective
         # of any claimed 'verified' source flag in the event body.
         try:
@@ -265,6 +295,9 @@ async def start_verified_research_runtime(
             observed_orderbook_imbalance=stats["indicator.obi"],
             durable_derived_research_receipts=sum(durable_receipts.values()),
             replayed_derived_research_receipts=replayed_receipts["count"],
+            durable_named_research_receipts=sum(x.durable_receipts for x in named_proofs),
+            replayed_named_research_receipts=sum(x.replayed_receipts for x in named_proofs),
+            named_research_subscribers=len(named_proofs),
             original_bytes_read_only=True,
             local_receiver_authenticated=True,
             historical_replay_only=True,
