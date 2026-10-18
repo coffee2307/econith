@@ -49,12 +49,12 @@ def inspect(root: Path) -> dict:
     count=int(originals)
     cursor=int(cursors[1] or 0)
     unprocessed=count-cursor
-    orphan=(root/".forward_producer.lock").exists()
+    owner_fence=(root/".forward_producer.lock").exists()
     if unprocessed<0 or cursor<0:
         raise ValueError("cursor beyond committed original inventory")
     # No source/ACK certification from counts. Full independent integrity
     # and HMAC proofs are separate mandatory acceptance gates.
-    status=("ORPHAN_FENCE_REQUIRES_OPERATOR_REVIEW" if orphan else
+    status=("OWNER_FENCE_PRESENT_REQUIRES_OPERATOR_REVIEW" if owner_fence else
             "OPEN_OR_ABORTED_SOURCE" if sessions[1] else
             "CLOSED_DIAGNOSTIC_ONLY")
     return {
@@ -66,8 +66,9 @@ def inspect(root: Path) -> dict:
         "checkpoint_rows":int(checkpoints),
         "receiver_checkpoint_counts_match":receipts==checkpoints,
         "original_session_open_or_aborted":bool(sessions[1]),
-        "orphan_owner_fence_present":orphan,
+        "owner_fence_present":owner_fence,
         "inspection_status":status,
+        "owner_liveness_verified":False,
         "source_continuity_certified":False,
         "receiver_hmac_cryptography_certified_by_this_inspector":False,
         "orders_submitted":0,
@@ -90,7 +91,7 @@ def main(argv=None)->int:
         }))
         return 2
     print(json.dumps(result,sort_keys=True,allow_nan=False))
-    return 0 if (not result["orphan_owner_fence_present"]
+    return 0 if (not result["owner_fence_present"]
                  and not result["original_session_open_or_aborted"]
                  and result["originals_not_projected"]==0
                  and result["receiver_checkpoint_counts_match"]) else 2
