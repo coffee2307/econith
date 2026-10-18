@@ -26,19 +26,18 @@ transcript and JSON only; it did NOT directly inspect the private raw SQLite.
 
 The code actually executed on app startup remains:
 
-- `main.py` calls `enforce_verified_only_spot_ingress()` **before** DB,
-  engine and network initialization. Its `verified_only` policy correctly
-  **rejects all startups**, because no complete runtime cutover exists.
-- `main.py` constructs `BinanceWebSocketStreamer(engine.bus,engine.time)`
-  and invokes `await streamer.start()`. The streamer publishes
-  `md.aggTrade` and **partial `depth20`** `md.depth` events, potentially
-  mock/simulation-overlaid; this is *not* an original REST snapshot +
-  `depthUpdate` synchronized full-book verified source.
-- `MarketDataPipeline` subscribes directly to these raw topics and
-  publishes `md.ticker`, `indicator.volume_delta` and
-  `indicator.obi`. Downstream signals can be reached without the offline
-  capture integrity journal/receiver receipts. The EventBus optional
-  `activate_verified_market_only()` guard is NOT enabled in `main.py`.
+- `main.py` checks `enforce_verified_only_spot_ingress()` before DB,
+  engine and network startup. Invalid/incomplete `verified_only` configuration
+  fails closed. **A configured closed historical replay is now supported**
+  in an isolated SIMULATION ASGI lifespan branch; it does NOT initialize
+  engine, CCXT, order bridge, HTTP mutation routes or legacy streamer.
+- **Default `legacy` startup** still constructs `BinanceWebSocketStreamer`,
+  publishes raw `md.aggTrade` and unverified partial-`depth20` `md.depth`,
+  and cannot be considered an approved verified-only runtime.
+- The **opt-in historical research branch** now uses guarded raw and derived
+  `EventBus` publication, authenticated source/receiver ACK and independent
+  derived observer receipts. The **default legacy** market pipeline still
+  bypasses these research-only source and subscriber proof gates.
 
 This makes the remaining work a **runtime architecture migration**, not a
 missing unit test or an incomplete Binance public-data capture.
@@ -88,3 +87,51 @@ the runtime migration would make an unsupported operational claim.
 complete based on operator evidence; default runtime verification and
 production integration must then become explicit separate milestones.
 Do not silently make that scope change.
+
+## Follow-up research evidence and deferred debt (2026-10-18)
+
+The protected historical research path and finite public microbatch path now
+include **two independent named read-only derived subscribers** (audit and
+monitor) in separate SQLite receipt ledgers. Each has source-bound, per-topic
+durable cursors and idempotent recovery tests. The opt-in research graph also
+guards `md.ticker`, `indicator.volume_delta` and `indicator.obi` publication
+using a distinct pipeline capability; the ordinary EventBus remains legacy.
+
+The new `infrastructure/spot_verified_soak.py` and
+`ci/phase1_verified_spot_soak.py` implement an opt-in **finite supervised
+sealed-market research soak** with per-round public clock preflight, at most
+24 rounds, separate source sessions, HMAC independent receiver/producer ACK,
+named subscriber receipts, atomic checkpointed evidence, SHA-256 report
+integrity checks and a single-writer orphan-sensitive process lock.
+All reports explicitly state `continuous_live_market=false` and
+`history_continuity_verified=false`. Full details are in
+`PHASE1_FINITE_VERIFIED_SPOT_SOAK.md`.
+
+**Explicit remaining Phase 1 acceptance debt:**
+
+- **P1-A — continuous market-data source:** create a genuinely long-running
+  verified source/consumer runtime, not consecutive sealed captures.
+  Enforce fresh snapshot after each reconnect, event-as-of ordering, lag,
+  clock plausibility and no fabricated historical coverage.
+- **P1-B — long-running backpressure:** verify bounded queue/CPU/RAM/disk,
+  timeouts and consumer liveness under real market traffic and stalled
+  subscribers, including 24–72h operator soak and power-loss restart.
+- **P1-C — subscriber completeness:** inventory all original and derived
+  producers/subscribers. Three approved research-only durable observers
+  do not make the arbitrary EventBus graph transactional or recoverable.
+  Define retry/dead-letter/idempotency for any future effectful consumer.
+- **P1-D — reviewed default runtime cutover:** isolate/remove legacy source
+  bypass, separate `REALITY` data mode from exchange execution authority,
+  prove correct API/UI exposure, and retain a fail-closed unapproved path.
+- **P1-E — original institutional data coverage:** multi-symbol OHLCV,
+  timestamp/de-list/precision tests and conditional funding/open interest
+  and macro announcement-vintage provenance have not been completed.
+- **P1-F — dependencies/legal:** remaining gitlink ownership and GPL/MIT
+  boundary require owner/source/legal review separately from CI.
+- **P1-G — real operator acceptance:** validate a new original public Binance
+  capture with reproducible versioned evidence, source clock, resource
+  metrics and physical host crash recovery. CI fixtures alone do not
+  prove real TLS availability or production-grade continuous ingest.
+
+**Exit decision unchanged: Phase 1 overall OPEN.** Do not merge PR #28
+or authorize broker execution or capital on this research-only evidence.
