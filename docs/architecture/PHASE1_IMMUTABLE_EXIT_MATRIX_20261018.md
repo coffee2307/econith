@@ -31,12 +31,12 @@ document, not an altered percentage.
 | P1-02 | Source availability, lineage, authenticated independently owned source/receiver ACK | 15 | 15 | PASS in bounded research trials |
 | P1-03 | Raw+derived publisher fences, primary/audit/monitor separately durable read-only projections | 15 | 15 | PASS in opt-in SIMULATION graph |
 | P1-04 | Atomic source intent, original-as-of eligible event rescan, outbox ACKs, crash recovery and process fencing | 15 | 14 | PARTIAL: external host crash acceptance outstanding |
-| P1-05 | Sustained continuous protected ingress, reconnect/catch-up, bounded backlog, long-duration host soak | 15 | 8 | PARTIAL: persistent HMAC receiver, operator-duration watch and verified gap ledger; true continuous source/uninterrupted 24h host evidence absent |
+| P1-05 | Sustained continuous protected ingress, reconnect/catch-up, bounded backlog, long-duration host soak | 15 | 9 | PARTIAL: strict real-public socket EOF/idle fault admission, persistent HMAC receiver and gap ledger; true continuous source and 24h host evidence absent |
 | P1-06 | Reviewed default-app source cutover, no legacy data bypass and fully isolated execution | 10 | 3 | PARTIAL: isolated opt-in forward ASGI preview only; default still legacy |
 | P1-07 | Original dataset coverage beyond BTCUSDT and real operator-certified 24–72h continuity/quality evidence | 10 | 0 | BLOCKED: no current-HEAD external soak or full dataset matrix |
-| **TOTAL** | | **100** | **75** | **Phase 1 remains OPEN** |
+| **TOTAL** | | **100** | **76** | **Phase 1 remains OPEN** |
 
-**75% is a conservative, explicitly subjective weighted engineering
+**76% is a conservative, explicitly subjective weighted engineering
 estimate.** The *certified institutional Phase 1 exit score is not this percentage*:
 all mandatory gate rows must be PASS before 100% can be stated. Neither
 a source label nor simulated forward data authorizes orders. Existing
@@ -211,3 +211,23 @@ satisfy the still-open single continuous verified source, full
 24–72h operator evidence, broad dataset admission or default
 `main.py` production cutover. See
 `PHASE1_OPERATOR_DURATION_WATCH_20261018.md`.
+
+## Remote EOF and socket idle guard — current incremental correction
+
+The public Binance Spot capture adapter previously inherited finite
+*offline fixture* iterator EOF semantics. A public WebSocket could close
+prematurely after a valid REST snapshot and still be counted as a
+successful session. The real-public entry point now enforces explicit
+frame-quota completion (`require_frame_limit=True`) and a configurable
+per-frame idle timer (default 30s). Unexpected close or idle data feed
+fails closed, leaving original/ACK/outage evidence to be classified.
+The offline fixture early-EOF policy is retained explicitly but can
+never be used as a real public-source closure proof. The opt-in forward
+supervisor and operator CLI expose the same idle watchdog.
+
+P1-05 receives one provisional evidence-credit point, from 8/15
+to **9/15**, or **76/100 engineering completeness**. This does NOT
+turn repeated bounded captures into uninterrupted 24/7 verified
+market data and does not substitute for the operator-authorized
+24–72h real-network acceptance. See
+`PHASE1_PUBLIC_SOCKET_LIVENESS_GATES_20261018.md`.
