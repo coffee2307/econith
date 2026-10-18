@@ -25,6 +25,10 @@ module adds a deliberately narrower in-session read-only data plane:
    is eligible for `md.depth`. Its `available_at_ms` must be at or earlier
    than the current committed record's local receipt. Later genuine depth
    changes produce new observations. An unchanged book ID is not re-emitted.
+   Trade forwarding additionally fails closed when the last synchronized
+   book availability exceeds the explicit freshness budget (default 2500ms,
+   configurable 100–30000ms), rather than silently pairing a fresh trade
+   with an obsolete order book.
 5. A bounded canonical envelope includes raw original SHA-256, original
    capture ID, original local availability, topic and admitted payload.
    A **separate Python interpreter**, authenticated over an ephemeral HMAC
