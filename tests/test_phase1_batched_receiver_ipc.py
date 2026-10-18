@@ -128,7 +128,7 @@ def test_parent_denies_signed_but_incomplete_or_mismatched_receipt(
     body = {"receipts": [] if spoof == "missing" else [item]}
     packet = _encode_json({
         "body": body, "mac": _tagged_mac(KEY, _BATCH_ACK_TAG, body),
-    }) + b"\\n"
+    }) + b"\n"
     monkeypatch.setattr(
         subprocess, "run",
         lambda *a, **kw: SimpleNamespace(returncode=0, stdout=packet),
