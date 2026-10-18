@@ -53,11 +53,16 @@ class OfflineDerivedResearchReceiptLedger:
     def __init__(
         self, path: str | Path, *,
         mode_provider: Callable[[], QuantMode],
+        reuse_connection: bool = False,
     ) -> None:
         if not callable(mode_provider):
             raise DerivedResearchReceiptError("SIMULATION mode provider required")
+        if type(reuse_connection) is not bool:
+            raise DerivedResearchReceiptError("invalid single-owner connection mode")
         self.path = Path(path)
         self._mode_provider = mode_provider
+        self._reuse_connection = reuse_connection
+        self._session_connection: sqlite3.Connection | None = None
         self._simulation_only()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
@@ -88,13 +93,39 @@ class OfflineDerivedResearchReceiptLedger:
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(str(self.path), isolation_level=None, timeout=10)
+        # Opt-in only for one trusted session/event-loop owner. SQLite still
+        # COMMITs every record with WAL + synchronous FULL; this eliminates
+        # per-event connection startup without claiming batch atomicity.
+        if self._reuse_connection:
+            if self._session_connection is None:
+                self._session_connection = sqlite3.connect(
+                    str(self.path), isolation_level=None, timeout=10,
+                )
+                self._session_connection.row_factory = sqlite3.Row
+                self._session_connection.execute("PRAGMA busy_timeout=10000")
+            if self._session_connection.in_transaction:
+                raise DerivedResearchReceiptError("reused connection has unfinished transaction")
+            yield self._session_connection
+        else:
+            conn = sqlite3.connect(str(self.path), isolation_level=None, timeout=10)
+            try:
+                conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA busy_timeout=10000")
+                yield conn
+            finally:
+                conn.close()
+
+    def close(self) -> None:
+        connection = self._session_connection
+        if connection is None:
+            return
+        self._session_connection = None
         try:
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA busy_timeout=10000")
-            yield conn
+            if connection.in_transaction:
+                connection.rollback()
+                raise DerivedResearchReceiptError("observer connection closed with uncommitted work")
         finally:
-            conn.close()
+            connection.close()
 
     def _simulation_only(self) -> None:
         if self._mode_provider() is not QuantMode.SIMULATION:
