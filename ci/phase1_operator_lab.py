@@ -348,7 +348,13 @@ def run_smoke(*,allow_public:bool,profile:str,
     with (trial/"stdout.log").open("wb") as out, (trial/"stderr.log").open("wb") as err, (
         trial/"host_resources.jsonl"
     ).open("w",encoding="utf-8") as host_log:
-        proc=subprocess.Popen(argv,cwd=_root(),stdout=out,stderr=err)
+        # Opt-in aggregate-only profiler for the finite Load research preset.
+        # Never changes source queue capacity, ACK or exchange permissions.
+        child_env = {**os.environ,
+                     "ECONITH_PHASE1_STAGE_PROFILE": (
+                         "1" if profile == "load" else "0")}
+        proc=subprocess.Popen(argv,cwd=_root(),stdout=out,stderr=err,
+                              env=child_env)
         try:
             while proc.poll() is None:
                 total,available=_memory()
