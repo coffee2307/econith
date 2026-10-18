@@ -5,7 +5,6 @@ import asyncio
 import hmac
 import json
 import os
-import signal
 import subprocess
 import sys
 
@@ -87,7 +86,7 @@ async def test_killed_receiver_never_fabricates_ack_and_exact_restart_is_idempot
         first=(await child.accept_batch([envelope(101)],
                                          now_ms=1780000000200))[0]
         assert len(saved(db))==1
-        os.kill(child.pid, signal.SIGKILL)
+        child._process.kill()  # asyncio subprocess kill works on Windows/Linux
         await asyncio.sleep(0.05)
         with pytest.raises(AuthenticatedReceiptIPCError):
             await child.accept_batch([envelope(102)],now_ms=1780000000300)
