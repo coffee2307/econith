@@ -54,11 +54,33 @@ async def matrix(root:Path,*,frames:int,max_lag_ms:int,
                 "max_lag_ms":passed["max_projector_lag_ms"],
                 "max_pending_originals":passed["max_spool_pending_originals"],
                 "publication_in_session":passed["publication_in_session"],
+                "projector_age_samples":passed.get("projector_age_samples"),
+                "admission_age_p50_upper_ms":passed.get("projector_p50_admission_age_upper_ms"),
+                "admission_age_p95_upper_ms":passed.get("projector_p95_admission_age_upper_ms"),
+                "admission_age_p99_upper_ms":passed.get("projector_p99_admission_age_upper_ms"),
+                "min_freshness_headroom_ms":passed.get("projector_min_headroom_ms"),
                 "orders_submitted":0,
             }
         except Exception as exc:
             item["failure_code"]=safe_failure_code(exc)
             item["orders_submitted"]=0
+            # A failed original is ALWAYS quarantined. This diagnostic can
+            # explain age distribution but can never change its verdict.
+            diag=path/"projector_lag.json"
+            try:
+                if diag.is_file() and not diag.is_symlink() and diag.stat().st_size<=32_768:
+                    age=json.loads(diag.read_text(encoding="utf-8"))
+                    if (age.get("schema")=="econith-phase1-projector-age-histogram-v1"
+                        and age.get("diagnostic_only_not_source_evidence") is True):
+                        item["incomplete_projector_diagnostic"]={
+                            "source_complete":False,
+                            "age_samples":age.get("age_samples"),
+                            "p95_age_upper_ms":age.get("p95_age_upper_ms"),
+                            "p99_age_upper_ms":age.get("p99_age_upper_ms"),
+                            "max_pending_originals":age.get("max_pending_originals"),
+                        }
+            except (OSError,ValueError,TypeError,UnicodeError):
+                pass
         results.append(item)
         print(json.dumps(item,sort_keys=True),flush=True)
     passed_count=sum(item["status"]=="PASSED" for item in results)
