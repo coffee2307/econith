@@ -37,6 +37,7 @@ from infrastructure.spot_forward_checkpoints import OfflineForwardSessionCheckpo
 from infrastructure.spot_forward_owner import exclusive_forward_owner
 from infrastructure.spot_forward_stage_profile import BoundedStageProfiler
 from infrastructure.spot_projection_durable_cursor import OfflineSpotProjectionCursor
+from infrastructure.spot_projector_lag_histogram import BoundedProjectorLag
 from infrastructure.market_persistent_hmac_receiver import PersistentHmacResearchReceiver
 from infrastructure.market_derived_research_receipts import (
     OfflineDerivedResearchReceiptLedger,
@@ -90,6 +91,11 @@ class ForwardSpotResearchStatus:
     spool_original_cursor: int = 0
     max_projector_lag_ms: int = 0
     max_spool_pending_originals: int = 0
+    projector_age_samples: int = 0
+    projector_p50_admission_age_upper_ms: int | None = None
+    projector_p95_admission_age_upper_ms: int | None = None
+    projector_p99_admission_age_upper_ms: int | None = None
+    projector_min_headroom_ms: int | None = None
 
 
 async def observe_forward_spot_research(
@@ -179,6 +185,10 @@ async def observe_forward_spot_research(
                     if os.environ.get("ECONITH_PHASE1_STAGE_PROFILE") == "1" else None)
         trace = profiler.measure if profiler else lambda _stage: nullcontext()
         completed = False
+        lag_diagnostic = (
+            BoundedProjectorLag(root / 'projector_lag.json', age_budget_ms=max_projector_lag_ms)
+            if spooled_in_session else None
+        )
         provider = lambda: QuantMode.SIMULATION
         journal = OfflineSpotCaptureJournal(
             root / "original.sqlite", mode_provider=provider, forward_capture_audit=True,
@@ -257,13 +267,15 @@ async def observe_forward_spot_research(
 
         async def forward(record: CapturedSpotRecord) -> None:
             nonlocal forwarded_trades, forwarded_books, pre_sync, last_book_id, admitted, receiver_ack_max_ms, highest_lag_ms, published_before_source_close
-            def enforce_live_age() -> None:
+            def enforce_live_age() -> int | None:
                 nonlocal highest_lag_ms
                 if spooled_in_session:
                     lag_ms = (time.time_ns() // 1_000_000) - record.received_at_ms
                     if lag_ms < -1000 or lag_ms > max_projector_lag_ms:
                         raise ForwardSpotResearchError("projector source delivery lag exceeded")
                     highest_lag_ms = max(highest_lag_ms, lag_ms)
+                    return max(0, lag_ms)
+                return None
             enforce_live_age()
             before = shadow.trades
             # Source COMMIT and independent disk re-read BEFORE any receiver IPC
@@ -357,7 +369,7 @@ async def observe_forward_spot_research(
                 outbox.ack_receiver(envelope, confirmations[0])
             # Signed receiver ACK may take time: recheck freshness just
             # BEFORE any protected EventBus publication, not only at dequeue.
-            enforce_live_age()
+            admission_lag_ms = enforce_live_age()
             # ONLY the approved read-only pipeline/observers run on this bus.
             # Subscription completion alone is never a durable external ACK.
             with trace("eventbus_publish"):
@@ -372,6 +384,8 @@ async def observe_forward_spot_research(
                     verified_source_available_at_ms=now,
                     receiver_receipt_id=confirmations[0].receipt_id,
                 )
+            if admission_lag_ms is not None and lag_diagnostic is not None:
+                lag_diagnostic.admit(admission_lag_ms)
             if spooled_in_session and not capture_closed:
                 published_before_source_close = True
             with trace("derived_subscriber_wait"):
@@ -413,6 +427,8 @@ async def observe_forward_spot_research(
             latest_original = record.capture_id
             backlog = latest_original - advanced_original
             peak_pending_originals = max(peak_pending_originals, backlog)
+            if lag_diagnostic is not None:
+                lag_diagnostic.pending(backlog)
             if backlog > max_pending_originals:
                 raise ForwardSpotResearchError("source spool pending capacity exceeded")
             signal.set()
@@ -522,6 +538,8 @@ async def observe_forward_spot_research(
                 else:
                     raise ForwardSpotResearchError("protected forward EventBus bypass")
             completed = True
+            lag_stats = (lag_diagnostic.summary(source_complete=True)
+                         if lag_diagnostic is not None else None)
             return ForwardSpotResearchStatus(
                 mode="SIMULATION", session_id=session_id,
                 original_records=proof.verified_original_records,
@@ -549,6 +567,15 @@ async def observe_forward_spot_research(
                 spool_original_cursor=advanced_original,
                 max_projector_lag_ms=highest_lag_ms,
                 max_spool_pending_originals=peak_pending_originals,
+                projector_age_samples=lag_stats["age_samples"] if lag_stats else 0,
+                projector_p50_admission_age_upper_ms=(
+                    lag_stats["p50_age_upper_ms"] if lag_stats else None),
+                projector_p95_admission_age_upper_ms=(
+                    lag_stats["p95_age_upper_ms"] if lag_stats else None),
+                projector_p99_admission_age_upper_ms=(
+                    lag_stats["p99_age_upper_ms"] if lag_stats else None),
+                projector_min_headroom_ms=(
+                    lag_stats["minimum_observed_headroom_ms"] if lag_stats else None),
             )
         finally:
             if projector_task is not None and not projector_task.done():
@@ -564,6 +591,10 @@ async def observe_forward_spot_research(
                         consumer.close()
                     derived_db.close()
                 finally:
-                    if profiler is not None:
-                        # Diagnostic output is not source/ACK evidence.
-                        profiler.write(completed=completed)
+                    try:
+                        if lag_diagnostic is not None:
+                            lag_diagnostic.write(source_complete=completed)
+                    finally:
+                        if profiler is not None:
+                            # Diagnostic output is not source/ACK evidence.
+                            profiler.write(completed=completed)
