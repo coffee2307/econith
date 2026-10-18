@@ -26,12 +26,12 @@ def test_producer_cached_sqlite_maintains_wal_full_and_independent_files(tmp_pat
     try:
         with outbox._connect() as db1:
             assert db1.execute("PRAGMA synchronous").fetchone()[0]==2
-            assert db1.execute("PRAGMA journal_mode").fetchone()[0][0].lower()=="wal"
+            assert db1.execute("PRAGMA journal_mode").fetchone()[0].lower()=="wal"
         with outbox._connect() as db2:
             assert db1 is db2
         with checkpoints._db() as ck1:
             assert ck1.execute("PRAGMA synchronous").fetchone()[0]==2
-            assert ck1.execute("PRAGMA journal_mode").fetchone()[0][0].lower()=="wal"
+            assert ck1.execute("PRAGMA journal_mode").fetchone()[0].lower()=="wal"
         with checkpoints._db() as ck2:
             assert ck1 is ck2
         assert ck1 is not db1
