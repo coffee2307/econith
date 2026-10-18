@@ -20,7 +20,8 @@ from infrastructure.spot_forward_failure_diagnostics import safe_failure_code
 from infrastructure.spot_forward_verified_research import observe_forward_spot_research
 
 
-async def run(root:Path,*,frames:int,timeout_s:float,max_lag_ms:int)->dict:
+async def run(root:Path,*,frames:int,timeout_s:float,max_lag_ms:int,
+              reuse_derived_connections:bool=False)->dict:
     await measure_public_clock(
         max_abs_offset_ms=3000,max_rtt_ms=2000,
     )
@@ -32,6 +33,7 @@ async def run(root:Path,*,frames:int,timeout_s:float,max_lag_ms:int)->dict:
         spooled_in_session=True,allow_experimental_public_spool=True,
         max_projector_lag_ms=max_lag_ms,max_pending_originals=512,
         max_source_raw_bytes=200_000_000,
+        experiment_reuse_derived_connections=reuse_derived_connections,
     )
     if (not result.session_complete or not result.publication_in_session
         or not result.all_receipts_independent or result.orders_submitted
@@ -45,6 +47,7 @@ async def run(root:Path,*,frames:int,timeout_s:float,max_lag_ms:int)->dict:
         "history_gap_free_verified":False,
         "default_market_ingress_cutover":False,
         "institutional_phase1_complete":False,
+        "derived_connection_reuse_experimental":reuse_derived_connections,
     }
 
 
@@ -52,6 +55,8 @@ def main(argv:list[str]|None=None)->int:
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--allow-public-market-data",action="store_true")
     p.add_argument("--accept-experimental-spool",action="store_true")
+    p.add_argument("--reuse-derived-connections",action="store_true",
+                   help="opt-in research-only observer connection reuse")
     p.add_argument("--output-dir",type=Path,required=True)
     p.add_argument("--frames",type=int,default=1000)
     p.add_argument("--timeout-s",type=float,default=120.0)
@@ -69,7 +74,8 @@ def main(argv:list[str]|None=None)->int:
     try:
         result=asyncio.run(run(args.output_dir,frames=args.frames,
                                timeout_s=args.timeout_s,
-                               max_lag_ms=args.max_lag_ms))
+                               max_lag_ms=args.max_lag_ms,
+                               reuse_derived_connections=args.reuse_derived_connections))
     except Exception as exc:
         print(json.dumps({
             "verdict":"FAILED_OR_QUARANTINED_SOURCE",
