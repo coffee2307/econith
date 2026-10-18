@@ -35,6 +35,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--max-clock-rtt-ms",type=int,default=2000)
     p.add_argument("--ws-idle-timeout-s",type=float,default=30.0)
     p.add_argument("--persistent-receiver",action="store_true")
+    p.add_argument("--fresh-socket-per-segment",action="store_true",
+                   help="Discard public WSS after every bounded attempt; no claimed history continuity")
     p.add_argument("--single-socket",action="store_true",
                    help="Reuse one public TLS socket across finite verified segments")
     return p
@@ -67,6 +69,7 @@ def validate(args: argparse.Namespace) -> None:
         or type(args.max_clock_rtt_ms) is not int
         or not 50 <= args.max_clock_rtt_ms <= 5000
         or (args.single_socket and not args.persistent_receiver)
+        or (args.fresh_socket_per_segment and not args.single_socket)
     ):
         raise ValueError("invalid bounded public endurance policy")
 
@@ -89,6 +92,7 @@ async def run(args: argparse.Namespace) -> dict:
             public_ws_idle_timeout_s=args.ws_idle_timeout_s,
             watch_duration_s=(args.watch_hours*3600 if args.watch_hours is not None else None),
             clock_check=clock_check,
+            fresh_socket_per_segment=args.fresh_socket_per_segment,
         )
         result=asdict(pilot.supervisor)
         result.update({
