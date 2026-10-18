@@ -74,6 +74,7 @@ class ForwardSpotResearchStatus:
     continuous_live_market: bool
     execution_started: bool
     orders_submitted: int
+    queue_high_watermark: int = 0
 
 
 async def observe_forward_spot_research(
@@ -334,6 +335,7 @@ async def observe_forward_spot_research(
                 publication_in_session=True, session_complete=True,
                 history_continuity_verified=False, continuous_live_market=False,
                 execution_started=False, orders_submitted=0,
+                queue_high_watermark=result.queue_high_watermark,
             )
         finally:
             await bus.stop()
