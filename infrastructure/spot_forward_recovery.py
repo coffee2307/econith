@@ -24,6 +24,7 @@ from infrastructure.market_derived_research_receipts import OfflineDerivedResear
 from infrastructure.market_named_research_subscribers import OfflineNamedResearchSubscriber
 from infrastructure.preprocessing.pipeline import MarketDataPipeline
 from infrastructure.spot_forward_outbox import OfflineForwardSpotOutbox, ForwardOutboxError
+from infrastructure.spot_forward_checkpoints import OfflineForwardSessionCheckpoints
 from infrastructure.spot_forward_eligibility import rescan_forward_eligibility
 from infrastructure.spot_forward_owner import exclusive_forward_owner
 from infrastructure.spot_ingress_capture import OfflineSpotCaptureJournal
@@ -47,6 +48,8 @@ class ForwardStagedRecoveryReport:
     session_certified: bool = False
     execution_started: bool = False
     orders_submitted: int = 0
+    forward_checkpoints: int = 0
+    checkpoint_suffix_repaired: int = 0
 
 
 async def recover_staged_forward_spot(
@@ -223,6 +226,20 @@ async def recover_staged_forward_spot(
                 or any(r.status != "DERIVED_ACKED" for r in outbox.items())
             ):
                 raise ForwardOutboxError("incomplete staged forward recovery")
+            # Old durable checkpoints must be an EXACT prefix of fully
+            # re-ACKed source outbox, or recovery is forbidden. A crash after
+            # derived COMMIT may leave a missing checkpoint *suffix* only.
+            checkpoint_count = suffix_repaired = 0
+            checkpoint_file = root/"forward_checkpoints.sqlite"
+            if checkpoint_file.is_file():
+                checkpoints=OfflineForwardSessionCheckpoints(
+                    checkpoint_file,session_id=session_id,mode_provider=provider,
+                )
+                completed=outbox.items()
+                preceding=checkpoints.verified_prefix(completed)
+                repaired=checkpoints.reconcile(completed)
+                checkpoint_count=repaired.checkpointed_events
+                suffix_repaired=checkpoint_count-preceding.checkpointed_events
             return ForwardStagedRecoveryReport(
                 session_id=session_id,
                 staged_envelopes=len(items),
@@ -233,6 +250,8 @@ async def recover_staged_forward_spot(
                 source_session_closed=session["closed_at_ms"] is not None,
                 reconstructed_missing_intents=rebuilt,
                 original_eligibility_rescan_verified=reconstruct_missing,
+                forward_checkpoints=checkpoint_count,
+                checkpoint_suffix_repaired=suffix_repaired,
             )
         finally:
             await bus.stop()
