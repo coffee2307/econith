@@ -191,7 +191,7 @@ def _batch_request(
     body = {"envelopes": [asdict(e) for e in envelopes], "now_ms": now_ms}
     return _encode_json({
         "body": body, "mac": _tagged_mac(key, _BATCH_REQ_TAG, body),
-    }) + b"\\n"
+    }) + b"\n"
 
 
 def _accept_authenticated_batch_input(
@@ -225,7 +225,7 @@ def _accept_authenticated_batch_input(
     ack = {"receipts": receipts}
     return _encode_json({
         "body": ack, "mac": _tagged_mac(key, _BATCH_ACK_TAG, ack),
-    }) + b"\\n"
+    }) + b"\n"
 
 
 def accept_batch_via_authenticated_subprocess(
