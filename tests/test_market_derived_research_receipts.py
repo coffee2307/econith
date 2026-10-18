@@ -294,3 +294,66 @@ async def test_research_session_reset_does_not_mix_unknown_gap_windows():
         assert counts == [1,1]
     finally:
         await bus.stop()
+
+
+def test_reused_connection_keeps_each_event_durable_to_independent_reader(tmp_path):
+    d=OfflineDerivedResearchReceiptLedger(
+        tmp_path/"reused.sqlite",
+        mode_provider=lambda:QuantMode.SIMULATION,
+        reuse_connection=True,
+    )
+    a=accept(d,1)
+    with sqlite3.connect(d.path.resolve().as_uri()+"?mode=ro",uri=True) as independent:
+        assert independent.execute(
+            "SELECT COUNT(*) FROM offline_research_derived_receipts"
+        ).fetchone()[0]==1
+    b=accept(d,2)
+    assert not a.replayed and not b.replayed
+    with pytest.raises(DerivedResearchReceiptError,match="injected crash"):
+        accept(d,3,crash=True)
+    with sqlite3.connect(d.path.resolve().as_uri()+"?mode=ro",uri=True) as independent:
+        assert independent.execute(
+            "SELECT COUNT(*) FROM offline_research_derived_receipts"
+        ).fetchone()[0]==2
+        assert independent.execute(
+            "SELECT last_ordinal FROM offline_research_derived_cursors"
+        ).fetchone()[0]==2
+    d.close()
+    assert OfflineDerivedResearchReceiptLedger(
+        d.path,mode_provider=lambda:QuantMode.SIMULATION,
+    ).verified_count("rec_fixture01","md.ticker")==2
+
+
+def test_reused_connection_conflicting_ack_does_not_mutate_cursor(tmp_path):
+    d=OfflineDerivedResearchReceiptLedger(
+        tmp_path/"bounded_reuse.sqlite",
+        mode_provider=lambda:QuantMode.SIMULATION,reuse_connection=True,
+    )
+    accept(d)
+    with pytest.raises(DerivedResearchReceiptError,match="conflicting"):
+        accept(d,value=9000)
+    assert d.verified_count("rec_fixture01","md.ticker")==1
+    d.close()
+    assert ledger(tmp_path).verified_count("rec_fixture01","md.ticker")==0
+
+
+def test_hard_exit_after_reused_connection_full_commit_preserves_receipt(tmp_path):
+    import subprocess,sys
+    path=tmp_path/"hard_exit_reuse.sqlite"
+    code="""
+import os,sys
+from core.mode import QuantMode
+from infrastructure.market_derived_research_receipts import OfflineDerivedResearchReceiptLedger
+d=OfflineDerivedResearchReceiptLedger(
+    sys.argv[1],mode_provider=lambda:QuantMode.SIMULATION,reuse_connection=True)
+d.accept(topic="md.ticker",session_id="rec_fixture01",ordinal=1,
+    source_record_id="rec_fixture01:aggTrade:101",
+    source_available_at_ms=1780000000001,projection={"symbol":"BTCUSDT","price":101.25})
+os._exit(49)
+"""
+    result=subprocess.run([sys.executable,"-c",code,str(path)],capture_output=True,text=True,timeout=15)
+    assert result.returncode==49,result.stderr
+    reopened=OfflineDerivedResearchReceiptLedger(
+        path,mode_provider=lambda:QuantMode.SIMULATION)
+    assert reopened.verified_count("rec_fixture01","md.ticker")==1
+    assert accept(reopened).replayed
