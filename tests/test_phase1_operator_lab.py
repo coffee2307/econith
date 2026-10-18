@@ -210,3 +210,17 @@ def test_load_operator_profile_is_bounded_and_no_duration_certificate(tmp_path):
     assert '"Load"' in windows and "--profile load" in windows
     assert "diagnostic|load|hour" in linux
     assert "setup|doctor|quick|diagnostic|load|hour" in linux
+
+
+def test_load_refuses_low_available_ram_before_creating_any_trial(tmp_path,monkeypatch):
+    monkeypatch.setattr(lab,"doctor",lambda **kwargs: {
+        "packages":{"httpx":"available","websockets":"available",
+                    "pydantic":"available","numpy":"available"},
+        "ram_available_gib":0.91,
+    })
+    destination=tmp_path/"not_created"
+    with pytest.raises(RuntimeError,match="at least 1.5 GiB"):
+        lab.run_smoke(
+            allow_public=True,profile="load",evidence_base=destination,
+        )
+    assert not destination.exists()
