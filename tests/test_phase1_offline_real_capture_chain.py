@@ -38,7 +38,7 @@ def agg(n):
     }
 
 
-def original_db(tmp_path, *, synchronized=True, closed=True):
+def original_db(tmp_path, *, synchronized=True, closed=True, extra_trades=0):
     path = tmp_path / "original.sqlite"
     j = OfflineSpotCaptureJournal(
         path, mode_provider=lambda: QuantMode.SIMULATION,
@@ -74,6 +74,11 @@ def original_db(tmp_path, *, synchronized=True, closed=True):
         SESSION, frame(agg(501)),
         stream_kind="aggTrade", received_at_ms=BASE+150,
     )
+    for index in range(extra_trades):
+        j.record_ws(
+            SESSION, frame(agg(502 + index)),
+            stream_kind="aggTrade", received_at_ms=BASE + 160 + index,
+        )
     if closed:
         j.close_session(SESSION, closed_at_ms=BASE+200)
     return path
@@ -177,3 +182,22 @@ def test_saved_real_capture_can_ack_via_authenticated_subprocess(tmp_path, capsy
     assert report["network_requests"] == 0
     assert report["orders_submitted"] == 0
     assert hashlib.sha256(source.read_bytes()).hexdigest() == before
+
+def test_authenticated_batch_crosses_32_trade_boundary_without_losing_acks(tmp_path):
+    # 35 verified original trades need 2 child process batches, but still
+    # 35 individually committed independent receiver receipts and source ACKs.
+    db = original_db(tmp_path, extra_trades=33)
+    report = run(__import__("argparse").Namespace(
+        source_db=db, output_dir=tmp_path / "batched_35",
+        session_id=SESSION, authenticated_subprocess=True,
+    ))
+    assert report["original_trades_replayed"] == 35
+    assert report["producer_ack_count"] == 35
+    assert report["independent_receiver_receipt_count"] == 35
+    assert report["lineage_manifest_entries"] == 35
+    assert report["authenticated_receiver_process_invocations"] == 2
+    assert report["authenticated_receiver_batch_limit"] == 32
+    with sqlite3.connect(tmp_path / "batched_35" / "receiver.sqlite") as conn:
+        assert conn.execute(
+            "SELECT COUNT(*) FROM offline_independent_projection_receipts"
+        ).fetchone()[0] == 35
