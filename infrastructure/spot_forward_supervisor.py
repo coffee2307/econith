@@ -365,6 +365,10 @@ async def run_forward_research_supervisor(
                 """,(iteration-1,)).fetchone()
                 if iteration>1 and previous is None:
                     raise ForwardSupervisorError("previous source not durably closed")
+                if previous is not None and started < previous[1]:
+                    raise ForwardSupervisorError(
+                        "local receipt clock moved backwards between source sessions"
+                    )
                 if previous is not None:
                     # Even successful successive source windows have unknowable
                     # exchange observations between the two receipt clocks.
