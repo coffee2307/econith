@@ -9,7 +9,6 @@ claims; injected fixture streams remain explicitly offline research.
 """
 from __future__ import annotations
 
-import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -22,11 +21,14 @@ class PinnedSpotLeaseError(RuntimeError):
     """Pinned public Spot transport invalid, closed or disallowed."""
 
 
+_LEASE_TOKEN=object()
+
+
 class PinnedPublicSpotLease:
-    def __init__(self, *, _token: object, _guard: object,
+    def __init__(self, *, _token: object,
                  socket: object, rest_client: object,
                  max_body_bytes: int):
-        if _token is not _guard:
+        if _token is not _LEASE_TOKEN:
             raise PinnedSpotLeaseError("lease cannot be constructed externally")
         self._socket=socket
         self._rest=rest_client
@@ -80,7 +82,6 @@ async def open_pinned_public_spot_lease(
     socket_url=(
         f"{_PUBLIC_WS}?streams=btcusdt@aggTrade/btcusdt@depth@100ms"
     )
-    guard=object()
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(10.0),follow_redirects=False,
         trust_env=False,verify=True,headers={"Accept-Encoding":"identity"},
@@ -91,7 +92,7 @@ async def open_pinned_public_spot_lease(
             ping_interval=20,ping_timeout=20,
         ) as socket:
             lease=PinnedPublicSpotLease(
-                _token=guard,_guard=guard,
+                _token=_LEASE_TOKEN,
                 socket=socket,rest_client=rest,
                 max_body_bytes=max_body_bytes,
             )
