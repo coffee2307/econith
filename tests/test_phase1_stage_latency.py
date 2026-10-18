@@ -1,6 +1,7 @@
 """Phase 1 latency profiling is opt-in, bounded and never certifies a source."""
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 
