@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-_SUPPORTED = frozenset(("legacy", "verified_only"))
+_SUPPORTED = frozenset(("legacy", "verified_only", "verified_forward_preview"))
 
 
 class VerifiedIngressNotReady(RuntimeError):
@@ -34,8 +34,25 @@ def enforce_verified_only_spot_ingress(
     )
     if not isinstance(chosen, str) or chosen not in _SUPPORTED:
         raise VerifiedIngressNotReady(
-            "invalid ECONITH_SPOT_INGRESS_POLICY; allowed: legacy, verified_only"
+            "invalid ECONITH_SPOT_INGRESS_POLICY; allowed: legacy, verified_only, verified_forward_preview"
         )
+    if chosen == "verified_forward_preview":
+        # Never default; only public data, no private execution routes.
+        consent = os.environ.get("ECONITH_SPOT_FORWARD_PREVIEW_CONSENT", "")
+        output = os.environ.get("ECONITH_SPOT_FORWARD_PREVIEW_OUTPUT_DIR", "")
+        if consent != "PUBLIC_MARKET_DATA_RESEARCH_ONLY" or not output:
+            raise VerifiedIngressNotReady(
+                "forward preview requires explicit public-only research consent"
+            )
+        target = Path(output)
+        if (
+            not target.is_absolute() or target.exists()
+            or target != target.resolve()
+            or target.parent.is_symlink()
+        ):
+            raise VerifiedIngressNotReady(
+                "forward preview must use a new absolute unaliased research directory"
+            )
     if chosen == "verified_only":
         # Only the physically isolated, historical SIMULATION research graph
         # may opt into the verified-only *main process*. No live streamer,
