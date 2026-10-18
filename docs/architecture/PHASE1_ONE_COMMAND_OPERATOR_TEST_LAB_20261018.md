@@ -110,16 +110,34 @@ bash scripts/phase1-test.sh hour
 bash scripts/phase1-test.sh day
 ```
 
-An Hour/Day preset uses the same one-socket read-only research source,
-persistent HMAC receiver and per-segment SQLite attestation. Hour
-has a 1-hour target, Day a 24-hour target, with bounded 2,048
-attempts and 1.8 GB file cap. The current finite-segment engine may
-exhaust attempts/disk before the target: the CLI will return nonzero
-and `REPORT.md` will say `DURATION_TARGET_NOT_REACHED`; **do not
-reinterpret that as completed endurance acceptance**. An operator
-should keep the shell/session connected or use a manually configured
-persistent terminal; no unattended auto-restart or crash evidence
-overwrite is implemented.
+An Hour/Day preset uses read-only public Binance Spot WSS
+and a persistent HMAC receiver **inside each bounded capture segment**.
+As of the real Diagnostic 3/3 acceptance on 18 Oct 2026, Hour/Day
+now adopt the Diagnostic **fresh TLS WebSocket lease per segment** policy:
+after the previous source is independently sealed, a following
+segment opens a new WSS, performs public clock preflight and captures
+a fresh REST book snapshot. This avoids inheriting stale queued frames
+from an unattended prior socket. No socket/data is reused across
+sealed segment boundaries. All such boundaries remain **UNKNOWN history
+gaps**; one hour of accepted bounded segments must NEVER be described
+as gap-free/continuous 1-hour capture.
+
+Hour has a 1-hour observation *target*, Day a 24-hour target,
+with at most 2,048 attempts and a 1.8 GB evidence cap. The bounded
+engine may hit file/attempt/time errors before the target; report
+and preserve the actual result, never interpret a budget exhaustion
+as successful endurance acceptance. The host must have >=1.5 GiB
+available RAM on Doctor for Hour/Day admission, working public WSS/
+HTTPS, and a supervised PowerShell or terminal session. Do not
+unattendedly restart, remove old failed evidence, bypass freshness,
+change legacy runtime defaults, or enable live execution.
+
+On Windows, first review a clean `-Mode Diagnostic` and its
+`report.json` (including queue, ACK and host-memory evidence),
+then explicitly opt in with `-Mode Hour`. Keep the terminal open
+and inspect `completion_code`, `failed`, `open_outages`,
+`unknown_session_boundaries`, and `gap_free_history_verified`
+before describing what was verified.
 
 **RunPod:** its CLI supports creating CPU-only Pods, but public CPU
 availability/pricing needs checking at provision time. Paying for
