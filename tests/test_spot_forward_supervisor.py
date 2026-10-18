@@ -214,7 +214,6 @@ async def test_source_alteration_is_detected_independently_after_success(tmp_pat
             WHERE capture_id=(SELECT MIN(capture_id)
                                FROM offline_spot_capture_records)
         """,(b'{"tampered":true}',))
-    original=await genuine_fixture if False else None  # no network, only disk audit
     from infrastructure.spot_forward_verified_research import ForwardSpotResearchStatus
     forged=ForwardSpotResearchStatus(
         mode="SIMULATION",session_id=sid,original_records=6,
@@ -229,3 +228,31 @@ async def test_source_alteration_is_detected_independently_after_success(tmp_pat
     )
     with pytest.raises(Exception):
         _verify_one(source_dir,forged)
+
+
+@pytest.mark.asyncio
+async def test_receiver_receipt_fingerprint_tamper_rejected_after_success(tmp_path):
+    root=(tmp_path/"altered_ack").resolve()
+    captured={}
+    async def capture(directory,sid,index):
+        value=await genuine_fixture(directory,sid,index)
+        captured["status"]=value
+        return value
+    outcome=await run_forward_research_supervisor(
+        output_dir=root,allow_public_network=True,attempts=1,
+        max_frames=20,timeout_s=20,capture_factory=capture,
+    )
+    assert outcome.accepted_sessions==1
+    with sqlite3.connect(
+        root/"attempt_001"/"independent_receiver.sqlite"
+    ) as db:
+        db.execute("""
+            UPDATE offline_independent_projection_receipts
+            SET projection_fingerprint=?
+            WHERE ingest_id=(
+                SELECT MIN(ingest_id)
+                FROM offline_independent_projection_receipts
+            )
+        """,("0"*64,))
+    with pytest.raises(ForwardSupervisorError,match="independent receipt"):
+        _verify_one(root/"attempt_001",captured["status"])
