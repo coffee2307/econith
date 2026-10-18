@@ -134,6 +134,7 @@ def _valid_session(source: dict,frames: int,lag_budget:int)->bool:
 async def timed_watch(
     root: Path, *, policy: WatchPolicy = WatchPolicy(),
     single_trial=trial, clock=time.monotonic, metrics=host_snapshot,
+    diagnose_pressure: bool = False,
 ) -> dict:
     policy.validate()
     if (not root.is_absolute() or root.exists() or root!=root.resolve()
@@ -154,6 +155,7 @@ async def timed_watch(
         "institutional_phase1_complete":False,
         "default_runtime_cutover":False,
         "orders_submitted":0,
+        "diagnose_pressure":diagnose_pressure,
     }
     _write_report(root,report)
     for number in range(1,policy.max_segments+1):
@@ -189,12 +191,18 @@ async def timed_watch(
         _write_report(root,report)
         attempt_start=clock()
         try:
-            source=await asyncio.wait_for(single_trial(
-                path,frames=policy.frames_per_segment,
-                timeout_s=policy.source_timeout_s,
-                max_lag_ms=policy.max_lag_ms,
-                reuse_derived_connections=True,
-            ),timeout=min(policy.per_segment_hard_timeout_s,remaining))
+            trial_args={
+                "frames":policy.frames_per_segment,
+                "timeout_s":policy.source_timeout_s,
+                "max_lag_ms":policy.max_lag_ms,
+                "reuse_derived_connections":True,
+            }
+            if diagnose_pressure:
+                trial_args["diagnose_pressure"]=True
+            source=await asyncio.wait_for(
+                single_trial(path,**trial_args),
+                timeout=min(policy.per_segment_hard_timeout_s,remaining),
+            )
             if not _valid_session(source,policy.frames_per_segment,policy.max_lag_ms):
                 raise RuntimeError("bounded source/ACK/age acceptance mismatch")
             after=metrics(root)
@@ -221,6 +229,23 @@ async def timed_watch(
                 item["status"]="FAILED_HOST_RESOURCE_BUDGET"
                 report["verdict"]="FAILED_OR_QUARANTINED"
         except Exception as exc:
+            if diagnose_pressure:
+                try:
+                    pressure_path=path/"spool_pressure.json"
+                    if (pressure_path.is_file() and not pressure_path.is_symlink()
+                        and pressure_path.stat().st_size <= 100_000):
+                        diagnostic=json.loads(pressure_path.read_text(encoding="utf-8"))
+                        if (diagnostic.get("schema")=="econith-phase1-spool-pressure-v1"
+                            and diagnostic.get("diagnostic_only_not_source_evidence") is True):
+                            item["incomplete_spool_diagnostic"]={
+                                "source_complete":False,
+                                "raw_callback_count":diagnostic["counters"]["raw_committed"],
+                                "cursor_count":diagnostic["counters"]["cursor_advanced"],
+                                "checkpoints":diagnostic["counters"]["checkpoints"],
+                                "windows_truncated":diagnostic["windows_truncated"],
+                            }
+                except (OSError,KeyError,TypeError,ValueError):
+                    pass
             item.update({
                 "status":"FAILED_OR_QUARANTINED",
                 "failure_code":("SEGMENT_HARD_TIMEOUT" if isinstance(exc,asyncio.TimeoutError)
@@ -262,6 +287,8 @@ def main(argv=None)->int:
     p.add_argument("--allow-public-market-data",action="store_true")
     p.add_argument("--accept-experimental-spool",action="store_true")
     p.add_argument("--accept-unverified-intersegment-gaps",action="store_true")
+    p.add_argument("--diagnose-pressure",action="store_true",
+                   help="record bounded per-segment pressure and stage diagnostic reports")
     p.add_argument("--output-dir",required=True,type=Path)
     p.add_argument("--min-watch-s",type=float,default=600.0)
     p.add_argument("--max-watch-s",type=float,default=900.0)
@@ -272,7 +299,9 @@ def main(argv=None)->int:
         p.error("three separate explicit bounded public research consents required")
     policy=WatchPolicy(min_watch_s=a.min_watch_s,max_watch_s=a.max_watch_s)
     try:
-        result=asyncio.run(timed_watch(a.output_dir,policy=policy))
+        result=asyncio.run(timed_watch(
+            a.output_dir,policy=policy,diagnose_pressure=a.diagnose_pressure,
+        ))
     except Exception as exc:
         print(json.dumps({
             "verdict":"REFUSED_OR_QUARANTINED",
