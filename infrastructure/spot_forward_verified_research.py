@@ -31,6 +31,7 @@ from infrastructure.market_cross_process_delivery import (
 )
 from infrastructure.market_delivery_cursor import OfflineMarketProjectionCursor
 from infrastructure.spot_forward_outbox import OfflineForwardSpotOutbox
+from infrastructure.spot_forward_checkpoints import OfflineForwardSessionCheckpoints
 from infrastructure.spot_forward_owner import exclusive_forward_owner
 from infrastructure.market_persistent_hmac_receiver import PersistentHmacResearchReceiver
 from infrastructure.market_derived_research_receipts import (
@@ -79,6 +80,8 @@ class ForwardSpotResearchStatus:
     receiver_process_starts: int = 0
     receiver_transport: str = "one_shot_hmac"
     max_receiver_ack_latency_ms: float = 0.0
+    forward_checkpoints: int = 0
+    forward_checkpoint_sha256: str | None = None
 
 
 async def observe_forward_spot_research(
@@ -157,6 +160,10 @@ async def observe_forward_spot_research(
         receiver_db = root / "independent_receiver.sqlite"
         outbox = OfflineForwardSpotOutbox(
             root / "forward_outbox.sqlite", session_id=session_id,
+            mode_provider=provider,
+        )
+        checkpoints = OfflineForwardSessionCheckpoints(
+            root / "forward_checkpoints.sqlite",session_id=session_id,
             mode_provider=provider,
         )
         observed = dict.fromkeys(_TOPIC_COUNTS, 0)
@@ -287,6 +294,9 @@ async def observe_forward_spot_research(
             # Handler completion is not itself durable. Advance after BOTH
             # independent receiver and derived-ledger counts are visible.
             outbox.ack_derived(envelope)
+            # The source session is STILL OPEN: durable independently tied
+            # producer/receiver/derived ACK proof is checkpointed per event.
+            checkpoints.append(envelope,completed_outbox=outbox.items())
             admitted += 1
             if topic == "md.aggTrade":
                 forwarded_trades += 1
@@ -338,6 +348,9 @@ async def observe_forward_spot_research(
             saved = outbox.verify_source(journal, source_session_id=session_id)
             if len(saved) != admitted or any(x.status != "DERIVED_ACKED" for x in saved):
                 raise ForwardSpotResearchError("producer outbox/consumer ACK mismatch")
+            checkpoint_proof = checkpoints.verified_prefix(saved)
+            if checkpoint_proof.checkpointed_events != admitted:
+                raise ForwardSpotResearchError("forward live checkpoint/ACK count mismatch")
             # A forged legacy raw/derived producer is still barred from this bus.
             for topic in ("md.aggTrade", "md.ticker"):
                 try:
@@ -366,6 +379,8 @@ async def observe_forward_spot_research(
                 receiver_transport=("persistent_hmac" if receiver_client is not None
                                     else "one_shot_hmac"),
                 max_receiver_ack_latency_ms=receiver_ack_max_ms,
+                forward_checkpoints=checkpoint_proof.checkpointed_events,
+                forward_checkpoint_sha256=checkpoint_proof.tail_sha256,
             )
         finally:
             if receiver_client is not None:
