@@ -24,6 +24,7 @@ from infrastructure.market_derived_research_receipts import OfflineDerivedResear
 from infrastructure.market_named_research_subscribers import OfflineNamedResearchSubscriber
 from infrastructure.preprocessing.pipeline import MarketDataPipeline
 from infrastructure.spot_forward_outbox import OfflineForwardSpotOutbox, ForwardOutboxError
+from infrastructure.spot_forward_owner import exclusive_forward_owner
 from infrastructure.spot_ingress_capture import OfflineSpotCaptureJournal
 
 _SOURCE = "verified_forward_spot_shadow"
@@ -56,126 +57,132 @@ async def recover_staged_forward_spot(
         or type(max_envelopes) is not int or not 1 <= max_envelopes <= 2000
     ):
         raise ForwardOutboxError("unsafe bounded forward recovery directory")
-    source = root / "original.sqlite"
-    ledger_path = root / "forward_outbox.sqlite"
-    receiver_path = root / "independent_receiver.sqlite"
-    primary_path = root / "derived.sqlite"
-    names = ("research_audit", "research_monitor")
-    needed = [source, ledger_path, receiver_path, primary_path] + [
-        root / (name + ".sqlite") for name in names
-    ]
-    if any(not p.is_file() or p.is_symlink() or p.resolve() != p
-           for p in needed):
-        raise ForwardOutboxError("all previously owned durable evidence ledgers required")
-    provider = lambda: QuantMode.SIMULATION
-    journal = OfflineSpotCaptureJournal(source, mode_provider=provider)
-    outbox = OfflineForwardSpotOutbox(
-        ledger_path, session_id=session_id, mode_provider=provider,
-    )
-    items = outbox.verify_source(journal, source_session_id=session_id)
-    if len(items) > max_envelopes:
-        raise ForwardOutboxError("staged recovery exceeds bounded resource limit")
-    with journal._connect() as db:
-        session = db.execute(
-            "SELECT closed_at_ms FROM offline_spot_capture_sessions WHERE session_id=?",
-            (session_id,),
-        ).fetchone()
-    if session is None:
-        raise ForwardOutboxError("original captured session missing")
-    named = [
-        OfflineNamedResearchSubscriber(
-            root / (name + ".sqlite"), name=name,
-            expected_source=_SOURCE, mode_provider=provider,
-        ) for name in names
-    ]
-    primary = OfflineDerivedResearchReceiptLedger(
-        primary_path, mode_provider=provider,
-    )
-    receiver = OfflineIndependentProjectionReceiver(
-        receiver_path, mode_provider=provider,
-    )
-    bus = EventBus(mode_provider=provider)
-    pub = bus.activate_verified_market_only(max_inflight=1)
-    derived = bus.activate_verified_derived_only()
-    MarketDataPipeline(bus, verified_derived_publisher=derived).register()
-    wanted = {"md.ticker":0,"indicator.volume_delta":0,"indicator.obi":0}
-
-    async def primary_observer(event: Event) -> None:
-        primary.accept(
-            topic=event.topic,
-            session_id=event.payload["verified_session_id"],
-            ordinal=event.payload["verified_source_ordinal"],
-            source_record_id=event.payload["verified_source_record_id"],
-            source_available_at_ms=event.payload["verified_source_available_at_ms"],
-            projection=event.payload,
+    with exclusive_forward_owner(root, role="STAGED_RECOVERY"):
+        source = root / "original.sqlite"
+        ledger_path = root / "forward_outbox.sqlite"
+        receiver_path = root / "independent_receiver.sqlite"
+        primary_path = root / "derived.sqlite"
+        names = ("research_audit", "research_monitor")
+        needed = [source, ledger_path, receiver_path, primary_path] + [
+            root / (name + ".sqlite") for name in names
+        ]
+        if any(not p.is_file() or p.is_symlink() or p.resolve() != p
+               for p in needed):
+            raise ForwardOutboxError("all previously owned durable evidence ledgers required")
+        provider = lambda: QuantMode.SIMULATION
+        journal = OfflineSpotCaptureJournal(
+            source, mode_provider=provider, forward_capture_audit=True,
         )
-    for topic in _TOPICS:
-        bus.subscribe(topic, primary_observer)
-    for consumer in named:
-        consumer.register(bus)
+        inventory = journal.verify_forward_capture_inventory(session_id)
+        if len(inventory) > max_envelopes + 500:
+            raise ForwardOutboxError("raw source inventory exceeds recovery budget")
+        outbox = OfflineForwardSpotOutbox(
+            ledger_path, session_id=session_id, mode_provider=provider,
+        )
+        items = outbox.verify_source(journal, source_session_id=session_id)
+        if len(items) > max_envelopes:
+            raise ForwardOutboxError("staged recovery exceeds bounded resource limit")
+        with journal._connect() as db:
+            session = db.execute(
+                "SELECT closed_at_ms FROM offline_spot_capture_sessions WHERE session_id=?",
+                (session_id,),
+            ).fetchone()
+        if session is None:
+            raise ForwardOutboxError("original captured session missing")
+        named = [
+            OfflineNamedResearchSubscriber(
+                root / (name + ".sqlite"), name=name,
+                expected_source=_SOURCE, mode_provider=provider,
+            ) for name in names
+        ]
+        primary = OfflineDerivedResearchReceiptLedger(
+            primary_path, mode_provider=provider,
+        )
+        receiver = OfflineIndependentProjectionReceiver(
+            receiver_path, mode_provider=provider,
+        )
+        bus = EventBus(mode_provider=provider)
+        pub = bus.activate_verified_market_only(max_inflight=1)
+        derived = bus.activate_verified_derived_only()
+        MarketDataPipeline(bus, verified_derived_publisher=derived).register()
+        wanted = {"md.ticker":0,"indicator.volume_delta":0,"indicator.obi":0}
 
-    await bus.start()
-    try:
-        for row in items:
-            e = row.envelope
-            data = json.loads(e.projection_json)
-            original = journal.verify_captured_record(session_id, e.ingest_id)
+        async def primary_observer(event: Event) -> None:
+            primary.accept(
+                topic=event.topic,
+                session_id=event.payload["verified_session_id"],
+                ordinal=event.payload["verified_source_ordinal"],
+                source_record_id=event.payload["verified_source_record_id"],
+                source_available_at_ms=event.payload["verified_source_available_at_ms"],
+                projection=event.payload,
+            )
+        for topic in _TOPICS:
+            bus.subscribe(topic, primary_observer)
+        for consumer in named:
+            consumer.register(bus)
+
+        await bus.start()
+        try:
+            for row in items:
+                e = row.envelope
+                data = json.loads(e.projection_json)
+                original = journal.verify_captured_record(session_id, e.ingest_id)
+                if (
+                    data["source_available_at_ms"] != original.received_at_ms
+                    or data["source_capture_id"] != e.ingest_id
+                    or data["topic"] not in ("md.aggTrade","md.depth")
+                ):
+                    raise ForwardOutboxError("original data diverges from staged envelope")
+                # Re-send EXACT original wire intent; signed receiver-owned receipt
+                # is idempotent even after a crash between its COMMIT and our ACK.
+                confirmations = await asyncio.to_thread(
+                    accept_batch_via_authenticated_subprocess,
+                    [e], receiver_db=receiver_path,
+                    now_ms=max(__import__("time").time_ns() // 1_000_000, e.available_at_ms),
+                )
+                if len(confirmations) != 1:
+                    raise ForwardOutboxError("independent receiver ACK unavailable")
+                outbox.ack_receiver(e, confirmations[0])
+                topic = data["topic"]
+                if topic == "md.aggTrade":
+                    wanted["md.ticker"] += 1
+                    wanted["indicator.volume_delta"] += 1
+                    ordinal = wanted["md.ticker"]
+                else:
+                    wanted["indicator.obi"] += 1
+                    ordinal = wanted["indicator.obi"]
+                await pub.publish_raw_confirmed(
+                    topic, frame=data["full_verified_frame"],
+                    **({"symbol":"BTCUSDT"} if topic == "md.depth" else {}),
+                    source=_SOURCE, historical_replay=False, forward_research=True,
+                    available_at_ms=e.available_at_ms,
+                    verified_session_id=session_id,
+                    verified_source_record_id=data["source_record_id"],
+                    verified_source_ordinal=ordinal,
+                    verified_source_available_at_ms=e.available_at_ms,
+                    receiver_receipt_id=confirmations[0].receipt_id,
+                )
+                await bus.wait_verified_idle(timeout_s=20)
+                outbox.ack_derived(e)
+            actual = {topic:primary.verified_count(session_id, topic) for topic in _TOPICS}
+            if actual != wanted:
+                raise ForwardOutboxError("primary derived receipt count not replayed")
+            named_proofs = [consumer.verify(session_id, wanted) for consumer in named]
+            received = receiver.receipts("forward_spot", "read_only_market")
             if (
-                data["source_available_at_ms"] != original.received_at_ms
-                or data["source_capture_id"] != e.ingest_id
-                or data["topic"] not in ("md.aggTrade","md.depth")
+                len(received) != len(items)
+                or len(outbox.items()) != len(items)
+                or any(r.status != "DERIVED_ACKED" for r in outbox.items())
             ):
-                raise ForwardOutboxError("original data diverges from staged envelope")
-            # Re-send EXACT original wire intent; signed receiver-owned receipt
-            # is idempotent even after a crash between its COMMIT and our ACK.
-            confirmations = await asyncio.to_thread(
-                accept_batch_via_authenticated_subprocess,
-                [e], receiver_db=receiver_path,
-                now_ms=max(__import__("time").time_ns() // 1_000_000, e.available_at_ms),
+                raise ForwardOutboxError("incomplete staged forward recovery")
+            return ForwardStagedRecoveryReport(
+                session_id=session_id,
+                staged_envelopes=len(items),
+                receiver_receipts=len(received),
+                primary_derived_receipts=sum(actual.values()),
+                independent_named_receipts=sum(x.durable_receipts for x in named_proofs),
+                outbox_derived_acked=len(items),
+                source_session_closed=session["closed_at_ms"] is not None,
             )
-            if len(confirmations) != 1:
-                raise ForwardOutboxError("independent receiver ACK unavailable")
-            outbox.ack_receiver(e, confirmations[0])
-            topic = data["topic"]
-            if topic == "md.aggTrade":
-                wanted["md.ticker"] += 1
-                wanted["indicator.volume_delta"] += 1
-                ordinal = wanted["md.ticker"]
-            else:
-                wanted["indicator.obi"] += 1
-                ordinal = wanted["indicator.obi"]
-            await pub.publish_raw_confirmed(
-                topic, frame=data["full_verified_frame"],
-                **({"symbol":"BTCUSDT"} if topic == "md.depth" else {}),
-                source=_SOURCE, historical_replay=False, forward_research=True,
-                available_at_ms=e.available_at_ms,
-                verified_session_id=session_id,
-                verified_source_record_id=data["source_record_id"],
-                verified_source_ordinal=ordinal,
-                verified_source_available_at_ms=e.available_at_ms,
-                receiver_receipt_id=confirmations[0].receipt_id,
-            )
-            await bus.wait_verified_idle(timeout_s=20)
-            outbox.ack_derived(e)
-        actual = {topic:primary.verified_count(session_id, topic) for topic in _TOPICS}
-        if actual != wanted:
-            raise ForwardOutboxError("primary derived receipt count not replayed")
-        named_proofs = [consumer.verify(session_id, wanted) for consumer in named]
-        received = receiver.receipts("forward_spot", "read_only_market")
-        if (
-            len(received) != len(items)
-            or len(outbox.items()) != len(items)
-            or any(r.status != "DERIVED_ACKED" for r in outbox.items())
-        ):
-            raise ForwardOutboxError("incomplete staged forward recovery")
-        return ForwardStagedRecoveryReport(
-            session_id=session_id,
-            staged_envelopes=len(items),
-            receiver_receipts=len(received),
-            primary_derived_receipts=sum(actual.values()),
-            independent_named_receipts=sum(x.durable_receipts for x in named_proofs),
-            outbox_derived_acked=len(items),
-            source_session_closed=session["closed_at_ms"] is not None,
-        )
-    finally:
-        await bus.stop()
+        finally:
+            await bus.stop()
