@@ -229,3 +229,134 @@ async def test_verified_only_denies_legacy_metrics_websocket_without_accept():
         assert observed == [("close",1008)]
     finally:
         app.state.verified_only_research = previous
+
+
+@pytest.mark.asyncio
+async def test_closed_source_restart_reuses_durable_derived_receipts(tmp_path):
+    """A new research graph verifies the source again and idempotently replays ACKs."""
+    from infrastructure.market_derived_research_receipts import (
+        OfflineDerivedResearchReceiptLedger,
+    )
+    original,sid=_original(tmp_path/"source")
+    ledger_path=(tmp_path/"shared-verified-receipts.sqlite").resolve()
+    OfflineDerivedResearchReceiptLedger(
+        ledger_path, mode_provider=lambda:QuantMode.SIMULATION,
+    )
+    first=await start_verified_research_runtime(
+        original_db=original,session_id=sid,output_dir=tmp_path/"proof_first",
+        derived_receipt_db=ledger_path,
+    )
+    try:
+        assert first.status.durable_derived_research_receipts==5
+        assert first.status.replayed_derived_research_receipts==0
+    finally:
+        await first.close()
+    # Restart with a fresh independent raw->market->authenticated-receiver
+    # proof. Only the consumer-owned durable observer ledger is reused.
+    second=await start_verified_research_runtime(
+        original_db=original,session_id=sid,output_dir=tmp_path/"proof_restart",
+        derived_receipt_db=ledger_path,
+    )
+    try:
+        assert second.status.durable_derived_research_receipts==5
+        assert second.status.replayed_derived_research_receipts==5
+        assert second.status.orders_submitted==0
+        assert second.status.execution_started is False
+        assert second.status.continuous_live_market is False
+    finally:
+        await second.close()
+    ledger=OfflineDerivedResearchReceiptLedger(
+        ledger_path,mode_provider=lambda:QuantMode.SIMULATION,
+    )
+    assert ledger.verified_count(sid,"md.ticker")==2
+    assert ledger.verified_count(sid,"indicator.volume_delta")==2
+    assert ledger.verified_count(sid,"indicator.obi")==1
+
+
+@pytest.mark.asyncio
+async def test_hard_process_exit_mid_derived_observation_is_recovered(tmp_path):
+    """Actually kill the research process after two committed derived ACKs.
+
+    The child exits without clean shutdown, WAL and consumer cursor survive.
+    A freshly authenticated source verification must precede re-admission.
+    """
+    import subprocess
+    import sys
+    import textwrap
+    from infrastructure.market_derived_research_receipts import (
+        OfflineDerivedResearchReceiptLedger,
+    )
+    original,sid=_original(tmp_path/"source")
+    ledger_path=(tmp_path/"shared-killed-consumer.sqlite").resolve()
+    OfflineDerivedResearchReceiptLedger(
+        ledger_path,mode_provider=lambda:QuantMode.SIMULATION,
+    )
+    child_script=textwrap.dedent("""
+        import asyncio
+        import os
+        import sys
+        from pathlib import Path
+        from infrastructure.market_derived_research_receipts import OfflineDerivedResearchReceiptLedger
+        from infrastructure.spot_verified_research_runtime import start_verified_research_runtime
+
+        source,sid,proof,receipts=sys.argv[1:]
+        original_accept=OfflineDerivedResearchReceiptLedger.accept
+        observed={"count":0}
+        def terminate_after_durable_commit(self,**kwargs):
+            reply=original_accept(self,**kwargs)
+            observed["count"]+=1
+            if observed["count"] == 2:
+                os._exit(37)
+            return reply
+        OfflineDerivedResearchReceiptLedger.accept=terminate_after_durable_commit
+        asyncio.run(start_verified_research_runtime(
+            original_db=Path(source),session_id=sid,
+            output_dir=Path(proof),derived_receipt_db=Path(receipts),
+        ))
+    """)
+    child=subprocess.run(
+        [sys.executable,"-c",child_script,str(original),sid,
+         str(tmp_path/"proof_crashed"),str(ledger_path)],
+        capture_output=True,text=True,timeout=40,check=False,
+    )
+    assert child.returncode==37,(child.returncode,child.stderr[-1000:])
+    ledger=OfflineDerivedResearchReceiptLedger(
+        ledger_path,mode_provider=lambda:QuantMode.SIMULATION,
+    )
+    # For the first raw trade, both derived topic handlers committed before
+    # process termination. No final OBI nor second trade was acknowledged.
+    assert ledger.verified_count(sid,"md.ticker")==1
+    assert ledger.verified_count(sid,"indicator.volume_delta")==1
+    assert ledger.verified_count(sid,"indicator.obi")==0
+    recovered=await start_verified_research_runtime(
+        original_db=original,session_id=sid,
+        output_dir=tmp_path/"proof_new_process_recovery",
+        derived_receipt_db=ledger_path,
+    )
+    try:
+        assert recovered.status.durable_derived_research_receipts==5
+        assert recovered.status.replayed_derived_research_receipts==2
+        assert recovered.status.orders_submitted==0
+    finally:
+        await recovered.close()
+    assert ledger.verified_count(sid,"md.ticker")==2
+    assert ledger.verified_count(sid,"indicator.volume_delta")==2
+    assert ledger.verified_count(sid,"indicator.obi")==1
+
+
+def test_verified_recovery_refuses_original_db_as_receipt_ledger(tmp_path):
+    original,sid=_original(tmp_path)
+    # Recovery never opens original capture SQLite as the writable
+    # durable derived-observer database, even in pure SIMULATION mode.
+    async def attempt():
+        await start_verified_research_runtime(
+            original_db=original,session_id=sid,
+            output_dir=tmp_path/"unused",
+            derived_receipt_db=original,
+        )
+    from infrastructure.spot_verified_research_runtime import (
+        VerifiedResearchRuntimeError,
+    )
+    with pytest.raises(VerifiedResearchRuntimeError,match="independent"):
+        asyncio.run(attempt())
+    assert not (tmp_path/"unused").exists()
