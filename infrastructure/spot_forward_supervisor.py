@@ -282,6 +282,8 @@ def _summarize(db_path: Path, root: Path,
             FROM forward_watch_plan WHERE singleton=1
         """).fetchone()
     status=("INCOMPLETE" if attempts[3] else
+            "NETWORK_PREFLIGHT_CIRCUIT_OPEN" if
+            plan[1]=="NETWORK_PREFLIGHT_CIRCUIT_OPEN" else
             "WATCH_TARGET_REACHED_WITH_UNKNOWN_GAPS" if
             plan[1]=="TARGET_REACHED" else
             "WATCH_ATTEMPT_CEILING_REACHED" if plan[0] is not None else
@@ -312,6 +314,7 @@ async def run_forward_research_supervisor(
     persistent_receiver: bool = False,
     public_ws_idle_timeout_s: float = 30.0,
     watch_duration_s: float | None = None,
+    max_consecutive_clock_failures: int | None = None,
     _monotonic_s: Callable[[],float] | None = None,
     clock_check: Callable[[], Awaitable[bool]] | None = None,
     capture_factory: Callable[
@@ -348,6 +351,11 @@ async def run_forward_research_supervisor(
         or type(max_book_staleness_ms) is not int
         or not 100 <= max_book_staleness_ms <= 30000
         or type(persistent_receiver) is not bool
+        or (max_consecutive_clock_failures is not None and (
+            watch_duration_s is None
+            or type(max_consecutive_clock_failures) is not int
+            or not 2 <= max_consecutive_clock_failures <= 10
+        ))
         or type(public_ws_idle_timeout_s) not in (int,float)
         or not 0.1 <= public_ws_idle_timeout_s <= 120
     ):
@@ -367,6 +375,7 @@ async def run_forward_research_supervisor(
         )
         # Append-only session rows survive a hard process exit. Such an
         # interrupted run cannot be silently resumed over partial evidence.
+        consecutive_clock_failures=0
         for iteration in range(1, attempts+1):
             if _storage_bytes(output_dir) > max_total_storage_bytes:
                 raise ForwardSupervisorError("durable storage ceiling reached before admission")
@@ -428,6 +437,14 @@ async def run_forward_research_supervisor(
             except Exception as exc:
                 failure=safe_failure_code(exc)
                 failed_queue_peak=failure_queue_peak(exc)
+                if failure.startswith("SPOT_TRANSPORT_CLOCK_PREFLIGHT_"):
+                    consecutive_clock_failures+=1
+                else:
+                    consecutive_clock_failures=0
+                clock_circuit_open=(
+                    max_consecutive_clock_failures is not None
+                    and consecutive_clock_failures>=max_consecutive_clock_failures
+                )
                 failure_storage=_storage_bytes(output_dir)
                 finished=_clock()
                 with sqlite3.connect(db_path) as db:
@@ -456,13 +473,27 @@ async def run_forward_research_supervisor(
                             UPDATE forward_watch_outage SET last_failure_code=?
                             WHERE outage_id=?
                         """,(failure,active[0]))
+                    if clock_circuit_open:
+                        # STOP the bounded watch after repeated failed HTTPS
+                        # clock admissions; evidence and outage remain FAILED.
+                        # Never issue thousands of connection attempts against
+                        # a broken network or certify missing venue history.
+                        db.execute("""
+                            UPDATE forward_watch_plan SET
+                            completion_code='NETWORK_PREFLIGHT_CIRCUIT_OPEN',
+                            completed_at_ms=?
+                            WHERE singleton=1
+                        """,(finished,))
                     db.execute("COMMIT")
                 # A storage/clock integrity violation cannot be retried.
                 if isinstance(exc,ForwardSupervisorError) or (
                     _storage_bytes(output_dir) > max_total_storage_bytes
                 ):
                     raise
+                if clock_circuit_open:
+                    break
             else:
+                consecutive_clock_failures=0
                 finished=_clock()
                 with sqlite3.connect(db_path) as db:
                     db.execute("BEGIN IMMEDIATE")
