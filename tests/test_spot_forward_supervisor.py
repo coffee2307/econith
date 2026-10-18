@@ -266,3 +266,38 @@ async def test_receiver_receipt_fingerprint_tamper_rejected_after_success(tmp_pa
     with pytest.raises((CrossProcessDeliveryError,ForwardSupervisorError),
                        match="fingerprint|receipt"):
         _verify_one(root/"attempt_001",captured["status"])
+
+
+@pytest.mark.asyncio
+async def test_two_forward_sessions_use_exactly_one_persistent_child_each(tmp_path):
+    root=(tmp_path/"persist_supervisor").resolve()
+
+    async def persistent_fixture(directory,sid,index):
+        return await observe_forward_spot_research(
+            output_dir=directory,session_id=sid,
+            stream=source(_NOW()),snapshot_fetch=snapshot,
+            max_frames=20,timeout_s=20,persistent_receiver=True,
+        )
+
+    report=await run_forward_research_supervisor(
+        output_dir=root,allow_public_network=True,attempts=2,
+        max_frames=20,timeout_s=20,capture_factory=persistent_fixture,
+        persistent_receiver=True,
+    )
+    assert report.accepted_sessions==2
+    assert report.failed_sessions==0
+    assert report.total_receiver_receipts==8
+    assert report.receiver_process_starts==2
+    assert report.max_receiver_ack_latency_ms>0
+    assert not report.history_continuity_verified
+    assert not report.continuous_live_market
+    with _db(root) as db:
+        rows=db.execute("""
+            SELECT receiver_process_starts,max_receiver_ack_latency_ms,
+                   receiver_acks,queue_high_watermark
+            FROM forward_watch_attempt ORDER BY iteration
+        """).fetchall()
+    assert len(rows)==2
+    assert [x[0] for x in rows]==[1,1]
+    assert all(x[1]>0 and x[2]==4 and x[3]>0 for x in rows)
+    assert not (root/".forward_producer.lock").exists()
