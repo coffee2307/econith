@@ -167,3 +167,27 @@ async def test_failed_connection_then_recovery_preserves_unknown_gap_between_rou
             "SELECT coverage_verified FROM forward_watch_outage"
         ).fetchall()
     assert boundaries==[(0,)] and outage==[(0,)]
+
+
+@pytest.mark.asyncio
+async def test_wall_clock_rollback_blocks_second_session_without_fabricated_boundary(
+    tmp_path,monkeypatch,
+):
+    root=(tmp_path/"clock_backwards").resolve()
+    import infrastructure.spot_forward_supervisor as supervisor
+    values=iter([1780000000000,1780000001000,1780000002000,1780000001999])
+    monkeypatch.setattr(supervisor,"_clock",lambda:next(values))
+    with pytest.raises(ForwardSupervisorError,match="clock moved backwards"):
+        await run_forward_research_supervisor(
+            output_dir=root,allow_public_network=True,
+            attempts=2,max_frames=20,timeout_s=20,
+            capture_factory=real_fixture,persistent_receiver=True,
+        )
+    with sqlite3.connect(root/"forward_supervisor.sqlite") as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM forward_watch_attempt WHERE status='PASSED'"
+        ).fetchone()[0]==1
+        assert db.execute(
+            "SELECT COUNT(*) FROM forward_watch_unobserved_boundary"
+        ).fetchone()[0]==0
+    assert not (root/".forward_producer.lock").exists()
