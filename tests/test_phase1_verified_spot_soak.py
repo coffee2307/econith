@@ -232,3 +232,52 @@ async def test_live_provenance_cannot_be_misreported_by_fixture(tmp_path, monkey
             max_frames=20, capture_factory=capture_factory,
         )
     assert json.loads((root/"verified_soak_manifest.json").read_text())["rounds"] == []
+
+
+@pytest.mark.asyncio
+async def test_second_soak_runner_cannot_take_over_active_process(tmp_path):
+    root = tmp_path/"one_writer"
+    clock_entered = asyncio.Event()
+    unblock = asyncio.Event()
+
+    async def blocked_preflight():
+        clock_entered.set()
+        await unblock.wait()
+        return True
+
+    job = asyncio.create_task(run_verified_spot_soak(
+        output_dir=root, allow_network=True, rounds=1,
+        max_frames=20, capture_factory=capture_factory,
+        clock_check=blocked_preflight,
+    ))
+    try:
+        await asyncio.wait_for(clock_entered.wait(), timeout=5)
+        assert (root/".verified_soak.lock").exists()
+        with pytest.raises(VerifiedSpotSoakError, match="lock"):
+            await run_verified_spot_soak(
+                output_dir=root, allow_network=True, rounds=1, resume=True,
+                max_frames=20, capture_factory=capture_factory,
+            )
+    finally:
+        unblock.set()
+        state = await job
+    assert state["status"] == "COMPLETE"
+    assert not (root/".verified_soak.lock").exists()
+
+
+@pytest.mark.asyncio
+async def test_orphaned_soak_lock_cannot_be_silently_taken_over(tmp_path):
+    root = tmp_path/"crash_orphan"
+    original = await run_verified_spot_soak(
+        output_dir=root, allow_network=True, rounds=1, max_frames=20,
+        capture_factory=capture_factory,
+    )
+    lock = root/".verified_soak.lock"
+    lock.write_text("stale process or crash - manual review required")
+    with pytest.raises(VerifiedSpotSoakError, match="manual review"):
+        await run_verified_spot_soak(
+            output_dir=root, allow_network=True, rounds=1,
+            max_frames=20, capture_factory=capture_factory, resume=True,
+        )
+    assert lock.exists()
+    assert json.loads((root/"verified_soak_manifest.json").read_text()) == original
