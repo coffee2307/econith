@@ -276,7 +276,7 @@ def test_fresh_socket_cli_requires_explicit_pinned_persistent_public_mode(tmp_pa
     base=["--allow-public-market-data","--output-dir",str((tmp_path/"e").resolve()),
           "--attempts","2","--max-frames","20"]
     invalid=parser().parse_args(base+["--fresh-socket-per-segment"])
-    with pytest.raises(ValueError,match="unsafe"):
+    with pytest.raises(ValueError,match="invalid bounded public endurance policy"):
         validate(invalid)
     valid=parser().parse_args(
         base+["--persistent-receiver","--single-socket","--fresh-socket-per-segment"]
