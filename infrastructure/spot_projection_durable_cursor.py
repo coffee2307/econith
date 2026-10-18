@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+from contextlib import contextmanager
+from typing import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -71,10 +73,14 @@ class OfflineSpotProjectionCursor:
                     db.execute("ROLLBACK")
                 raise
 
-    def _open(self):
+    @contextmanager
+    def _open(self) -> Iterator[sqlite3.Connection]:
         db=sqlite3.connect(self.path,isolation_level=None,timeout=10)
-        db.execute("PRAGMA busy_timeout=10000")
-        return db
+        try:
+            db.execute("PRAGMA busy_timeout=10000")
+            yield db
+        finally:
+            db.close()
 
     def _state(self, db:sqlite3.Connection)->ProjectionCursorState:
         row=db.execute("""SELECT session_id,last_capture_id,original_sha256,
@@ -113,6 +119,17 @@ class OfflineSpotProjectionCursor:
         if exact!=record:
             raise ProjectionCursorError("cursor advanced with forged original")
         digest=hashlib.sha256(record.raw).hexdigest()
+        with self.journal._connect() as source_db:
+            intent=source_db.execute(
+                """SELECT session_id,kind,received_at_ms,sha256
+                FROM offline_forward_capture_intents WHERE capture_id=?""",
+                (record.capture_id,),
+            ).fetchone()
+        if (intent is None or intent["session_id"]!=self.session_id
+            or intent["kind"]!=record.kind
+            or intent["received_at_ms"]!=record.received_at_ms
+            or intent["sha256"]!=digest):
+            raise ProjectionCursorError("atomic source intent not verified")
         with self._open() as db:
             db.execute("BEGIN IMMEDIATE")
             try:
