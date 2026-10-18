@@ -29,6 +29,8 @@ _PROFILES={
              "max_storage_mb":100,"watch_hours":None},
     "diagnostic":{"attempts":3,"max_frames":500,"timeout_s":120,
              "max_storage_mb":150,"watch_hours":None},
+    "load":{"attempts":3,"max_frames":1000,"timeout_s":120,
+            "max_storage_mb":200,"watch_hours":None},
     "hour":{"attempts":2048,"max_frames":1000,"timeout_s":120,
             "max_storage_mb":1800,"watch_hours":1.0},
     "day":{"attempts":2048,"max_frames":2000,"timeout_s":120,
@@ -283,7 +285,7 @@ def _profile_launch_argv(*,profile:str,trial:Path,python_executable:str) -> list
         "--max-storage-mb",str(config["max_storage_mb"]),
         "--ws-idle-timeout-s","15",
     ]
-    if profile in ("diagnostic","hour","day"):
+    if profile in ("diagnostic","load","hour","day"):
         # Sealed source segments do not form gap-free history. The old
         # retained WSS lease could accumulate stale unread frames between
         # attempts; use a new pinned TLS lease per segment in longer trials.
@@ -310,7 +312,7 @@ def run_smoke(*,allow_public:bool,profile:str,
     # reproducible market-data acceptance test. Quick remains opt-in,
     # but Hour/Day require a conservative local RAM headroom preflight.
     if (
-        profile in ("diagnostic","hour","day")
+        profile in ("diagnostic","load","hour","day")
         and health["ram_available_gib"] is not None
         and health["ram_available_gib"] < 1.5
     ):
