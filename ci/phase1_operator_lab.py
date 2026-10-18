@@ -188,12 +188,40 @@ def inspect_trial(trial_dir:Path) -> dict:
             max((x[8] for x in attempts),default=0),2,
         ),
         "failure_classes":by_reason,
+        "failed_attempt_diagnostics":[
+            {"iteration":x[0],"reason":x[3],
+             "source_queue_high_watermark":x[6]}
+            for x in attempts if x[2]=="FAILED"
+        ],
         "operator_trial_not_institutional_phase1_certification":True,
         "gap_free_history_verified":False,
         "continuous_market_feed_certified":False,
         "default_verified_runtime_cutover_complete":False,
         "orders_submitted":0,
     }
+    # Host sampling is observational, not source-proven or a formal CPU/RAM
+    # acceptance certificate. Old trial folders legitimately lack this file.
+    host=trial_dir/"host_resources.jsonl"
+    if host.is_file() and not host.is_symlink():
+        ram_values=[]
+        try:
+            with host.open("r",encoding="utf-8") as stream:
+                for index,line in enumerate(stream):
+                    if index>=50_000:
+                        break
+                    sample=json.loads(line)
+                    value=sample.get("available_ram_gib")
+                    if type(value) in (int,float) and 0<=value<=10000:
+                        ram_values.append(value)
+        except (OSError,ValueError,TypeError):
+            ram_values=[]
+        result["operator_host_ram_min_available_gib"]=(
+            round(min(ram_values),3) if ram_values else None
+        )
+        result["operator_host_resource_samples"]=len(ram_values)
+    else:
+        result["operator_host_ram_min_available_gib"]=None
+        result["operator_host_resource_samples"]=0
     return result
 
 
@@ -212,7 +240,9 @@ def _write_report(trial_dir:Path,summary:dict) -> None:
         f"- Unknown boundaries between sessions: {summary['unknown_session_boundaries']}",
         f"- Original rows from accepted segments: {summary['total_originals_in_passed_attempts']}",
         f"- Independent receiver ACKs: {summary['total_receiver_acks_in_passed_attempts']}",
-        f"- Maximum source queue watermark: {summary['max_queue_high_watermark']}",
+        f"- Maximum source queue watermark (includes instrumented failures): {summary['max_queue_high_watermark']}",
+        f"- Error codes: {summary['failure_classes']}",
+        f"- Minimum sampled host RAM available: {summary.get('operator_host_ram_min_available_gib')} GiB",
         f"- Maximum observed receiver ACK latency: {summary['max_receiver_ack_latency_ms']} ms",
         f"- Operator time target completed: {summary['completion_code']}",
         "",
@@ -272,10 +302,23 @@ def run_smoke(*,allow_public:bool,profile:str,
     print("Evidence directory:",trial,flush=True)
     print("Research-only public Binance; no credentials/orders",flush=True)
     previous=None
-    with (trial/"stdout.log").open("wb") as out, (trial/"stderr.log").open("wb") as err:
+    with (trial/"stdout.log").open("wb") as out, (trial/"stderr.log").open("wb") as err, (
+        trial/"host_resources.jsonl"
+    ).open("w",encoding="utf-8") as host_log:
         proc=subprocess.Popen(argv,cwd=_root(),stdout=out,stderr=err)
         try:
             while proc.poll() is None:
+                total,available=_memory()
+                host_log.write(json.dumps({
+                    "observed_utc":datetime.now(timezone.utc).isoformat(),
+                    "available_ram_gib":(
+                        round(available/2**30,3) if available is not None else None
+                    ),
+                    "total_ram_gib":(
+                        round(total/2**30,3) if total is not None else None
+                    ),
+                },sort_keys=True)+"\n")
+                host_log.flush()
                 time.sleep(3)
                 ledger=trial/"evidence"/"forward_supervisor.sqlite"
                 if ledger.is_file():
