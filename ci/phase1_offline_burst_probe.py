@@ -77,7 +77,8 @@ async def _source(frames: int, spacing_ms: float):
 
 
 async def probe(root: Path, *, frames: int, spacing_ms: float,
-                sealed_spool: bool = False) -> int:
+                sealed_spool: bool = False,
+                live_spool: bool = False) -> int:
     old = os.environ.get("ECONITH_PHASE1_STAGE_PROFILE")
     os.environ["ECONITH_PHASE1_STAGE_PROFILE"] = "1"
     started = time.monotonic()
@@ -97,6 +98,9 @@ async def probe(root: Path, *, frames: int, spacing_ms: float,
                     snapshot_fetch=_snapshot, max_frames=frames,
                     timeout_s=120, persistent_receiver=True,
                     max_book_staleness_ms=2500,
+                    spooled_in_session=live_spool,
+                    max_projector_lag_ms=5000,
+                    max_pending_originals=512,
                 )
         except Exception as exc:
             # No raw payloads, paths or child secrets in outputs.
@@ -114,7 +118,15 @@ async def probe(root: Path, *, frames: int, spacing_ms: float,
                     "queue_peak":(status.capture_queue_high_watermark
                                   if sealed_spool else status.queue_high_watermark),
                     "sealed_only_not_live":sealed_spool,
+                    "spooled_in_session":live_spool,
                     "synthetic_only":True,"orders_submitted":0}
+            if live_spool:
+                result.update({
+                    "original_cursor":status.spool_original_cursor,
+                    "max_source_delivery_lag_ms":status.max_projector_lag_ms,
+                    "max_pending_originals":status.max_spool_pending_originals,
+                    "published_before_source_closed":status.publication_in_session,
+                })
             if sealed_spool:
                 result.update({
                     "capture_elapsed_s":status.capture_elapsed_s,
@@ -141,8 +153,11 @@ def main() -> int:
     p.add_argument("--output-dir",type=Path,required=True)
     p.add_argument("--frames",type=int,default=240)
     p.add_argument("--spacing-ms",type=float,default=3.0)
-    p.add_argument("--sealed-spool",action="store_true",
-                   help="Source-first append then validated sealed research replay, NOT live")
+    group = p.add_mutually_exclusive_group()
+    group.add_argument("--sealed-spool",action="store_true",
+                   help="Source-first append then sealed historical replay, NOT live")
+    group.add_argument("--live-spool",action="store_true",
+                   help="OFFLINE-ONLY in-session durable spool worker with delivery lag gate")
     a=p.parse_args()
     if (not a.output_dir.is_absolute() or a.output_dir.exists()
         or type(a.frames) is not int or not 10<=a.frames<=1000
@@ -150,7 +165,8 @@ def main() -> int:
         p.error("refusing non-fresh or unsafe bounded offline configuration")
     return asyncio.run(probe(a.output_dir,frames=a.frames,
                              spacing_ms=a.spacing_ms,
-                             sealed_spool=a.sealed_spool))
+                             sealed_spool=a.sealed_spool,
+                             live_spool=a.live_spool))
 
 
 if __name__=="__main__":
