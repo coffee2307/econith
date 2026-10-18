@@ -30,13 +30,13 @@ document, not an altered percentage.
 | P1-01 | Original source capture, indexed immutable bytes, REST+diff Spot synchronized snapshot, as-of closed replay | 20 | 20 | PASS within BTCUSDT opt-in scope |
 | P1-02 | Source availability, lineage, authenticated independently owned source/receiver ACK | 15 | 15 | PASS in bounded research trials |
 | P1-03 | Raw+derived publisher fences, primary/audit/monitor separately durable read-only projections | 15 | 15 | PASS in opt-in SIMULATION graph |
-| P1-04 | Forward event source-intent, monotonic outbox ACKs, staged crash reconciliation, process fencing | 15 | 12 | PARTIAL: unstaged eligibility rebuilding not certified |
+| P1-04 | Atomic source intent, original-as-of eligible event rescan, outbox ACKs, crash recovery and process fencing | 15 | 14 | PARTIAL: external host crash acceptance outstanding |
 | P1-05 | Sustained continuous protected ingress, reconnect/catch-up, bounded backlog, long-duration host soak | 15 | 3 | PARTIAL: finite samples and in-session research prototype only |
-| P1-06 | Reviewed default-app source cutover, no legacy data bypass and fully isolated execution | 10 | 0 | BLOCKED: default legacy publisher remains |
+| P1-06 | Reviewed default-app source cutover, no legacy data bypass and fully isolated execution | 10 | 3 | PARTIAL: isolated opt-in forward ASGI preview only; default still legacy |
 | P1-07 | Original dataset coverage beyond BTCUSDT and real operator-certified 24–72h continuity/quality evidence | 10 | 0 | BLOCKED: no current-HEAD external soak or full dataset matrix |
-| **TOTAL** | | **100** | **65** | **Phase 1 remains OPEN** |
+| **TOTAL** | | **100** | **70** | **Phase 1 remains OPEN** |
 
-**65% is a conservative, explicitly subjective weighted engineering
+**70% is a conservative, explicitly subjective weighted engineering
 estimate.** The *certified institutional Phase 1 exit score is not 65%*:
 all mandatory gate rows must be PASS before 100% can be stated. Neither
 a source label nor simulated forward data authorizes orders. Existing
@@ -107,3 +107,38 @@ owner approval rather than invent observations.
   formally moving the remaining requirements to another phase.
 - PR #28 stays Draft/unmerged until evidence and review; no real
   exchange trading or deployment is permitted.
+
+## Evidence update — optional forward preview and raw original eligibility rescan
+
+The most recent iteration adds a deterministic, source-availability-ordered
+rescan of **previously committed original Spot frames** into missing
+forward outbox envelopes. It starts with an unsynchronized empty book,
+replays the original snapshot/diff bridge, refuses stale/gapped/ambiguous
+source data, checks every old immutable envelope before staging new ones
+and replays through the separately authenticated receiver and read-only
+derived observers. It does not assert missing external trade history or a
+successful crashed capture session. A completely new receiver-owned DB
+is created only for an entirely previously un-STAGED source with no
+preexisting receiver effects; it cannot silently replace an existing DB.
+
+`main.py` also has a new **explicitly configured**
+`verified_forward_preview` mode. Only a bounded public-data-only
+SIMULATION forward source and the guarded status endpoint are started.
+No engine, exchange order bridge, legacy streamer, world service or
+mutating HTTP handler is admitted in this branch. The `legacy` **default
+has not changed**, and this new path is NOT continuous production ingest.
+
+Bounded research tests on commit
+`4bd586fba83a2351d43f29d79d18abdb5332d97e`:
+[CI #39100349644](https://github.com/coffee2307/econith/actions/runs/39100349644)
+**707 passed, 1 skipped, 0 failed**; corresponding images and container
+smoke succeeded. The documentation-only follow-up commit requires
+its own exact-HEAD CI confirmation.
+
+Updated engineering evidence credit: **P1-04 14/15**, **P1-06 3/10**
+and **total 70/100**. No previously open institutional exit gate was
+renamed 100%. Real continuous service, long-duration hardware soak,
+default cutover and full dataset coverage remain the dominant
+unaccepted obligations. See
+`PHASE1_FORWARD_RESCAN_ASGI_PREVIEW_20261018.md` for reproducible
+offline-test scope and operator instructions.
