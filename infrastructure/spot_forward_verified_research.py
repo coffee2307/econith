@@ -307,9 +307,9 @@ async def observe_forward_spot_research(
             ):
                 raise ForwardSpotResearchError("source/receiver forward admission mismatch")
             inventory = journal.verify_forward_capture_inventory(session_id)
-        if len(inventory) != proof.verified_original_records:
-            raise ForwardSpotResearchError("raw source/atomic capture-intent coverage mismatch")
-        saved = outbox.verify_source(journal, source_session_id=session_id)
+            if len(inventory) != proof.verified_original_records:
+                raise ForwardSpotResearchError("raw source/atomic capture-intent coverage mismatch")
+            saved = outbox.verify_source(journal, source_session_id=session_id)
             if len(saved) != admitted or any(x.status != "DERIVED_ACKED" for x in saved):
                 raise ForwardSpotResearchError("producer outbox/consumer ACK mismatch")
             # A forged legacy raw/derived producer is still barred from this bus.
