@@ -83,3 +83,21 @@ async def test_source_spool_budget_fail_closed_before_any_receiver_effect(tmp_pa
     assert (root/"original.sqlite").is_file()
     assert not (root/"independent_receiver.sqlite").exists()
     assert not (root/"forward_outbox.sqlite").exists()
+
+
+@pytest.mark.asyncio
+async def test_public_source_requires_explicit_exclusive_opt_in(tmp_path):
+    no_mode=(tmp_path/"no_source").resolve()
+    with pytest.raises(ValueError,match="exclusive spool source"):
+        await capture_then_replay_sealed_spool(
+            output_dir=no_mode,session_id="rec_missing_policy",
+        )
+    assert not no_mode.exists()
+    mixed=(tmp_path/"mixed").resolve()
+    with pytest.raises(ValueError,match="exclusive spool source"):
+        await capture_then_replay_sealed_spool(
+            output_dir=mixed,session_id="rec_mixed_policy",
+            stream=_source(30,3),snapshot_fetch=_snapshot,
+            allow_public_network=True,
+        )
+    assert not mixed.exists()
