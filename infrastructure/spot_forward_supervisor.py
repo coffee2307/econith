@@ -297,6 +297,7 @@ async def run_forward_research_supervisor(
     max_total_storage_bytes: int = 100_000_000,
     max_book_staleness_ms: int = 2500,
     persistent_receiver: bool = False,
+    public_ws_idle_timeout_s: float = 30.0,
     watch_duration_s: float | None = None,
     _monotonic_s: Callable[[],float] | None = None,
     clock_check: Callable[[], Awaitable[bool]] | None = None,
@@ -334,6 +335,8 @@ async def run_forward_research_supervisor(
         or type(max_book_staleness_ms) is not int
         or not 100 <= max_book_staleness_ms <= 30000
         or type(persistent_receiver) is not bool
+        or type(public_ws_idle_timeout_s) not in (int,float)
+        or not 0.1 <= public_ws_idle_timeout_s <= 120
     ):
         raise ValueError("unsafe bounded forward supervision configuration")
     if capture_factory is None and not callable(clock_check):
@@ -396,6 +399,7 @@ async def run_forward_research_supervisor(
                         max_frames=max_frames,timeout_s=timeout_s,
                         max_book_staleness_ms=max_book_staleness_ms,
                         persistent_receiver=persistent_receiver,
+                        public_ws_idle_timeout_s=public_ws_idle_timeout_s,
                     )
                 else:
                     result=await capture_factory(directory,sid,iteration)
