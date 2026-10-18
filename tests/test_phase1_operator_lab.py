@@ -132,3 +132,50 @@ def test_operator_lab_script_explicitly_never_enables_order_routes():
             "REALITY","--enable-orders","BINANCE_API_KEY",
             "docker compose up","ECONITH_SPOT_INGRESS_POLICY=",
         ))
+
+
+@pytest.mark.parametrize("profile,frames,watch_hours",[
+    ("diagnostic","500",None),
+    ("hour","1000","1.0"),
+    ("day","2000","24.0"),
+])
+def test_extended_operator_profiles_require_new_pinned_wss_per_segment(
+    tmp_path,profile,frames,watch_hours,
+):
+    trial=(tmp_path/"new_evidence_root").resolve()
+    argv=lab._profile_launch_argv(
+        profile=profile,trial=trial,python_executable="python-3.12",
+    )
+    assert argv[:3]==["python-3.12","-m","ci.phase1_forward_endurance_trial"]
+    assert argv.count("--allow-public-market-data")==1
+    assert argv.count("--persistent-receiver")==1
+    assert argv.count("--single-socket")==1
+    assert argv.count("--fresh-socket-per-segment")==1
+    assert argv[argv.index("--max-frames")+1]==frames
+    assert argv[argv.index("--output-dir")+1]==str(trial/"evidence")
+    assert (argv[argv.index("--watch-hours")+1] if "--watch-hours" in argv
+            else None)==watch_hours
+    assert not any(
+        keyword in argv for keyword in
+        ("--enable-orders","REALITY","--api-key","--secret")
+    )
+
+
+def test_quick_stays_bounded_and_does_not_claim_fresh_long_watch(tmp_path):
+    argv=lab._profile_launch_argv(
+        profile="quick",trial=(tmp_path/"quick_trial").resolve(),
+        python_executable="python-3.12",
+    )
+    assert argv[argv.index("--max-frames")+1]=="160"
+    assert "--watch-hours" not in argv
+    assert "--fresh-socket-per-segment" not in argv
+    with pytest.raises(ValueError,match="invalid public trial profile"):
+        lab._profile_launch_argv(
+            profile="live_trade",trial=(tmp_path/"bad").resolve(),
+            python_executable="python-3.12",
+        )
+    with pytest.raises(ValueError,match="absolute"):
+        lab._profile_launch_argv(
+            profile="hour",trial=__import__("pathlib").Path("relative"),
+            python_executable="python-3.12",
+        )
