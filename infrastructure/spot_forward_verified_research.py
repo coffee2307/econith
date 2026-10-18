@@ -108,6 +108,7 @@ async def observe_forward_spot_research(
     max_projector_lag_ms: int = 5000,
     max_pending_originals: int = 512,
     max_source_raw_bytes: int = 200_000_000,
+    experiment_reuse_derived_connections: bool = False,
 ) -> ForwardSpotResearchStatus:
     """One real *in-session* research pass (no default startup/auto retry).
 
@@ -136,6 +137,7 @@ async def observe_forward_spot_research(
         or not 100 <= max_projector_lag_ms <= 30000
         or type(max_pending_originals) is not int
         or not 1 <= max_pending_originals <= 1000
+        or type(experiment_reuse_derived_connections) is not bool
         or type(max_source_raw_bytes) is not int
         or not 1024 <= max_source_raw_bytes <= 200_000_000
     ):
@@ -150,6 +152,8 @@ async def observe_forward_spot_research(
         or (public_lease is not None and (offline or not allow_public_network))
     ):
         raise PermissionError("explicit and exclusive offline/real-public source mode required")
+    if experiment_reuse_derived_connections and (not offline or not spooled_in_session):
+        raise PermissionError("unreviewed derived connection reuse requires offline spool experiment")
     if spooled_in_session and (
         queue_capacity != 128 or not persistent_receiver
     ):
@@ -201,11 +205,13 @@ async def observe_forward_spot_research(
         pipeline.register()
         derived_db = OfflineDerivedResearchReceiptLedger(
             root / "derived.sqlite", mode_provider=provider,
+            reuse_connection=experiment_reuse_derived_connections,
         )
         named = [
             OfflineNamedResearchSubscriber(
                 root / (name + ".sqlite"), name=name, expected_source=_SOURCE,
                 mode_provider=provider,
+                reuse_connection=experiment_reuse_derived_connections,
             ) for name in ("research_audit", "research_monitor")
         ]
         for consumer in named:
@@ -550,6 +556,11 @@ async def observe_forward_spot_research(
                     await receiver_client.close()
                 await bus.stop()
             finally:
-                if profiler is not None:
-                    # Original source/ACK ledgers are NOT touched by diagnostics.
-                    profiler.write(completed=completed)
+                try:
+                    for consumer in named:
+                        consumer.close()
+                    derived_db.close()
+                finally:
+                    if profiler is not None:
+                        # Diagnostic output is not source/ACK evidence.
+                        profiler.write(completed=completed)
