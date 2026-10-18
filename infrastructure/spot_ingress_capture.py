@@ -79,6 +79,7 @@ class OfflineSpotCaptureJournal:
         self, path: str | Path, *, mode_provider: Callable[[], QuantMode],
         max_body_bytes: int = 262_144, max_frames_per_session: int = 100_000,
         max_age_ms: int = 10_000, max_future_skew_ms: int = 1000,
+        forward_capture_audit: bool = False,
     ) -> None:
         if not callable(mode_provider):
             raise ValueError("SIMULATION-only mode provider is required")
@@ -87,6 +88,7 @@ class OfflineSpotCaptureJournal:
             or type(max_frames_per_session) is not int
             or not 1 <= max_frames_per_session <= 1_000_000
             or type(max_age_ms) is not int or max_age_ms < 0
+            or type(forward_capture_audit) is not bool
             or type(max_future_skew_ms) is not int or max_future_skew_ms < 0
         ):
             raise ValueError("invalid raw-capture resource bounds")
@@ -96,6 +98,7 @@ class OfflineSpotCaptureJournal:
         self.max_frames_per_session = max_frames_per_session
         self.max_age_ms = max_age_ms
         self.max_future_skew_ms = max_future_skew_ms
+        self.forward_capture_audit = forward_capture_audit
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
@@ -130,6 +133,20 @@ class OfflineSpotCaptureJournal:
                 CREATE INDEX IF NOT EXISTS offline_capture_session_order
                 ON offline_spot_capture_records(session_id,capture_id)
             """)
+            if forward_capture_audit:
+                # Optional forward-only write-ahead SOURCE inventory: raw row
+                # and immutable receipt-intent proof commit in one transaction.
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS offline_forward_capture_intents (
+                        capture_id INTEGER PRIMARY KEY,
+                        session_id TEXT NOT NULL,
+                        kind TEXT NOT NULL,
+                        received_at_ms INTEGER NOT NULL,
+                        sha256 TEXT NOT NULL,
+                        FOREIGN KEY(capture_id)
+                          REFERENCES offline_spot_capture_records(capture_id)
+                    )
+                """)
 
     from contextlib import contextmanager
 
@@ -371,6 +388,12 @@ class OfflineSpotCaptureJournal:
                     VALUES (?,?,?,?,?,?,?,?)
                 """, (session_id, kind, received, requested, request_symbol,
                       endpoint, body, digest))
+                if self.forward_capture_audit:
+                    conn.execute("""
+                        INSERT INTO offline_forward_capture_intents
+                        (capture_id,session_id,kind,received_at_ms,sha256)
+                        VALUES (?,?,?,?,?)
+                    """, (cursor.lastrowid, session_id, kind, received, digest))
                 conn.execute("""
                     UPDATE offline_spot_capture_sessions SET last_receipt_ms=?
                     WHERE session_id=?
