@@ -117,6 +117,29 @@ def _verify_one(root: Path, result: ForwardSpotResearchStatus) -> None:
         root/"independent_receiver.sqlite",mode_provider=provider,
     )
     receipts = receiver.receipts("forward_spot","read_only_market")
+    # Counts alone do not authenticate WHICH original each independent
+    # receiver acknowledged. Compare every receipt to its immutable intent.
+    exact = {row.envelope.ingest_id:row.envelope for row in intents}
+    if any(
+        r.ingest_id not in exact
+        or r.event_id != exact[r.ingest_id].event_id
+        or r.source_consumer != exact[r.ingest_id].source_consumer
+        or r.receiver != exact[r.ingest_id].receiver
+        or r.projection_fingerprint != exact[r.ingest_id].projection_fingerprint
+        or r.receipt_id != OfflineIndependentProjectionReceiver._receipt_id(
+            exact[r.ingest_id]
+        )
+        or r.received_at_ms < exact[r.ingest_id].available_at_ms
+        for r in receipts
+    ):
+        raise ForwardSupervisorError("independent receipt does not match source intent")
+    with original._connect() as conn:
+        session = conn.execute(
+            "SELECT closed_at_ms,symbol FROM offline_spot_capture_sessions "
+            "WHERE session_id=?", (result.session_id,),
+        ).fetchone()
+    if session is None or session["closed_at_ms"] is None or session["symbol"]!="BTCUSDT":
+        raise ForwardSupervisorError("unclosed or unrelated original session")
     counts = {
         "md.ticker":result.forwarded_trades,
         "indicator.volume_delta":result.forwarded_trades,
