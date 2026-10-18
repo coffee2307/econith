@@ -309,9 +309,12 @@ async def test_hard_process_exit_mid_derived_observation_is_recovered(tmp_path):
         observed={"count":0}
         def terminate_after_durable_commit(self,**kwargs):
             reply=original_accept(self,**kwargs)
-            observed["count"]+=1
-            if observed["count"] == 2:
-                os._exit(37)
+            # This crash injection targets the ORIGINAL primary observer
+            # ledger, not unrelated newly independent named consumer DBs.
+            if self.path.resolve() == Path(receipts).resolve():
+                observed["count"]+=1
+                if observed["count"] == 2:
+                    os._exit(37)
             return reply
         OfflineDerivedResearchReceiptLedger.accept=terminate_after_durable_commit
         asyncio.run(start_verified_research_runtime(
