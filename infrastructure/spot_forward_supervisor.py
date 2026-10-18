@@ -55,6 +55,8 @@ class ForwardSupervisorStatus:
     total_receiver_receipts: int
     max_queue_high_watermark: int
     peak_recorded_storage_bytes: int
+    receiver_process_starts: int = 0
+    max_receiver_ack_latency_ms: float = 0.0
     historical_gaps_recovered: bool = False
     history_continuity_verified: bool = False
     continuous_live_market: bool = False
@@ -86,6 +88,10 @@ def _verify_one(root: Path, result: ForwardSpotResearchStatus) -> None:
         or result.orders_submitted != 0
         or result.queue_high_watermark < 0
         or result.queue_high_watermark > 128
+        or result.receiver_process_starts < 0
+        or (result.receiver_transport == "persistent_hmac"
+            and result.receiver_process_starts != 1)
+        or result.max_receiver_ack_latency_ms < 0
         or result.original_records <= 0
         or result.forwarded_trades <= 0
         or result.forwarded_books <= 0
@@ -186,7 +192,9 @@ def _initialize(root: Path) -> Path:
                 originals INTEGER NOT NULL DEFAULT 0,
                 receiver_acks INTEGER NOT NULL DEFAULT 0,
                 queue_high_watermark INTEGER NOT NULL DEFAULT 0,
-                recorded_storage_bytes INTEGER NOT NULL DEFAULT 0
+                recorded_storage_bytes INTEGER NOT NULL DEFAULT 0,
+                receiver_process_starts INTEGER NOT NULL DEFAULT 0,
+                max_receiver_ack_latency_ms REAL NOT NULL DEFAULT 0
             )
         """)
         db.execute("""
@@ -208,7 +216,9 @@ def _summarize(db_path: Path, root: Path) -> ForwardSupervisorStatus:
                    SUM(status='STARTED'),COALESCE(SUM(originals),0),
                    COALESCE(SUM(receiver_acks),0),
                    COALESCE(MAX(queue_high_watermark),0),
-                   COALESCE(MAX(recorded_storage_bytes),0)
+                   COALESCE(MAX(recorded_storage_bytes),0),
+                   COALESCE(SUM(receiver_process_starts),0),
+                   COALESCE(MAX(max_receiver_ack_latency_ms),0)
             FROM forward_watch_attempt
         """).fetchone()
         outage=db.execute("""
@@ -224,6 +234,8 @@ def _summarize(db_path: Path, root: Path) -> ForwardSupervisorStatus:
         total_originals=attempts[4],total_receiver_receipts=attempts[5],
         max_queue_high_watermark=attempts[6],
         peak_recorded_storage_bytes=max(attempts[7],_storage_bytes(root)),
+        receiver_process_starts=attempts[8],
+        max_receiver_ack_latency_ms=attempts[9],
     )
 
 
@@ -233,6 +245,7 @@ async def run_forward_research_supervisor(
     timeout_s: float = 45, pause_s: float = 0,
     max_total_storage_bytes: int = 100_000_000,
     max_book_staleness_ms: int = 2500,
+    persistent_receiver: bool = False,
     clock_check: Callable[[], Awaitable[bool]] | None = None,
     capture_factory: Callable[
         [Path,str,int], Awaitable[ForwardSpotResearchStatus]
@@ -259,6 +272,7 @@ async def run_forward_research_supervisor(
         or not 2_000_000 <= max_total_storage_bytes <= 2_000_000_000
         or type(max_book_staleness_ms) is not int
         or not 100 <= max_book_staleness_ms <= 30000
+        or type(persistent_receiver) is not bool
     ):
         raise ValueError("unsafe bounded forward supervision configuration")
     if capture_factory is None and not callable(clock_check):
@@ -293,6 +307,7 @@ async def run_forward_research_supervisor(
                         source="binance_public_simulation",
                         max_frames=max_frames,timeout_s=timeout_s,
                         max_book_staleness_ms=max_book_staleness_ms,
+                        persistent_receiver=persistent_receiver,
                     )
                 else:
                     result=await capture_factory(directory,sid,iteration)
@@ -346,12 +361,14 @@ async def run_forward_research_supervisor(
                         UPDATE forward_watch_attempt SET
                         status='PASSED',finished_ms=?,originals=?,
                         receiver_acks=?,queue_high_watermark=?,
-                        recorded_storage_bytes=?
+                        recorded_storage_bytes=?,receiver_process_starts=?,
+                        max_receiver_ack_latency_ms=?
                         WHERE iteration=? AND status='STARTED'
                     """,(
                         finished,result.original_records,
                         result.receiver_receipts,result.queue_high_watermark,
-                        size,iteration,
+                        size,result.receiver_process_starts,
+                        result.max_receiver_ack_latency_ms,iteration,
                     ))
                     db.execute("""
                         UPDATE forward_watch_outage SET restored_ms=?
