@@ -32,6 +32,7 @@ from infrastructure.market_cross_process_delivery import (
 from infrastructure.market_delivery_cursor import OfflineMarketProjectionCursor
 from infrastructure.spot_forward_outbox import OfflineForwardSpotOutbox
 from infrastructure.spot_forward_owner import exclusive_forward_owner
+from infrastructure.market_persistent_hmac_receiver import PersistentHmacResearchReceiver
 from infrastructure.market_derived_research_receipts import (
     OfflineDerivedResearchReceiptLedger,
 )
@@ -75,6 +76,9 @@ class ForwardSpotResearchStatus:
     execution_started: bool
     orders_submitted: int
     queue_high_watermark: int = 0
+    receiver_process_starts: int = 0
+    receiver_transport: str = "one_shot_hmac"
+    max_receiver_ack_latency_ms: float = 0.0
 
 
 async def observe_forward_spot_research(
@@ -85,6 +89,7 @@ async def observe_forward_spot_research(
     max_frames: int = 160, timeout_s: float = 45,
     queue_capacity: int = 128,
     max_book_staleness_ms: int = 2500,
+    persistent_receiver: bool = False,
 ) -> ForwardSpotResearchStatus:
     """One real *in-session* research pass (no default startup/auto retry).
 
@@ -103,6 +108,7 @@ async def observe_forward_spot_research(
         or type(queue_capacity) is not int or not 2 <= queue_capacity <= 8192
         or type(max_book_staleness_ms) is not int
         or not 100 <= max_book_staleness_ms <= 30000
+        or type(persistent_receiver) is not bool
     ):
         raise ValueError("invalid fresh, bounded forward research configuration")
     offline = stream is not None and snapshot_fetch is not None
@@ -154,6 +160,9 @@ async def observe_forward_spot_research(
         forwarded_trades = forwarded_books = pre_sync = 0
         last_book_id: int | None = None
         admitted = 0
+        receiver_ack_max_ms = 0.0
+        receiver_client = (PersistentHmacResearchReceiver(receiver_db)
+                           if persistent_receiver else None)
         async def derived_observer(event: Event) -> None:
             if event.payload.get("source") != _SOURCE:
                 raise ForwardSpotResearchError("derived event has untrusted forward provenance")
@@ -171,7 +180,7 @@ async def observe_forward_spot_research(
             bus.subscribe(topic, derived_observer)
 
         async def forward(record: CapturedSpotRecord) -> None:
-            nonlocal forwarded_trades, forwarded_books, pre_sync, last_book_id, admitted
+            nonlocal forwarded_trades, forwarded_books, pre_sync, last_book_id, admitted, receiver_ack_max_ms
             before = shadow.trades
             # Source COMMIT and independent disk re-read BEFORE any receiver IPC
             # or EventBus publish. On any error the capture adapter ends the session.
@@ -236,12 +245,22 @@ async def observe_forward_spot_research(
             # Stage immutable source-bound intent durably BEFORE IPC. If the
             # child COMMITs then this process dies, exact recovery can retry it.
             outbox.stage(envelope)
-            # An actual fresh OS child owns the independent receiver SQLite.
-            # Signing verifies the EXACT ordered envelope/receipt identity.
-            confirmations = await asyncio.to_thread(
-                accept_batch_via_authenticated_subprocess,
-                [envelope], receiver_db=receiver_db,
-                now_ms=max(time.time_ns() // 1_000_000, now),
+            # Both modes require an independent SQLite COMMIT and HMAC-bound
+            # receipt before publishing. Persistent mode reuses one child
+            # across the finite session, never across source identities.
+            ipc_start = time.monotonic()
+            if receiver_client is None:
+                confirmations = await asyncio.to_thread(
+                    accept_batch_via_authenticated_subprocess,
+                    [envelope], receiver_db=receiver_db,
+                    now_ms=max(time.time_ns() // 1_000_000, now),
+                )
+            else:
+                confirmations = await receiver_client.accept_batch(
+                    [envelope], now_ms=max(time.time_ns() // 1_000_000, now),
+                )
+            receiver_ack_max_ms = max(
+                receiver_ack_max_ms, (time.monotonic()-ipc_start)*1000,
             )
             if len(confirmations) != 1 or confirmations[0].receipt_id != (
                 OfflineIndependentProjectionReceiver._receipt_id(envelope)
@@ -274,6 +293,8 @@ async def observe_forward_spot_research(
 
         await bus.start()
         try:
+            if receiver_client is not None:
+                await receiver_client.start()
             if offline:
                 result = await adapter.capture_open_stream(
                     stream, snapshot_fetch, session_id=session_id, source=source,
@@ -336,6 +357,13 @@ async def observe_forward_spot_research(
                 history_continuity_verified=False, continuous_live_market=False,
                 execution_started=False, orders_submitted=0,
                 queue_high_watermark=result.queue_high_watermark,
+                receiver_process_starts=(receiver_client.process_starts
+                                         if receiver_client is not None else admitted),
+                receiver_transport=("persistent_hmac" if receiver_client is not None
+                                    else "one_shot_hmac"),
+                max_receiver_ack_latency_ms=receiver_ack_max_ms,
             )
         finally:
+            if receiver_client is not None:
+                await receiver_client.close()
             await bus.stop()
