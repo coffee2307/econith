@@ -290,6 +290,7 @@ def _profile_launch_argv(*,profile:str,trial:Path,python_executable:str) -> list
         argv.append("--fresh-socket-per-segment")
     if config["watch_hours"] is not None:
         argv+=["--watch-hours",str(config["watch_hours"])]
+        argv+=["--max-consecutive-clock-failures","3"]
     return argv
 
 
