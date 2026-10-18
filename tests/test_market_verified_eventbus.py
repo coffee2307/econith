@@ -280,3 +280,93 @@ def test_verified_inflight_limit_invalid(n):
     bus=EventBus(mode_provider=lambda:QuantMode.SIMULATION)
     with pytest.raises(RawMarketAdmissionDenied,match="bound"):
         bus.activate_verified_market_only(max_inflight=n)
+
+
+@pytest.mark.asyncio
+async def test_optin_verified_derived_fence_refuses_forged_direct_publication():
+    from core.event_bus import VerifiedDerivedPublisher
+    bus = EventBus(mode_provider=lambda: QuantMode.SIMULATION)
+    bus.activate_verified_market_only()
+    capability = bus.activate_verified_derived_only()
+    with pytest.raises(RawMarketAdmissionDenied, match="capability"):
+        await bus.publish(
+            "md.ticker", source="verified_closed_session_replay",
+            verified_session_id="rec_fake", verified_source_record_id="rec_fake:aggTrade:1",
+            verified_source_ordinal=1, verified_source_available_at_ms=1780000000001,
+        )
+    fake = VerifiedDerivedPublisher(bus, object())
+    with pytest.raises(RawMarketAdmissionDenied, match="unverified derived"):
+        await fake.publish(
+            "md.ticker", source="verified_closed_session_replay",
+            verified_session_id="rec_fake", verified_source_record_id="rec_fake:aggTrade:1",
+            verified_source_ordinal=1, verified_source_available_at_ms=1780000000001,
+        )
+    assert bus._queue.empty()
+    with pytest.raises(RawMarketAdmissionDenied, match="unverified derived"):
+        await capability.publish("md.ticker", source="unknown")
+    assert bus._queue.empty()
+    with pytest.raises(RawMarketAdmissionDenied, match="fresh protected"):
+        bus.activate_verified_derived_only()
+
+
+@pytest.mark.asyncio
+async def test_verified_derived_pipeline_produces_source_bound_events_and_denies_bypass():
+    from infrastructure.preprocessing.pipeline import MarketDataPipeline
+    bus = EventBus(mode_provider=lambda: QuantMode.SIMULATION)
+    publisher = bus.activate_verified_market_only()
+    derived = bus.activate_verified_derived_only()
+    MarketDataPipeline(bus, verified_derived_publisher=derived).register()
+    received = []
+    async def observed(e):
+        received.append(e)
+    bus.subscribe("md.ticker", observed)
+    bus.subscribe("indicator.volume_delta", observed)
+    await bus.start()
+    try:
+        await publisher.publish_raw_confirmed(
+            "md.aggTrade",
+            frame={"e":"aggTrade","s":"BTCUSDT","a":501,
+                   "E":1780000000000,"T":1780000000000,
+                   "f":501,"l":501,"p":"101","q":"0.2","m":False},
+            source="verified_closed_session_replay",
+            verified_session_id="rec_derived_gate",
+            verified_source_record_id="rec_derived_gate:aggTrade:1",
+            verified_source_ordinal=1,
+            verified_source_available_at_ms=1780000000001,
+        )
+        await bus.wait_verified_idle()
+        assert {e.topic for e in received} == {"md.ticker", "indicator.volume_delta"}
+        for e in received:
+            assert e.payload["verified_session_id"] == "rec_derived_gate"
+            assert e.payload["source"] == "verified_closed_session_replay"
+        with pytest.raises(RawMarketAdmissionDenied):
+            await bus.publish("indicator.volume_delta", source="verified_closed_session_replay")
+    finally:
+        await bus.stop()
+
+
+@pytest.mark.asyncio
+async def test_missing_derived_capability_poisoned_handler_in_fenced_research_bus():
+    from infrastructure.preprocessing.pipeline import MarketDataPipeline
+    bus = EventBus(mode_provider=lambda: QuantMode.SIMULATION)
+    publisher = bus.activate_verified_market_only()
+    bus.activate_verified_derived_only()
+    MarketDataPipeline(bus).register()  # incorrect wiring deliberately
+    await bus.start()
+    try:
+        with pytest.raises(VerifiedRawDeliveryError, match="handler failed"):
+            await publisher.publish_raw_confirmed(
+                "md.aggTrade",
+                frame={"e":"aggTrade","s":"BTCUSDT","a":500,
+                       "E":1780000000000,"T":1780000000000,
+                       "f":500,"l":500,"p":"101","q":"0.1","m":False},
+                source="verified_closed_session_replay",
+                verified_session_id="rec_missing_cap",
+                verified_source_record_id="rec_missing_cap:aggTrade:1",
+                verified_source_ordinal=1,
+                verified_source_available_at_ms=1780000000001,
+            )
+        with pytest.raises(VerifiedRawDeliveryError, match="handler failures"):
+            await bus.wait_verified_idle()
+    finally:
+        await bus.stop()
