@@ -90,6 +90,9 @@ async def test_verified_research_bus_only_sees_receipt_provenance(tmp_path):
         assert status.observed_volume_deltas == 2
         assert status.observed_orderbook_imbalance == 1
         assert status.durable_derived_research_receipts == 5
+        assert status.named_research_subscribers == 2
+        assert status.durable_named_research_receipts == 10
+        assert status.replayed_named_research_receipts == 0
         from infrastructure.market_derived_research_receipts import (
             OfflineDerivedResearchReceiptLedger,
         )
@@ -174,6 +177,8 @@ async def test_main_verified_only_lifespan_protects_all_legacy_http(monkeypatch,
             body = ok.json()
             assert body["producer_acks"] == body["receiver_receipts"] == 2
             assert body["durable_derived_research_receipts"] == 5
+            assert body["durable_named_research_receipts"] == 10
+            assert body["named_research_subscribers"] == 2
             assert body["execution_started"] is False
             assert body["legacy_streamer_started"] is False
             assert body["history_continuity_verified"] is False
@@ -360,3 +365,61 @@ def test_verified_recovery_refuses_original_db_as_receipt_ledger(tmp_path):
     with pytest.raises(VerifiedResearchRuntimeError,match="independent"):
         asyncio.run(attempt())
     assert not (tmp_path/"unused").exists()
+
+@pytest.mark.asyncio
+async def test_two_independent_named_subscribers_recover_after_new_source_proof(tmp_path):
+    from infrastructure.market_named_research_subscribers import (
+        OfflineNamedResearchSubscriber, NamedResearchSubscriberError,
+    )
+    original, sid = _original(tmp_path)
+    first = await start_verified_research_runtime(
+        original_db=original, session_id=sid, output_dir=tmp_path/"named_first",
+    )
+    try:
+        assert first.status.durable_named_research_receipts == 10
+        assert first.status.replayed_named_research_receipts == 0
+    finally:
+        await first.close()
+    named = {
+        name: (tmp_path/"named_first"/(name + ".sqlite")).resolve()
+        for name in ("research_audit", "research_monitor")
+    }
+    restarted = await start_verified_research_runtime(
+        original_db=original, session_id=sid, output_dir=tmp_path/"named_second",
+        named_receipt_dbs=named,
+    )
+    try:
+        assert restarted.status.durable_named_research_receipts == 10
+        assert restarted.status.replayed_named_research_receipts == 10
+        assert restarted.status.durable_derived_research_receipts == 5
+        assert restarted.status.orders_submitted == 0
+    finally:
+        await restarted.close()
+    for name, db in named.items():
+        subscriber = OfflineNamedResearchSubscriber(
+            db, name=name, expected_source="verified_closed_session_replay",
+            mode_provider=lambda: QuantMode.SIMULATION,
+        )
+        assert subscriber.verify(sid, {
+            "md.ticker":2, "indicator.volume_delta":2, "indicator.obi":1,
+        }).durable_receipts == 5
+
+
+def test_named_recovery_refuses_alias_to_original_or_one_shared_ledger(tmp_path):
+    from infrastructure.market_named_research_subscribers import (
+        NamedResearchSubscriberError,
+    )
+    original, sid = _original(tmp_path)
+    kwargs = dict(
+        original_db=original, session_id=sid,
+        output_dir=tmp_path/"named_recovery_denied",
+    )
+    import asyncio
+    with pytest.raises(NamedResearchSubscriberError):
+        asyncio.run(start_verified_research_runtime(
+            **kwargs, named_receipt_dbs={
+                "research_audit":original.resolve(),
+                "research_monitor":original.resolve(),
+            },
+        ))
+    assert not kwargs["output_dir"].exists()
