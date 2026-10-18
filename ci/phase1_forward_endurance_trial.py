@@ -34,6 +34,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--max-clock-offset-ms",type=int,default=3000)
     p.add_argument("--max-clock-rtt-ms",type=int,default=2000)
     p.add_argument("--ws-idle-timeout-s",type=float,default=30.0)
+    p.add_argument("--max-consecutive-clock-failures",type=int,default=None,
+                   help="Hour/Day bounded network circuit breaker (2..10 failed clock preflights)")
     p.add_argument("--persistent-receiver",action="store_true")
     p.add_argument("--fresh-socket-per-segment",action="store_true",
                    help="Discard public WSS after every bounded attempt; no claimed history continuity")
@@ -68,6 +70,10 @@ def validate(args: argparse.Namespace) -> None:
         or not 0.1 <= args.ws_idle_timeout_s <= 120
         or type(args.max_clock_rtt_ms) is not int
         or not 50 <= args.max_clock_rtt_ms <= 5000
+        or (args.max_consecutive_clock_failures is not None and (
+            args.watch_hours is None
+            or not 2 <= args.max_consecutive_clock_failures <= 10
+        ))
         or (args.single_socket and not args.persistent_receiver)
         or (args.fresh_socket_per_segment and not args.single_socket)
     ):
@@ -93,6 +99,7 @@ async def run(args: argparse.Namespace) -> dict:
             watch_duration_s=(args.watch_hours*3600 if args.watch_hours is not None else None),
             clock_check=clock_check,
             fresh_socket_per_segment=args.fresh_socket_per_segment,
+            max_consecutive_clock_failures=args.max_consecutive_clock_failures,
         )
         result=asdict(pilot.supervisor)
         result.update({
@@ -113,6 +120,7 @@ async def run(args: argparse.Namespace) -> dict:
         persistent_receiver=args.persistent_receiver,
         public_ws_idle_timeout_s=args.ws_idle_timeout_s,
         watch_duration_s=(args.watch_hours*3600 if args.watch_hours is not None else None),
+        max_consecutive_clock_failures=args.max_consecutive_clock_failures,
         clock_check=clock_check,
     )
     return asdict(result)
