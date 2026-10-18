@@ -20,3 +20,8 @@ Forensic evidence on authorized host remains under `F:\ECONITH-Phase1-Evidence\2
 Original matrix: [PHASE1_IMMUTABLE_EXIT_MATRIX_20261018.md](PHASE1_IMMUTABLE_EXIT_MATRIX_20261018.md). Supporting research report: [PHASE1_LAG_HISTOGRAM_HARDKILL_ACCEPTANCE_20261019.md](PHASE1_LAG_HISTOGRAM_HARDKILL_ACCEPTANCE_20261019.md).
 
 **Governance:** PR #28 remains **DRAFT**, no main merge, no production deployment, no brokerage API keys, no REALITY, no executed orders or financial-capital authorization. This re-score is a documented conservative engineering opinion, not a newly frozen exit-matrix version.
+
+
+## Later same-day timed-watch outcome
+
+The new 10-minute finite, multi-session public research watch **did not pass**. Four 1,000-frame independent Binance sessions passed; attempt 5 quarantined on `FORWARD_PROJECTOR_SOURCE_LAG` after 738 original rows with 92 originals past the cursor and one independently committed HMAC receipt awaiting checkpoint reconciliation. The program stopped at **396.218s**, well before the 600s target. Host free RAM had previously fallen to ~1.10GB; direct causality remains unproven. This negative result is **not** grounds for increasing the P1-05 credit above 13/15 or relaxing the 5s age limit. The provisional total **remains 81/100**, and formal Phase 1 exit stays OPEN. Full read-only forensic record: [PHASE1_10MIN_WATCH_FAILURE_20261019.md](PHASE1_10MIN_WATCH_FAILURE_20261019.md).
