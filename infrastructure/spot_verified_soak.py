@@ -16,6 +16,7 @@ import asyncio
 import hashlib
 import json
 import os
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable
 
@@ -67,6 +68,32 @@ def _atomic_checkpoint(destination: Path, report: dict[str, Any]) -> None:
         pass
     finally:
         os.close(fd)
+
+
+
+@contextmanager
+def _exclusive_soak_lock(root: Path):
+    """No concurrent writers or automatic takeover of stale process state.
+
+    The lock is created exclusively before reading/writing the manifest.
+    If the whole interpreter is killed, an orphan lock intentionally blocks
+    automatic resume until an operator inspects that run's evidence.
+    """
+    lock = root / ".verified_soak.lock"
+    try:
+        fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError as exc:
+        raise VerifiedSpotSoakError(
+            "another soak runner or orphaned lock requires manual review"
+        ) from exc
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as out:
+            out.write("RESEARCH_ONLY_LOCKED\\n")
+            out.flush()
+            os.fsync(out.fileno())
+        yield
+    finally:
+        lock.unlink(missing_ok=True)
 
 
 def _read_manifest(root: Path) -> dict[str, Any]:
@@ -270,44 +297,48 @@ async def run_verified_spot_soak(
     root = output_dir.resolve()
     if output_dir != root:
         raise VerifiedSpotSoakError("research soak root must not be symlinked")
+
     if not resume:
         if root.exists():
             raise FileExistsError("new empty soak directory required")
         root.mkdir(parents=True, exist_ok=False)
-        state: dict[str, Any] = {
-            "schema": 1, "requested_rounds": rounds,
-            "fixture": fixture, "status": "RUNNING", "rounds": [],
-            "continuous_live_market": False,
-            "history_continuity_verified": False, "orders_submitted": 0,
-        }
-        _atomic_checkpoint(root / _MANIFEST, state)
-    else:
-        state = _read_manifest(root)
-        _validate_history(root, state, expected_rounds=rounds, fixture=fixture)
-        if state["status"] == "COMPLETE":
-            return state
-    known_ids = {row["session_id"] for row in state["rounds"]}
-    for i in range(len(state["rounds"]) + 1, rounds + 1):
-        if clock_check is not None:
-            checked = clock_check()
-            if asyncio.iscoroutine(checked):
-                checked = await checked
-            if checked is not True:
-                raise VerifiedSpotSoakError("public clock preflight refused research admission")
-        path = root / f"round_{i:03d}"
-        capture = capture_factory(i, path) if fixture else None
-        result = await observe_verified_public_batches(
-            output_dir=path, allow_network=True, cycles=1,
-            max_frames=max_frames, timeout_s=timeout_s,
-            max_attempts=max_attempts, capture_once=capture,
-        )
-        row = _verify_sealed_round(root, i, result, fixture=fixture)
-        if row["session_id"] in known_ids:
-            raise VerifiedSpotSoakError("duplicate public Spot session across soak rounds")
-        known_ids.add(row["session_id"])
-        state["rounds"].append(row)
-        state["status"] = "COMPLETE" if i == rounds else "RUNNING"
-        _atomic_checkpoint(root / _MANIFEST, state)
-        if i < rounds and pause_s:
-            await asyncio.sleep(pause_s)
-    return state
+    elif not root.is_dir():
+        raise VerifiedSpotSoakError("cannot resume missing soak evidence root")
+    with _exclusive_soak_lock(root):
+            state: dict[str, Any] = {
+                "schema": 1, "requested_rounds": rounds,
+                "fixture": fixture, "status": "RUNNING", "rounds": [],
+                "continuous_live_market": False,
+                "history_continuity_verified": False, "orders_submitted": 0,
+            }
+            _atomic_checkpoint(root / _MANIFEST, state)
+        else:
+            state = _read_manifest(root)
+            _validate_history(root, state, expected_rounds=rounds, fixture=fixture)
+            if state["status"] == "COMPLETE":
+                return state
+        known_ids = {row["session_id"] for row in state["rounds"]}
+        for i in range(len(state["rounds"]) + 1, rounds + 1):
+            if clock_check is not None:
+                checked = clock_check()
+                if asyncio.iscoroutine(checked):
+                    checked = await checked
+                if checked is not True:
+                    raise VerifiedSpotSoakError("public clock preflight refused research admission")
+            path = root / f"round_{i:03d}"
+            capture = capture_factory(i, path) if fixture else None
+            result = await observe_verified_public_batches(
+                output_dir=path, allow_network=True, cycles=1,
+                max_frames=max_frames, timeout_s=timeout_s,
+                max_attempts=max_attempts, capture_once=capture,
+            )
+            row = _verify_sealed_round(root, i, result, fixture=fixture)
+            if row["session_id"] in known_ids:
+                raise VerifiedSpotSoakError("duplicate public Spot session across soak rounds")
+            known_ids.add(row["session_id"])
+            state["rounds"].append(row)
+            state["status"] = "COMPLETE" if i == rounds else "RUNNING"
+            _atomic_checkpoint(root / _MANIFEST, state)
+            if i < rounds and pause_s:
+                await asyncio.sleep(pause_s)
+        return state
