@@ -156,7 +156,11 @@ async def test_recovery_after_receiver_commit_before_producer_ack(tmp_path,monke
     assert not report.session_certified
     assert report.orders_submitted==0
     again=await recover_staged_forward_spot(root=root,session_id="rec_recovery_receiver")
-    assert again==report
+    assert again.forward_checkpoints==report.forward_checkpoints==1
+    assert again.checkpoint_suffix_repaired==0
+    assert report.checkpoint_suffix_repaired==1
+    assert again.staged_envelopes==report.staged_envelopes
+    assert again.receiver_receipts==report.receiver_receipts
 
 
 def open_outbox_path(root,sid):
