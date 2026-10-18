@@ -172,6 +172,8 @@ def test_saved_real_capture_can_ack_via_authenticated_subprocess(tmp_path, capsy
     assert report["transport_scope"] == "HMAC_AUTHENTICATED_LOCAL_SUBPROCESS_PIPE_ONLY"
     assert report["independent_receiver_receipt_count"] == 2
     assert report["producer_ack_count"] == 2
+    assert report["authenticated_receiver_batch_limit"] == 32
+    assert report["authenticated_receiver_process_invocations"] == 1
     assert report["network_requests"] == 0
     assert report["orders_submitted"] == 0
     assert hashlib.sha256(source.read_bytes()).hexdigest() == before
