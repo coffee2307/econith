@@ -3,7 +3,7 @@
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\phase1-test.ps1 -Mode Doctor
 # powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\phase1-test.ps1 -Mode Quick -Setup
 param(
-    [ValidateSet("Doctor","Quick","Hour","Day","Report")]
+    [ValidateSet("Doctor","Quick","Diagnostic","Hour","Day","Report")]
     [string]$Mode="Doctor",
     [switch]$Setup,
     [string]$OutputBase="",
@@ -38,6 +38,9 @@ switch ($Mode) {
     }
     "Quick" {
         & $python -m ci.phase1_operator_lab smoke --allow-public-market-data --profile quick @extra
+    }
+    "Diagnostic" {
+        & $python -m ci.phase1_operator_lab smoke --allow-public-market-data --profile diagnostic @extra
     }
     "Hour" {
         & $python -m ci.phase1_operator_lab smoke --allow-public-market-data --profile hour @extra
