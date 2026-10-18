@@ -68,10 +68,18 @@ async def test_profile_records_real_receiver_and_derived_stages(tmp_path,monkeyp
 async def test_profile_writes_incomplete_on_source_rejection(tmp_path,monkeypatch):
     monkeypatch.setenv("ECONITH_PHASE1_STAGE_PROFILE","1")
     root=(tmp_path/"failed").resolve()
+    async def definitely_stale_source():
+        async for frame in source(_NOW()):
+            # The original 150ms fixture can coincide with a newer depth
+            # receipt on a busy Windows host. Force a >350ms trade delay.
+            item=json.loads(frame)
+            if item["data"]["e"]=="aggTrade" and item["data"]["a"]==500:
+                await asyncio.sleep(0.35)
+            yield frame
     with pytest.raises(Exception,match="stale synchronized book"):
         await observe_forward_spot_research(
             output_dir=root,session_id="rec_profile_failure",
-            stream=source(_NOW()),snapshot_fetch=snapshot,
+            stream=definitely_stale_source(),snapshot_fetch=snapshot,
             max_frames=20,timeout_s=20,persistent_receiver=True,
             max_book_staleness_ms=100,
         )
