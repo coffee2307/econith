@@ -106,7 +106,7 @@ def _verify_sealed_round(
         or result.get("named_research_subscriber_receipts_durable") is not True
         or result.get("named_research_subscribers") != 2
         or result.get("other_eventbus_subscribers_durable") is not False
-        or result.get("public_tls_peer_confirmed") is (not fixture) is False
+        or result.get("public_tls_peer_confirmed") is not (not fixture)
     ):
         raise VerifiedSpotSoakError("incomplete or unsafe research batch report")
     s = sessions[0]
