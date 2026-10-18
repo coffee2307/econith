@@ -31,12 +31,12 @@ document, not an altered percentage.
 | P1-02 | Source availability, lineage, authenticated independently owned source/receiver ACK | 15 | 15 | PASS in bounded research trials |
 | P1-03 | Raw+derived publisher fences, primary/audit/monitor separately durable read-only projections | 15 | 15 | PASS in opt-in SIMULATION graph |
 | P1-04 | Atomic source intent, original-as-of eligible event rescan, outbox ACKs, crash recovery and process fencing | 15 | 14 | PARTIAL: external host crash acceptance outstanding |
-| P1-05 | Sustained continuous protected ingress, reconnect/catch-up, bounded backlog, long-duration host soak | 15 | 10 | PARTIAL: in-session original/HMAC/derived chained checkpoints and liveness guards; true continuous source and 24h host evidence absent |
-| P1-06 | Reviewed default-app source cutover, no legacy data bypass and fully isolated execution | 10 | 3 | PARTIAL: isolated opt-in forward ASGI preview only; default still legacy |
+| P1-05 | Sustained continuous protected ingress, reconnect/catch-up, bounded backlog, long-duration host soak | 15 | 12 | PARTIAL: reused pinned WSS across independently sealed forward segments, failed-link reconnect and durable gaps; real 24h soak/completeness unproven |
+| P1-06 | Reviewed default-app source cutover, no legacy data bypass and fully isolated execution | 10 | 4 | PARTIAL: CI AST gate catches verified/legacy engine crossover; default still legacy, migration unapproved |
 | P1-07 | Original dataset coverage beyond BTCUSDT and real operator-certified 24–72h continuity/quality evidence | 10 | 0 | BLOCKED: no current-HEAD external soak or full dataset matrix |
-| **TOTAL** | | **100** | **77** | **Phase 1 remains OPEN** |
+| **TOTAL** | | **100** | **80** | **Phase 1 remains OPEN** |
 
-**77% is a conservative, explicitly subjective weighted engineering
+**80% is a conservative, explicitly subjective weighted engineering
 estimate.** The *certified institutional Phase 1 exit score is not this percentage*:
 all mandatory gate rows must be PASS before 100% can be stated. Neither
 a source label nor simulated forward data authorizes orders. Existing
@@ -251,3 +251,36 @@ CI succeeds. No counter here or in the runtime certifies missing
 public exchange history, an uninterrupted source, 24–72h network soak
 or reviewed default `main.py` cutover. See
 `PHASE1_DURABLE_LIVE_FORWARD_CHECKPOINTS_20261018.md`.
+
+## Faster closure iteration: pinned single-socket read-only forward research and static legacy boundary gate
+
+This iteration implements a **shared hostname-verified public Binance
+Spot WSS lease** across multiple separately checkpointed and
+independently HMAC-receiver/observer-attested bounded forward segments.
+A successful segment reuses the same socket, but STILL records a
+`coverage_verified=0` unknown boundary. When a segment fails, the
+lease is destroyed; any later segment must open a fresh connection
+and new REST book. A fresh clock preflight runs before each segment.
+This is a meaningful network churn/recovery improvement, **not**
+an unbounded single-session proof of complete exchange history.
+
+Two additional test gates are included in the SAME implementation:
+(1) forced socket failure/reconnect with independent per-segment
+snapshot, original/outbox/receiver/derived/checkpoint evidence, and
+(2) a Python AST-based startup gate executed by GitHub CI, refusing
+any future introduction of a legacy streamer, engine or CCXT call
+into verified research branches, missing early return, or unreviewed
+default-ingress change. The second gate explicitly records that the
+default `main.py` still uses the **unverified legacy** publisher and
+that it has not been migrated.
+
+Provisional engineering evidence P1-05 rises from 10→**12/15** and
+P1-06 from 3→**4/10**; **80/100** engineering points conditional on
+same-HEAD CI PASS. The 100% institutional release gates remain
+strictly OPEN: actual 24–72h real Binance source and host-resource
+soak, default verified-only migration with full publisher/execution
+audit, multi-symbol/OHLCV and applicable derivatives/macro vintages.
+This is not production readiness or authority to trade money.
+
+Operator instructions and fault semantics:
+`PHASE1_SINGLE_SOCKET_SEGMENTED_SPOT_AND_CUTOVER_AUDIT_20261018.md`.
