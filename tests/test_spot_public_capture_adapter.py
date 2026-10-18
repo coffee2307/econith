@@ -277,7 +277,7 @@ async def test_public_transport_pins_tls_hosts_and_get_only_via_fake_clients(
 
     class FakeWS:
         async def __aenter__(self):
-            return feed(raw(depth()), gap=0.001)
+            return feed(raw(depth()), raw(trade()), gap=0.001)
         async def __aexit__(self, *args):
             return False
 
@@ -302,7 +302,7 @@ async def test_public_transport_pins_tls_hosts_and_get_only_via_fake_clients(
     monkeypatch.setattr(websockets, "connect", ws_connect)
     monkeypatch.setattr(httpx, "AsyncClient", FakeHTTP)
     result = await adapter.capture_public_once(
-        allow_network=True, session_id="tls_fake",
+        allow_network=True, session_id="tls_fake",max_frames=2,
     )
     assert result.depth_status == "SYNCED"
     assert calls["ws"][0][0] == (
