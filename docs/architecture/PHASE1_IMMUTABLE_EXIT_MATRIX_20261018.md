@@ -31,12 +31,12 @@ document, not an altered percentage.
 | P1-02 | Source availability, lineage, authenticated independently owned source/receiver ACK | 15 | 15 | PASS in bounded research trials |
 | P1-03 | Raw+derived publisher fences, primary/audit/monitor separately durable read-only projections | 15 | 15 | PASS in opt-in SIMULATION graph |
 | P1-04 | Atomic source intent, original-as-of eligible event rescan, outbox ACKs, crash recovery and process fencing | 15 | 14 | PARTIAL: external host crash acceptance outstanding |
-| P1-05 | Sustained continuous protected ingress, reconnect/catch-up, bounded backlog, long-duration host soak | 15 | 7 | PARTIAL: persistent local authenticated receiver, finite trials and outage ledger; continuous/long-duration unproven |
+| P1-05 | Sustained continuous protected ingress, reconnect/catch-up, bounded backlog, long-duration host soak | 15 | 8 | PARTIAL: persistent HMAC receiver, operator-duration watch and verified gap ledger; true continuous source/uninterrupted 24h host evidence absent |
 | P1-06 | Reviewed default-app source cutover, no legacy data bypass and fully isolated execution | 10 | 3 | PARTIAL: isolated opt-in forward ASGI preview only; default still legacy |
 | P1-07 | Original dataset coverage beyond BTCUSDT and real operator-certified 24–72h continuity/quality evidence | 10 | 0 | BLOCKED: no current-HEAD external soak or full dataset matrix |
-| **TOTAL** | | **100** | **74** | **Phase 1 remains OPEN** |
+| **TOTAL** | | **100** | **75** | **Phase 1 remains OPEN** |
 
-**74% is a conservative, explicitly subjective weighted engineering
+**75% is a conservative, explicitly subjective weighted engineering
 estimate.** The *certified institutional Phase 1 exit score is not this percentage*:
 all mandatory gate rows must be PASS before 100% can be stated. Neither
 a source label nor simulated forward data authorizes orders. Existing
@@ -189,3 +189,25 @@ real-network soak, load/RAM/disk/tail-latency acceptance, legacy default
 cutover and broad market-data coverage are still unaccepted. Full Phase 1
 stays OPEN and Draft PR #28 stays unmerged. See
 `PHASE1_PERSISTENT_HMAC_RECEIVER_20261018.md`.
+
+## Operator-duration watch and successful-session gap auditing
+
+`run_forward_research_supervisor(...,watch_duration_s=...)` now
+supports an opt-in monitored process target up to 72 hours using the
+verified HMAC persistent receiver, time and attempt ceilings, the
+existing independent original/ACK attestations and finite per-socket
+sessions. The durably recorded watch plan distinguishes target reached
+from early exhaustion of its attempt budget. Another table records
+**unknown source coverage between any two successful or failed
+sessions**, not only network errors. Local wall-clock rollback is
+refused. These controls allow an operator to attempt a measured 24h
+public-market study, but the current build has **not** collected or
+certified that actual 24h network data.
+
+P1-05 earns one further provisional engineering point, from 7/15
+to **8/15**, for **75/100 provisional weighted engineering progress**.
+No other gate is silently closed. A rolling operator trial does not
+satisfy the still-open single continuous verified source, full
+24–72h operator evidence, broad dataset admission or default
+`main.py` production cutover. See
+`PHASE1_OPERATOR_DURATION_WATCH_20261018.md`.
