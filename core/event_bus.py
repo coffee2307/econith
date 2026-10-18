@@ -48,6 +48,7 @@ _VERIFIED_ONLY_DERIVED_TOPICS = frozenset((
 ))
 _VERIFIED_DERIVED_SOURCES = frozenset((
     "verified_closed_session_replay", "verified_sealed_public_microbatch",
+    "verified_forward_spot_shadow",
 ))
 
 
