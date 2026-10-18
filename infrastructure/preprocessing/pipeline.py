@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 
-from core.event_bus import Event, EventBus
+from core.event_bus import Event, EventBus, VerifiedDerivedPublisher
 from infrastructure.indicators.orderflow.obi import (
     VolumeDeltaTracker,
     compute_obi,
@@ -33,12 +33,21 @@ class MarketDataPipeline:
         bus: EventBus,
         obi_levels: int = 20,
         volume_window_s: float = 10.0,
+        verified_derived_publisher: VerifiedDerivedPublisher | None = None,
     ) -> None:
         self._bus = bus
+        self._verified_derived_publisher = verified_derived_publisher
         self._obi_levels = obi_levels
         self._volume_window_s = volume_window_s
         self._vd = VolumeDeltaTracker(window_s=volume_window_s)
         self._last_price: float | None = None
+
+    async def _publish_derived(self, topic: str, **payload) -> None:
+        publisher = self._verified_derived_publisher
+        if publisher is None:
+            await self._bus.publish(topic, **payload)
+        else:
+            await publisher.publish(topic, **payload)
 
     def register(self) -> None:
         """Wire pipeline handlers onto the bus (call once at startup)."""
@@ -92,7 +101,7 @@ class MarketDataPipeline:
         self._vd.add(trade, now=research_clock)
         vd = self._vd.value(now=research_clock)
 
-        await self._bus.publish(
+        await self._publish_derived(
             "md.ticker",
             symbol=trade.symbol,
             price=trade.price,
@@ -100,7 +109,7 @@ class MarketDataPipeline:
             source=event.payload.get("source", "unknown"),
             **self._verified_research_metadata(event),
         )
-        await self._bus.publish(
+        await self._publish_derived(
             "indicator.volume_delta",
             symbol=trade.symbol,
             volume_delta=vd.volume_delta,
@@ -119,7 +128,7 @@ class MarketDataPipeline:
             return
 
         result = compute_obi(snapshot, levels=self._obi_levels)
-        await self._bus.publish(
+        await self._publish_derived(
             "indicator.obi",
             symbol=symbol,
             obi=result.obi,
