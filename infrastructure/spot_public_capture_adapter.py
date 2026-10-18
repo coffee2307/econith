@@ -107,6 +107,8 @@ class OptInSpotIngressAdapter:
         max_frames: int = 300,
         timeout_s: float = 30.0,
         on_persisted: Callable[[CapturedSpotRecord], Awaitable[None]] | None = None,
+        idle_timeout_s: float | None = None,
+        require_frame_limit: bool = False,
     ) -> SpotTransportResult:
         """No network is opened here; caller supplies an already-opened stream.
 
@@ -124,6 +126,13 @@ class OptInSpotIngressAdapter:
             or timeout_s != timeout_s
         ):
             raise ValueError("invalid capture timeout")
+        if (idle_timeout_s is not None and (
+            type(idle_timeout_s) not in (int,float)
+            or not 0.1 <= idle_timeout_s <= 120
+            or idle_timeout_s != idle_timeout_s)):
+            raise ValueError("invalid bounded websocket read idle timeout")
+        if type(require_frame_limit) is not bool:
+            raise ValueError("invalid source completeness policy")
         if not callable(snapshot_fetch):
             raise TypeError("a read-only REST snapshot fetcher is required")
         if on_persisted is not None and not callable(on_persisted):
@@ -161,7 +170,27 @@ class OptInSpotIngressAdapter:
         async def _read() -> None:
             count = 0
             try:
-                async for raw in stream:
+                iterator = aiter(stream)
+                while True:
+                    try:
+                        if idle_timeout_s is None:
+                            raw = await anext(iterator)
+                        else:
+                            raw = await asyncio.wait_for(
+                                anext(iterator), timeout=idle_timeout_s,
+                            )
+                    except StopAsyncIteration:
+                        if require_frame_limit:
+                            raise SpotTransportError(
+                                "public websocket ended before full bounded observation",
+                                reason="WS_EARLY_EOF",
+                            )
+                        break
+                    except asyncio.TimeoutError as exc:
+                        raise SpotTransportError(
+                            "websocket stopped delivering market evidence",
+                            reason="WS_IDLE_TIMEOUT",
+                        ) from exc
                     received = self._clock()
                     count += 1
                     await _queue("ws", raw, received)
@@ -293,6 +322,7 @@ class OptInSpotIngressAdapter:
         timeout_s: float = 30.0,
         inject_disconnect_after_frames: int | None = None,
         on_persisted: Callable[[CapturedSpotRecord], Awaitable[None]] | None = None,
+        idle_timeout_s: float = 30.0,
     ) -> SpotTransportResult:
         """Explicit public TLS market-data-only capture; no API keys or orders.
 
@@ -374,4 +404,6 @@ class OptInSpotIngressAdapter:
                 ws_endpoint=_PUBLIC_WS, rest_endpoint=_PUBLIC_REST,
                 max_frames=max_frames, timeout_s=timeout_s,
                 on_persisted=on_persisted,
+                idle_timeout_s=idle_timeout_s,
+                require_frame_limit=True,
             )
