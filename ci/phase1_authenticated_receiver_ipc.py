@@ -25,6 +25,7 @@ import subprocess
 import sys
 from dataclasses import asdict
 from pathlib import Path
+from typing import Sequence
 
 from core.mode import QuantMode
 from infrastructure.market_cross_process_delivery import (
@@ -38,6 +39,9 @@ _MAX_WIRE_BYTES = 1_048_576
 _CHILD_KEY_ENV = "ECONITH_RESEARCH_RECEIVER_IPC_HMAC_KEY"
 _REQ_TAG = b"ECONITH-P1-RECEIVER-REQUEST-v1\x00"
 _ACK_TAG = b"ECONITH-P1-RECEIVER-RESPONSE-v1\x00"
+_BATCH_REQ_TAG = b"ECONITH-P1-RECEIVER-BATCH-REQUEST-v1\x00"
+_BATCH_ACK_TAG = b"ECONITH-P1-RECEIVER-BATCH-RESPONSE-v1\x00"
+_MAX_BATCH_SIZE = 32
 
 
 class AuthenticatedReceiptIPCError(CrossProcessDeliveryError):
@@ -171,7 +175,131 @@ def accept_via_authenticated_subprocess(
     return ReceiverOwnedReceipt(**data)
 
 
-def _child_main(db: Path) -> int:
+def _batch_request(
+    envelopes: Sequence[ProjectionEnvelope], now_ms: int, key: bytes,
+) -> bytes:
+    # Fail before starting a process if the packet could exceed its budget.
+    if type(envelopes) not in (list, tuple) or not 1 <= len(envelopes) <= _MAX_BATCH_SIZE:
+        raise AuthenticatedReceiptIPCError("invalid bounded receiver batch size")
+    if type(now_ms) is not int or now_ms <= 0:
+        raise AuthenticatedReceiptIPCError("invalid batch receive time")
+    if any(type(e) is not ProjectionEnvelope for e in envelopes):
+        raise AuthenticatedReceiptIPCError("typed immutable envelopes required")
+    identities = [(e.source_consumer, e.receiver, e.ingest_id) for e in envelopes]
+    if len(set(identities)) != len(identities):
+        raise AuthenticatedReceiptIPCError("duplicate source delivery in batch")
+    body = {"envelopes": [asdict(e) for e in envelopes], "now_ms": now_ms}
+    return _encode_json({
+        "body": body, "mac": _tagged_mac(key, _BATCH_REQ_TAG, body),
+    }) + b"\\n"
+
+
+def _accept_authenticated_batch_input(
+    packet: bytes, receiver: OfflineIndependentProjectionReceiver, key: bytes,
+) -> bytes:
+    # One signed request, separate durable receiver transaction per envelope.
+    # Partial commit on a child crash is legal: without the signed complete
+    # response the parent MUST NOT advance *any* source producer ACK.
+    frame = _decode_json(packet)
+    if set(frame) != {"body", "mac"} or type(frame["body"]) is not dict:
+        raise AuthenticatedReceiptIPCError("invalid authenticated batch frame")
+    _verify_mac(key, _BATCH_REQ_TAG, frame["body"], frame["mac"])
+    body = frame["body"]
+    if set(body) != {"envelopes", "now_ms"} or type(body["envelopes"]) is not list:
+        raise AuthenticatedReceiptIPCError("invalid authenticated batch structure")
+    if not 1 <= len(body["envelopes"]) <= _MAX_BATCH_SIZE:
+        raise AuthenticatedReceiptIPCError("batch capacity exceeded")
+    if type(body["now_ms"]) is not int or body["now_ms"] <= 0:
+        raise AuthenticatedReceiptIPCError("invalid authenticated receive time")
+    entries = body["envelopes"]
+    if any(type(e) is not dict or set(e) != set(ProjectionEnvelope.__dataclass_fields__)
+           for e in entries):
+        raise AuthenticatedReceiptIPCError("unexpected batch envelope fields")
+    envelopes = [ProjectionEnvelope(**e) for e in entries]
+    identities = [(e.source_consumer, e.receiver, e.ingest_id) for e in envelopes]
+    if len(set(identities)) != len(identities):
+        raise AuthenticatedReceiptIPCError("duplicate source delivery in batch")
+    receipts = [
+        asdict(receiver.accept(e, now_ms=body["now_ms"])) for e in envelopes
+    ]
+    ack = {"receipts": receipts}
+    return _encode_json({
+        "body": ack, "mac": _tagged_mac(key, _BATCH_ACK_TAG, ack),
+    }) + b"\\n"
+
+
+def accept_batch_via_authenticated_subprocess(
+    envelopes: Sequence[ProjectionEnvelope], *,
+    receiver_db: str | Path,
+    now_ms: int,
+    python_executable: str | None = None,
+    timeout_s: float = 30.0,
+    _key: bytes | None = None,
+) -> list[ReceiverOwnedReceipt]:
+    """Bounded local batch; never producer-ACK a partial or forged response.
+
+    A separate interpreter owns the SQLite receiver ledger. Every accepted
+    envelope gets its *own* durable row and receipt; the parent verifies an
+    authenticated ordered complete set before returning any receipt. If the
+    child dies after one or more commits, the caller must retry the identical
+    batch (SQLite admission is idempotent) rather than infer success.
+    """
+    if type(timeout_s) not in (float, int) or not 0 < timeout_s <= 60:
+        raise ValueError("invalid batch subprocess timeout")
+    key = secrets.token_bytes(32) if _key is None else _key
+    packet = _batch_request(envelopes, now_ms, key)
+    env = dict(os.environ)
+    env[_CHILD_KEY_ENV] = key.hex()
+    try:
+        result = subprocess.run(
+            [python_executable or sys.executable, "-m",
+             "ci.phase1_authenticated_receiver_ipc",
+             "--batch-child", "--receiver-db", str(Path(receiver_db).resolve())],
+            input=packet, capture_output=True, timeout=timeout_s,
+            check=False, env=env,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise AuthenticatedReceiptIPCError(
+            "independent batch receiver could not confirm durable receipts"
+        ) from exc
+    if result.returncode != 0:
+        raise AuthenticatedReceiptIPCError("receiver refused authenticated batch")
+    response = _decode_json(result.stdout.strip())
+    if set(response) != {"body", "mac"} or type(response["body"]) is not dict:
+        raise AuthenticatedReceiptIPCError("malformed receiver batch ACK")
+    _verify_mac(key, _BATCH_ACK_TAG, response["body"], response["mac"])
+    body = response["body"]
+    if set(body) != {"receipts"} or type(body["receipts"]) is not list:
+        raise AuthenticatedReceiptIPCError("unexpected receiver batch ACK structure")
+    if len(body["receipts"]) != len(envelopes):
+        raise AuthenticatedReceiptIPCError("incomplete authenticated batch ACK")
+    verified = []
+    for item, source in zip(body["receipts"], envelopes):
+        if type(item) is not dict or set(item) != set(ReceiverOwnedReceipt.__dataclass_fields__):
+            raise AuthenticatedReceiptIPCError("invalid receiver-owned receipt fields")
+        receipt = ReceiverOwnedReceipt(**item)
+        if (
+            type(receipt.ingest_id) is not int
+            or type(receipt.received_at_ms) is not int
+            or receipt.source_consumer != source.source_consumer
+            or receipt.receiver != source.receiver
+            or receipt.ingest_id != source.ingest_id
+            or receipt.event_id != source.event_id
+            or receipt.projection_fingerprint != source.projection_fingerprint
+            or receipt.received_at_ms < source.available_at_ms
+            or receipt.received_at_ms > now_ms
+            or type(receipt.receipt_id) is not str
+            or not hmac.compare_digest(
+                receipt.receipt_id,
+                OfflineIndependentProjectionReceiver._receipt_id(source),
+            )
+        ):
+            raise AuthenticatedReceiptIPCError("mismatched authenticated batch receipt")
+        verified.append(receipt)
+    return verified
+
+
+def _child_main(db: Path, *, batch: bool = False) -> int:
     secret = os.environ.pop(_CHILD_KEY_ENV, None)
     if secret is None:
         return 2
@@ -185,7 +313,10 @@ def _child_main(db: Path) -> int:
         receiver = OfflineIndependentProjectionReceiver(
             db, mode_provider=lambda: QuantMode.SIMULATION,
         )
-        reply = _accept_authenticated_input(packet.rstrip(b"\r\n"), receiver, key)
+        reply = (
+            _accept_authenticated_batch_input(packet.rstrip(b"\r\n"), receiver, key)
+            if batch else _accept_authenticated_input(packet.rstrip(b"\r\n"), receiver, key)
+        )
         sys.stdout.buffer.write(reply)
         sys.stdout.buffer.flush()
         return 0
@@ -197,12 +328,13 @@ def _child_main(db: Path) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--child", action="store_true")
+    parser.add_argument("--batch-child", action="store_true")
     parser.add_argument("--receiver-db", type=Path)
     args = parser.parse_args(argv)
-    if not args.child or args.receiver_db is None:
+    if args.child == args.batch_child or args.receiver_db is None:
         print("This module is a one-shot internal offline receiver; no service is started.", file=sys.stderr)
         return 2
-    return _child_main(args.receiver_db)
+    return _child_main(args.receiver_db, batch=args.batch_child)
 
 
 if __name__ == "__main__":
