@@ -16,6 +16,7 @@ from pathlib import Path
 
 from ci.phase1_public_spot_acceptance import measure_public_clock
 from infrastructure.spot_forward_supervisor import run_forward_research_supervisor
+from infrastructure.spot_single_socket_watch import run_single_socket_forward_watch
 
 
 def parser() -> argparse.ArgumentParser:
@@ -34,6 +35,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--max-clock-rtt-ms",type=int,default=2000)
     p.add_argument("--ws-idle-timeout-s",type=float,default=30.0)
     p.add_argument("--persistent-receiver",action="store_true")
+    p.add_argument("--single-socket",action="store_true",
+                   help="Reuse one public TLS socket across finite verified segments")
     return p
 
 
@@ -63,6 +66,7 @@ def validate(args: argparse.Namespace) -> None:
         or not 0.1 <= args.ws_idle_timeout_s <= 120
         or type(args.max_clock_rtt_ms) is not int
         or not 50 <= args.max_clock_rtt_ms <= 5000
+        or (args.single_socket and not args.persistent_receiver)
     ):
         raise ValueError("invalid bounded public endurance policy")
 
@@ -75,6 +79,27 @@ async def run(args: argparse.Namespace) -> dict:
             max_rtt_ms=args.max_clock_rtt_ms,
         )
         return True
+    if args.single_socket:
+        pilot=await run_single_socket_forward_watch(
+            output_dir=args.output_dir,allow_public_market_data=True,
+            attempts=args.attempts,max_frames=args.max_frames,
+            timeout_s=args.timeout_s,
+            max_total_storage_bytes=args.max_storage_mb*1_000_000,
+            max_book_staleness_ms=args.max_book_staleness_ms,
+            public_ws_idle_timeout_s=args.ws_idle_timeout_s,
+            watch_duration_s=(args.watch_hours*3600 if args.watch_hours is not None else None),
+            clock_check=clock_check,
+        )
+        result=asdict(pilot.supervisor)
+        result.update({
+            "public_socket_starts":pilot.public_socket_starts,
+            "successful_socket_reuses":pilot.successful_socket_reuses,
+            "discarded_broken_sockets":pilot.discarded_broken_sockets,
+            "public_tls_lease_established_by_trusted_connector":
+                pilot.public_tls_lease_established_by_trusted_connector,
+            "no_unobserved_market_gaps_certified":False,
+        })
+        return result
     result=await run_forward_research_supervisor(
         output_dir=args.output_dir,allow_public_network=True,
         attempts=args.attempts,max_frames=args.max_frames,
