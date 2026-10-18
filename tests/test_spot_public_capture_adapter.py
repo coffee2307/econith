@@ -385,3 +385,80 @@ async def test_snapshot_failure_exposes_static_diagnostic_reason(tmp_path):
             failure, session_id="rest_error_reason",
         )
     assert err.value.reason == "REST_SNAPSHOT_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_public_policy_rejects_remote_eof_before_requested_capture_boundary(tmp_path):
+    adapter,journal,_=make(tmp_path)
+    with pytest.raises(SpotTransportError,match="WS_EARLY_EOF|early|before full"):
+        await adapter.capture_open_stream(
+            feed(raw(depth()),raw(trade()),gap=0.001),
+            rest,session_id="remote_eof",
+            source="offline_fixture",max_frames=20,timeout_s=5,
+            require_frame_limit=True,
+        )
+    with journal._connect() as db:
+        row=db.execute("""
+            SELECT closed_at_ms FROM offline_spot_capture_sessions
+            WHERE session_id='remote_eof'
+        """).fetchone()
+        assert row is not None and row[0] is not None
+        assert db.execute("""
+            SELECT COUNT(*) FROM offline_spot_capture_records
+            WHERE session_id='remote_eof'
+        """).fetchone()[0]>=1
+
+
+@pytest.mark.asyncio
+async def test_public_policy_detects_stalled_websocket_after_book_source_commit(tmp_path):
+    adapter,journal,_=make(tmp_path)
+    stop=asyncio.Event()
+    async def stalled():
+        yield raw(depth())
+        await stop.wait()
+        yield raw(trade())
+    with pytest.raises(SpotTransportError,match="TimeoutError|WS_IDLE_TIMEOUT|idle"):
+        await adapter.capture_open_stream(
+            stalled(),rest,session_id="idle_source",
+            max_frames=20,timeout_s=5,
+            idle_timeout_s=0.1,require_frame_limit=True,
+        )
+    with journal._connect() as db:
+        session=db.execute("""
+            SELECT closed_at_ms FROM offline_spot_capture_sessions
+            WHERE session_id='idle_source'
+        """).fetchone()
+        assert session is not None and session[0] is not None
+        assert db.execute("""
+            SELECT COUNT(*) FROM offline_spot_capture_records
+            WHERE session_id='idle_source'
+        """).fetchone()[0]>=1
+
+
+@pytest.mark.asyncio
+async def test_bounded_research_fixture_early_eof_is_explicitly_not_public_proof(tmp_path):
+    adapter,journal,_=make(tmp_path)
+    accepted=await adapter.capture_open_stream(
+        feed(raw(depth()),raw(trade()),gap=0.001),
+        rest,session_id="fixture_eof",
+        max_frames=20,timeout_s=5,
+        require_frame_limit=False,
+    )
+    assert accepted.websocket_frames==2
+    assert accepted.depth_status=="SYNCED"
+    assert accepted.last_update_id>=100
+
+
+@pytest.mark.asyncio
+async def test_public_idle_timeout_configuration_refused_before_creating_source(tmp_path):
+    adapter,journal,_=make(tmp_path)
+    for bad in (0,-1,121,float("nan"),"30"):
+        with pytest.raises(ValueError,match="idle timeout"):
+            await adapter.capture_open_stream(
+                feed(raw(depth())),rest,session_id="bad_idle",
+                max_frames=20,timeout_s=5,idle_timeout_s=bad,
+            )
+    with journal._connect() as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM offline_spot_capture_sessions"
+        ).fetchone()[0]==0
