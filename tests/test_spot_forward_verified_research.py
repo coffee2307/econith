@@ -176,12 +176,20 @@ async def test_explicit_public_source_policy_denies_implicit_network_and_mix(tmp
 @pytest.mark.asyncio
 async def test_trade_with_stale_book_refused_after_original_committed(tmp_path):
     root = (tmp_path / "stale_book").resolve()
+    async def delayed_after_book():
+        async for raw in source(_NOW()):
+            body=json.loads(raw)
+            if body["data"]["e"]=="aggTrade" and body["data"]["a"]==500:
+                # The REST snapshot must have time to commit before the
+                # stale trade. A 150ms sleep alone races subprocess startup.
+                await asyncio.sleep(0.5)
+            yield raw
     with pytest.raises(ForwardSpotResearchError, match="stale synchronized book"):
         await observe_forward_spot_research(
             output_dir=root, session_id="rec_forward_stale",
-            stream=source(_NOW()), snapshot_fetch=snapshot,
+            stream=delayed_after_book(), snapshot_fetch=snapshot,
             max_frames=20, timeout_s=20,
-            # The fixture holds the first post-snapshot trade for 150ms.
+            # Force the first post-snapshot trade beyond 100ms staleness.
             # A 100ms research freshness budget must deny it.
             max_book_staleness_ms=100,
         )
