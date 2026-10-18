@@ -143,9 +143,6 @@ async def observe_forward_spot_research(
                     if os.environ.get("ECONITH_PHASE1_STAGE_PROFILE") == "1" else None)
         trace = profiler.measure if profiler else lambda _stage: nullcontext()
         completed = False
-        parallel_observers = (
-            os.environ.get("ECONITH_PHASE1_PARALLEL_OBSERVERS") == "1"
-        )
         provider = lambda: QuantMode.SIMULATION
         journal = OfflineSpotCaptureJournal(
             root / "original.sqlite", mode_provider=provider, forward_capture_audit=True,
@@ -168,7 +165,7 @@ async def observe_forward_spot_research(
         named = [
             OfflineNamedResearchSubscriber(
                 root / (name + ".sqlite"), name=name, expected_source=_SOURCE,
-                mode_provider=provider, parallel_delivery=parallel_observers,
+                mode_provider=provider,
             ) for name in ("research_audit", "research_monitor")
         ]
         for consumer in named:
@@ -192,7 +189,7 @@ async def observe_forward_spot_research(
         async def derived_observer(event: Event) -> None:
             if event.payload.get("source") != _SOURCE:
                 raise ForwardSpotResearchError("derived event has untrusted forward provenance")
-            arguments = dict(
+            derived_db.accept(
                 topic=event.topic,
                 session_id=event.payload["verified_session_id"],
                 ordinal=event.payload["verified_source_ordinal"],
@@ -200,12 +197,6 @@ async def observe_forward_spot_research(
                 source_available_at_ms=event.payload["verified_source_available_at_ms"],
                 projection=event.payload,
             )
-            # Research A/B only: parallel execution of three INDEPENDENT
-            # SQLite COMMITs while awaiting all their durable receipts.
-            if parallel_observers:
-                await asyncio.to_thread(derived_db.accept, **arguments)
-            else:
-                derived_db.accept(**arguments)
             observed[event.topic] += 1
 
         for topic in observed:
