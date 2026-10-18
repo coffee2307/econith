@@ -300,7 +300,11 @@ async def observe_forward_spot_research(
             outbox.ack_derived(envelope)
             # The source session is STILL OPEN: durable independently tied
             # producer/receiver/derived ACK proof is checkpointed per event.
-            checkpoints.append(envelope,completed_outbox=outbox.items())
+            checkpoints.append_live(
+                envelope,
+                completed_item=outbox.completed_item(envelope),
+                expected_ordinal=admitted+1,
+            )
             admitted += 1
             if topic == "md.aggTrade":
                 forwarded_trades += 1
