@@ -47,7 +47,7 @@ def test_producer_cached_sqlite_maintains_wal_full_and_independent_files(tmp_pat
 @pytest.mark.asyncio
 async def test_public_producer_cache_needs_explicit_experimental_gate(tmp_path):
     root=(tmp_path/"public_denied").resolve()
-    with pytest.raises(PermissionError,match="separately opted-in"):
+    with pytest.raises(PermissionError,match="bounded research spool"):
         await observe_forward_spot_research(
             output_dir=root,session_id="rec_cache_public_denied",
             allow_public_network=True,source="binance_public_simulation",
