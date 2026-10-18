@@ -171,3 +171,23 @@ async def test_explicit_public_source_policy_denies_implicit_network_and_mix(tmp
             stream=source(_NOW()), snapshot_fetch=snapshot, max_frames=1,
         )
     assert not missing.exists()
+
+
+@pytest.mark.asyncio
+async def test_trade_with_stale_book_refused_after_original_committed(tmp_path):
+    root = (tmp_path / "stale_book").resolve()
+    with pytest.raises(ForwardSpotResearchError, match="stale synchronized book"):
+        await observe_forward_spot_research(
+            output_dir=root, session_id="rec_forward_stale",
+            stream=source(_NOW()), snapshot_fetch=snapshot,
+            max_frames=20, timeout_s=20,
+            # The fixture holds the first post-snapshot trade for 150ms.
+            # A 100ms research freshness budget must deny it.
+            max_book_staleness_ms=100,
+        )
+    with sqlite3.connect(root/"original.sqlite") as conn:
+        row=conn.execute(
+            "SELECT closed_at_ms FROM offline_spot_capture_sessions"
+        ).fetchone()
+    assert row[0] is not None
+    assert not (root/"forward_complete.json").exists()
