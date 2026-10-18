@@ -305,6 +305,7 @@ async def run_verified_spot_soak(
     elif not root.is_dir():
         raise VerifiedSpotSoakError("cannot resume missing soak evidence root")
     with _exclusive_soak_lock(root):
+        if not resume:
             state: dict[str, Any] = {
                 "schema": 1, "requested_rounds": rounds,
                 "fixture": fixture, "status": "RUNNING", "rounds": [],
