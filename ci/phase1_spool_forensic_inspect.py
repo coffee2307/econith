@@ -6,6 +6,7 @@ cryptography, or change any original/derived/outbox/cursor record.
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 import json
 import sqlite3
 from pathlib import Path
@@ -14,8 +15,8 @@ from pathlib import Path
 def _query_one(path: Path, sql: str):
     if not path.is_file() or path.is_symlink():
         raise ValueError("required offline evidence ledger missing")
-    with sqlite3.connect(path.resolve().as_uri()+"?mode=ro",uri=True,
-                         timeout=3.0) as con:
+    with closing(sqlite3.connect(path.resolve().as_uri()+"?mode=ro",uri=True,
+                                 timeout=3.0)) as con:
         return con.execute(sql).fetchone()
 
 
