@@ -71,12 +71,18 @@ async def recover_staged_forward_spot(
         receiver_path = root / "independent_receiver.sqlite"
         primary_path = root / "derived.sqlite"
         names = ("research_audit", "research_monitor")
-        needed = [source, ledger_path, receiver_path, primary_path] + [
+        needed = [source, ledger_path, primary_path] + [
             root / (name + ".sqlite") for name in names
         ]
         if any(not p.is_file() or p.is_symlink() or p.resolve() != p
                for p in needed):
             raise ForwardOutboxError("all previously owned durable evidence ledgers required")
+        if receiver_path.exists() and (
+            not receiver_path.is_file()
+            or receiver_path.is_symlink()
+            or receiver_path.resolve() != receiver_path
+        ):
+            raise ForwardOutboxError("invalid existing receiver evidence path")
         provider = lambda: QuantMode.SIMULATION
         journal = OfflineSpotCaptureJournal(
             source, mode_provider=provider, forward_capture_audit=True,
@@ -123,6 +129,14 @@ async def recover_staged_forward_spot(
         items = outbox.verify_source(journal, source_session_id=session_id)
         if len(items) > max_envelopes:
             raise ForwardOutboxError("staged recovery exceeds bounded resource limit")
+        if not receiver_path.is_file() and not (
+            reconstruct_missing
+            and rebuilt == len(items)
+            and all(x.status == "STAGED" for x in items)
+        ):
+            # Never silently replace an independently owned receiver ledger
+            # once any prior producer intent/ACK might have been delivered.
+            raise ForwardOutboxError("missing independent receiver evidence")
         named = [
             OfflineNamedResearchSubscriber(
                 root / (name + ".sqlite"), name=name,
