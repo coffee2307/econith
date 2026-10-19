@@ -233,6 +233,7 @@ async def observe_forward_spot_research(
             journal, symbol="BTCUSDT", queue_capacity=queue_capacity,
             stage_profile=profiler,
             on_queue_depth=(pressure.fifo if pressure is not None else None),
+            on_queue_event=(pressure.fifo_event if pressure is not None else None),
         )
         shadow = IncrementalSpotShadowValidator(
             journal, session_id=session_id, source=source,
