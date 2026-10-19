@@ -120,6 +120,7 @@ async def observe_forward_spot_research(
     experiment_reuse_producer_connections: bool = False,
     experiment_reuse_receiver_connection: bool = False,
     experiment_reuse_original_connection: bool = False,
+    experiment_cooperative_reader_yield: bool = False,
 ) -> ForwardSpotResearchStatus:
     """One real *in-session* research pass (no default startup/auto retry).
 
@@ -148,6 +149,7 @@ async def observe_forward_spot_research(
         or not 100 <= max_projector_lag_ms <= 30000
         or type(max_pending_originals) is not int
         or not 1 <= max_pending_originals <= 1000
+        or type(experiment_cooperative_reader_yield) is not bool
         or type(experiment_reuse_original_connection) is not bool
         or type(experiment_reuse_receiver_connection) is not bool
         or type(experiment_reuse_producer_connections) is not bool
@@ -172,6 +174,15 @@ async def observe_forward_spot_research(
         (not offline and not allow_experimental_public_spool)
     ):
         raise PermissionError("derived connection reuse requires explicitly bounded research spool")
+    if experiment_cooperative_reader_yield and (
+        not spooled_in_session or not persistent_receiver
+        or not experiment_reuse_derived_connections
+        or not experiment_reuse_producer_connections
+        or not experiment_reuse_receiver_connection
+        or not experiment_reuse_original_connection
+        or (not offline and not allow_experimental_public_spool)
+    ):
+        raise PermissionError("cooperative reader requires explicitly reviewed full-cache research spool")
     if experiment_reuse_original_connection and (
         not spooled_in_session
         or not experiment_reuse_derived_connections
@@ -234,6 +245,7 @@ async def observe_forward_spot_research(
             stage_profile=profiler,
             on_queue_depth=(pressure.fifo if pressure is not None else None),
             on_queue_event=(pressure.fifo_event if pressure is not None else None),
+            cooperative_reader_yield=experiment_cooperative_reader_yield,
         )
         shadow = IncrementalSpotShadowValidator(
             journal, session_id=session_id, source=source,
