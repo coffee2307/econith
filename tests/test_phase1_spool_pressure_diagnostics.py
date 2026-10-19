@@ -24,6 +24,8 @@ def test_pressure_windows_show_ingress_vs_projection_and_truncate(tmp_path):
     )
     sample.raw(1)
     sample.raw(2)
+    sample.fifo(127,128)
+    sample.receiver_ack(501.25)
     t[0]=5_100_000_000
     cpu[0]=400_000_000
     sample.projected()
@@ -40,6 +42,10 @@ def test_pressure_windows_show_ingress_vs_projection_and_truncate(tmp_path):
         "eventbus_published":1, "checkpoints":1,
     }
     assert report["windows"][0]["raw_originals_per_s"]==0.4
+    assert report["windows"][0]["max_ingress_fifo_depth"]==127
+    assert report["windows"][0]["ingress_fifo_90pct_observations"]==1
+    assert report["windows"][0]["max_receiver_ack_ms"]==502
+    assert report["windows"][0]["receiver_ack_over_500ms"]==1
     assert report["windows"][0]["cursor_originals_per_s"]==0
     assert report["windows"][1]["cursor_originals_per_s"]==0.2
     assert report["windows"][1]["max_admission_age_ms"]==100
@@ -74,6 +80,8 @@ async def test_in_session_spool_pressure_matches_durable_ledger(tmp_path):
     assert pressure["counters"]["cursor_advanced"]==result.original_records
     assert pressure["counters"]["eventbus_published"]==result.receiver_receipts
     assert pressure["counters"]["checkpoints"]==result.forward_checkpoints
+    assert sum(x["receiver_ack_observations"] for x in pressure["windows"])==result.receiver_receipts
+    assert max(x["max_ingress_fifo_depth"] for x in pressure["windows"])<=result.queue_high_watermark
     assert latency["stages"]["receiver_hmac_ack"]["samples"]==result.receiver_receipts
     assert latency["stages"]["source_sqlite_commit"]["samples"]==result.original_records
     assert result.orders_submitted==0
@@ -107,3 +115,13 @@ async def test_pressure_flag_requires_explicit_spool(tmp_path):
             diagnose_pressure=True,
         )
     assert not root.exists()
+
+
+def test_pressure_rejects_invalid_fifo_and_hmac_latency(tmp_path):
+    p=BoundedSpoolPressure(tmp_path/"spool_pressure.json")
+    for depth,capacity in [(-1,128),(129,128),(1,0),(True,128)]:
+        with pytest.raises(ValueError):
+            p.fifo(depth,capacity)
+    for value in [-1.0,float("nan"),float("inf"),True]:
+        with pytest.raises(ValueError):
+            p.receiver_ack(value)
