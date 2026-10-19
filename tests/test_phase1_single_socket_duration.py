@@ -18,7 +18,7 @@ def _frame(i, *, depth=False):
     now=time.time_ns()//1_000_000
     if depth:
         item={"e":"depthUpdate","E":now,"s":"BTCUSDT",
-              "U":100+i,"u":100+i,"b":[["100","3"]],"a":[]}
+              "U":(100 if i==1 else 103),"u":(102 if i==1 else 104),"b":[["100","3"]],"a":[]}
         stream="btcusdt@depth@100ms"
     else:
         item={"e":"aggTrade","E":now,"T":now,"s":"BTCUSDT",
