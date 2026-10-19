@@ -651,13 +651,14 @@ async def observe_forward_spot_research(
                             try:
                                 journal.close()
                             finally:
-                                if lag_diagnostic is not None:
-                                    lag_diagnostic.write(source_complete=completed)
-                            finally:
                                 try:
-                                    if pressure is not None:
-                                        pressure.write(source_complete=completed)
+                                    if lag_diagnostic is not None:
+                                        lag_diagnostic.write(source_complete=completed)
                                 finally:
-                                    if profiler is not None:
-                                        # Diagnostics cannot replace source/ACK evidence.
-                                        profiler.write(completed=completed)
+                                    try:
+                                        if pressure is not None:
+                                            pressure.write(source_complete=completed)
+                                    finally:
+                                        if profiler is not None:
+                                            # Diagnostics cannot replace source/ACK evidence.
+                                            profiler.write(completed=completed)
