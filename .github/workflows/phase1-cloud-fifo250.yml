@@ -1,0 +1,108 @@
+name: ECONITH Phase 1 cloud 250ms FIFO investigation (one-shot)
+
+on:
+  push:
+    branches:
+      - experiment/phase1-cloud-subsecond-20261019
+    paths:
+      - .github/workflows/phase1-cloud-fifo250.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: econith-fifo250-research-20261019
+  cancel-in-progress: false
+
+jobs:
+  finite-source-diagnostics:
+    if: ${{ github.repository == 'coffee2307/econith' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      ECONITH_MODE: SIMULATION
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - name: Fetch pinned commit archive without malformed submodule
+        shell: bash
+        run: |
+          curl -fsSL --retry 3 -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_SHA}" \
+            -o "${RUNNER_TEMP}/source.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/source.tar.gz" --strip-components=1
+          test -f ci/phase1_subsecond_forensics.py
+          test -f infrastructure/spot_spool_pressure_diagnostics.py
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned research dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Verify bounded 250ms metrics and fail-closed crash invariants
+        run: |
+          python -m pytest -q --tb=short \
+            tests/test_phase1_subsecond_fifo_burst.py \
+            tests/test_phase1_subsecond_forensics.py \
+            tests/test_phase1_spool_pressure_diagnostics.py \
+            tests/test_phase1_cached_original_invariants.py \
+            tests/test_phase1_spool_physical_kill.py
+      - name: Fail-closed Linux RAM and disk preflight
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from ci.phase1_cloud_resources import host_snapshot
+          root=Path(os.environ["RUNNER_TEMP"])/"econith-fifo-preflight"
+          root.mkdir(parents=True,exist_ok=False)
+          s=host_snapshot(root)
+          print("CLOUD_MEMORY_FREE_GB",round(s["available_memory_bytes"]/1e9,2))
+          print("CLOUD_DISK_FREE_GB",round(s["disk_free_bytes"]/1e9,2))
+          assert s["available_memory_bytes"]>=1_500_000_000
+          assert s["disk_free_bytes"]>=2_000_000_000
+          PY
+      - name: One bounded public Binance Spot source with 250ms FIFO diagnosis
+        run: |
+          python -m ci.phase1_public_live_spool_trial \
+            --allow-public-market-data \
+            --accept-experimental-spool \
+            --reuse-derived-connections \
+            --reuse-producer-connections \
+            --reuse-receiver-connection \
+            --reuse-original-connection \
+            --diagnose-pressure \
+            --output-dir "${{ runner.temp }}/econith-fifo250-source" \
+            --frames 1000 \
+            --timeout-s 120 \
+            --max-lag-ms 5000
+      - name: Independently summarize 250ms microbursts, even on failed source
+        if: ${{ always() }}
+        run: |
+          root="${{ runner.temp }}/econith-fifo250-source"
+          if [ -f "$root/spool_pressure.json" ]; then
+            python -m ci.phase1_subsecond_forensics \
+              --input "$root/spool_pressure.json" \
+              --output "$root/subsecond_forensic_summary.json"
+          else
+            echo "Source was not created or no spool diagnostic exists"
+          fi
+      - name: Stage aggregate-only public-safe evidence
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          src="${{ runner.temp }}/econith-fifo250-source"
+          dest="${{ runner.temp }}/econith-fifo250-reports"
+          mkdir -p "$dest"
+          for name in spool_pressure.json stage_latency.json projector_lag.json subsecond_forensic_summary.json; do
+            if [ -f "$src/$name" ]; then cp "$src/$name" "$dest/$name"; fi
+          done
+          echo "No raw market frames, independent receiver secrets, or SQLite ledgers were uploaded."
+      - name: Upload short-lived aggregate diagnostic artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: econith-fifo250-${{ github.run_id }}
+          path: ${{ runner.temp }}/econith-fifo250-reports/
+          retention-days: 3
+          if-no-files-found: warn
