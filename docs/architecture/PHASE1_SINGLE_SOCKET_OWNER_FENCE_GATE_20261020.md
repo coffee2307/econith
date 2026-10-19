@@ -1,6 +1,6 @@
 # ECONITH Phase 1 — Single-socket ownership and terminal liveness qualification (2026-10-20)
 
-**Research-only, no new market-data capture on this branch.** Source branch builds upon the verified 90.001s public WebSocket read and adds defensive tests before any 24h planning. Default `main.py` remains legacy. No 24h public continuity, HMAC downstream proof or real-order authorization. Frozen weighted engineering score stays **81/100 provisional**.
+**Research-only, staged public-data-only bounded pilot after deterministic offline qualification.** Source branch builds upon the verified 90.001s public WebSocket read and adds defensive tests before any 24h planning. Default `main.py` remains legacy. No 24h public continuity, HMAC downstream proof or real-order authorization. Frozen weighted engineering score stays **81/100 provisional**.
 
 ## Focused changes
 
@@ -13,7 +13,7 @@
 
 - The OS marker is process-level advisory O_EXCL, not distributed transactional fencing or proof of physical disk flush under power loss. `os._exit` demonstrates process death only, not hardware power cut.
 - This iteration does **not** implement durable journal rotation, a continuously operating service, multiple-source event-rate fairness, true losslessness against Binance exchange events, HMAC receiver ACK or independent research observers.
-- No source-replay artifacts are uploaded to a public GitHub repository. The new workflow runs only deterministic offline fixtures and real local process hard exits (no Binance request).
+- No source-replay artifacts are uploaded to a public GitHub repository. The workflow runs deterministic offline fixtures and real local process hard exits first; only if those pass, a separate push-only cloud job makes a bounded read-only public Spot single-socket observation for 120 seconds. Pull-request workflows do not make public market requests. Any failure is retained and no automatic retry is performed.
 - P1-04 remains 14/15, P1-05 13/15, P1-06 4/10, P1-07 0/10; Phase 1 exit remains OPEN.
 
 ## Offline qualification
