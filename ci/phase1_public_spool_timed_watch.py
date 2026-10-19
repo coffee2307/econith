@@ -139,8 +139,13 @@ async def timed_watch(
     reuse_producer_connections: bool = False,
     reuse_receiver_connection: bool = False,
     reuse_original_connection: bool = False,
+    cooperative_reader_yield: bool = False,
 ) -> dict:
     policy.validate()
+    if cooperative_reader_yield and not (
+        reuse_original_connection and reuse_receiver_connection
+        and reuse_producer_connections):
+        raise ValueError("cooperative reader requires reviewed full-cache path")
     if reuse_original_connection and not (
         reuse_receiver_connection and reuse_producer_connections):
         raise ValueError("full original cache requires reviewed receiver/producer path")
@@ -169,6 +174,7 @@ async def timed_watch(
         "producer_connection_reuse_experimental":reuse_producer_connections,
         "receiver_connection_reuse_experimental":reuse_receiver_connection,
         "original_connection_reuse_experimental":reuse_original_connection,
+        "cooperative_reader_yield_experimental":cooperative_reader_yield,
     }
     _write_report(root,report)
     for number in range(1,policy.max_segments+1):
@@ -216,6 +222,7 @@ async def timed_watch(
                 (reuse_producer_connections,"reuse_producer_connections"),
                 (reuse_receiver_connection,"reuse_receiver_connection"),
                 (reuse_original_connection,"reuse_original_connection"),
+                (cooperative_reader_yield,"cooperative_reader_yield"),
             ):
                 if active:
                     trial_args[name]=True
@@ -311,6 +318,8 @@ def main(argv=None)->int:
                    help="opt-in producer outbox/checkpoint FULL SQLite connection cache")
     p.add_argument("--reuse-receiver-connection",action="store_true",
                    help="opt-in independent HMAC receiver child SQLite cache")
+    p.add_argument("--cooperative-reader-yield",action="store_true",
+                   help="full-cache-only opt-in reader event-loop fairness")
     p.add_argument("--reuse-original-connection",action="store_true",
                    help="opt-in source/intent WAL FULL SQLite cache")
     p.add_argument("--diagnose-pressure",action="store_true",
@@ -322,6 +331,9 @@ def main(argv=None)->int:
     if (not a.allow_public_market_data
         or not a.accept_experimental_spool
         or not a.accept_unverified_intersegment_gaps
+        or (a.cooperative_reader_yield and not (
+            a.reuse_original_connection and a.reuse_receiver_connection
+            and a.reuse_producer_connections))
         or (a.reuse_original_connection and not (
             a.reuse_receiver_connection and a.reuse_producer_connections))
         or (a.reuse_receiver_connection and not a.reuse_producer_connections)):
@@ -333,6 +345,7 @@ def main(argv=None)->int:
             reuse_producer_connections=a.reuse_producer_connections,
             reuse_receiver_connection=a.reuse_receiver_connection,
             reuse_original_connection=a.reuse_original_connection,
+            cooperative_reader_yield=a.cooperative_reader_yield,
         ))
     except Exception as exc:
         print(json.dumps({
