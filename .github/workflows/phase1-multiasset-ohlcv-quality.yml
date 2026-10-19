@@ -1,0 +1,41 @@
+name: ECONITH Phase1 bounded Spot OHLCV offline quality
+on:
+  push:
+    branches:
+      - 'experiment/phase1-postcampaign-quality-*'
+    paths:
+      - 'ci/phase1_spot_multiasset_ohlcv.py'
+      - 'ci/phase1_spot_multiasset_ohlcv_audit.py'
+      - 'tests/test_phase1_spot_multiasset_ohlcv.py'
+      - '.github/workflows/phase1-multiasset-ohlcv-quality.yml'
+  pull_request:
+    paths:
+      - 'ci/phase1_spot_multiasset_ohlcv.py'
+      - 'ci/phase1_spot_multiasset_ohlcv_audit.py'
+      - 'tests/test_phase1_spot_multiasset_ohlcv.py'
+      - '.github/workflows/phase1-multiasset-ohlcv-quality.yml'
+permissions:
+  contents: read
+jobs:
+  offline-admission:
+    name: Deterministic OHLCV integrity and fail-closed test gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Obtain exact immutable commit archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 2 \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/\${GITHUB_REPOSITORY}/tarball/\${GITHUB_SHA}" \
+            -o "\${RUNNER_TEMP}/source.tar.gz"
+          tar -xzf "\${RUNNER_TEMP}/source.tar.gz" --strip-components=1
+          test -f tests/test_phase1_spot_multiasset_ohlcv.py
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Offline-only 16 quality, tamper and failure tests; no Binance requests
+        run: |
+          python -m unittest -v tests.test_phase1_spot_multiasset_ohlcv
+          python -m py_compile ci/phase1_spot_multiasset_ohlcv.py ci/phase1_spot_multiasset_ohlcv_audit.py
