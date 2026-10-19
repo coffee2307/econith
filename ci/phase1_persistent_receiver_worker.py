@@ -27,6 +27,7 @@ from infrastructure.market_persistent_hmac_receiver import (
 def main(argv: list[str] | None=None) -> int:
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--child",action="store_true")
+    parser.add_argument("--reuse-receiver-connection",action="store_true")
     parser.add_argument("--receiver-db",type=Path)
     args=parser.parse_args(argv)
     secret=os.environ.pop(_CHILD_KEY_ENV,None)
@@ -38,10 +39,12 @@ def main(argv: list[str] | None=None) -> int:
             return 2
         receiver=OfflineIndependentProjectionReceiver(
             args.receiver_db,mode_provider=lambda:QuantMode.SIMULATION,
+            reuse_connection=args.reuse_receiver_connection,
         )
         for sequence in range(1,_MAX_MESSAGES+1):
             packet=sys.stdin.buffer.readline(_MAX_WIRE_BYTES+1)
             if not packet:
+                receiver.close()
                 return 0  # explicit parent EOF closes a healthy worker
             if len(packet)>_MAX_WIRE_BYTES or not packet.endswith(b"\n"):
                 return 2
@@ -54,6 +57,7 @@ def main(argv: list[str] | None=None) -> int:
             sys.stdout.buffer.flush()
         # At most 4096 messages per source process. Never silently restart
         # and claim the resumed socket is the same continuous source.
+        receiver.close()
         return 0
     except Exception:
         # An already-COMMITted receipt could exist; caller must recover the
