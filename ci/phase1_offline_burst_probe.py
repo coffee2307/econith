@@ -81,7 +81,8 @@ async def probe(root: Path, *, frames: int, spacing_ms: float,
                 live_spool: bool = False,
                 experiment_reuse_derived_connections: bool = False,
                 diagnose_pressure: bool = False,
-                experiment_reuse_producer_connections: bool = False) -> int:
+                experiment_reuse_producer_connections: bool = False,
+                experiment_reuse_receiver_connection: bool = False) -> int:
     old = os.environ.get("ECONITH_PHASE1_STAGE_PROFILE")
     os.environ["ECONITH_PHASE1_STAGE_PROFILE"] = "1"
     started = time.monotonic()
@@ -107,6 +108,7 @@ async def probe(root: Path, *, frames: int, spacing_ms: float,
                     experiment_reuse_derived_connections=experiment_reuse_derived_connections,
                     diagnose_pressure=diagnose_pressure,
                     experiment_reuse_producer_connections=experiment_reuse_producer_connections,
+                    experiment_reuse_receiver_connection=experiment_reuse_receiver_connection,
                 )
         except Exception as exc:
             # No raw payloads, paths or child secrets in outputs.
@@ -162,6 +164,8 @@ def main() -> int:
     p.add_argument("--output-dir",type=Path,required=True)
     p.add_argument("--frames",type=int,default=240)
     p.add_argument("--spacing-ms",type=float,default=3.0)
+    p.add_argument("--reuse-receiver-connection",action="store_true",
+                   help="OFFLINE research only: HMAC child SQLite FULL per-envelope cache")
     p.add_argument("--reuse-producer-connections",action="store_true",
                    help="OFFLINE ONLY: A/B producer outbox and checkpoint FULL-commit connection cache")
     p.add_argument("--diagnose-pressure",action="store_true",
@@ -178,6 +182,10 @@ def main() -> int:
         or type(a.frames) is not int or not 10<=a.frames<=1000
         or not 0<=a.spacing_ms<=200):
         p.error("refusing non-fresh or unsafe bounded offline configuration")
+    if a.reuse_receiver_connection and (not a.live_spool
+                                        or not a.reuse_producer_connections
+                                        or not a.reuse_derived_connections):
+        p.error("receiver cache requires the fully reviewed opt-in spool profile")
     if a.reuse_producer_connections and not a.live_spool:
         p.error("producer connection reuse requires explicit offline in-session spool")
     if a.diagnose_pressure and not a.live_spool:
@@ -190,7 +198,8 @@ def main() -> int:
                              live_spool=a.live_spool,
                              experiment_reuse_derived_connections=a.reuse_derived_connections,
                              diagnose_pressure=a.diagnose_pressure,
-                             experiment_reuse_producer_connections=a.reuse_producer_connections))
+                             experiment_reuse_producer_connections=a.reuse_producer_connections,
+                             experiment_reuse_receiver_connection=a.reuse_receiver_connection))
 
 
 if __name__=="__main__":
