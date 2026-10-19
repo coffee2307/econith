@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import shutil
 import sys
 import time
@@ -22,11 +23,16 @@ from infrastructure.spot_forward_failure_diagnostics import safe_failure_code
 
 
 def _safe_store(path:Path,report:dict)->None:
-    # The operator root is fresh and isolated; no source ledger rewritten.
-    path.write_text(
-        json.dumps(report,sort_keys=True,indent=2,allow_nan=False)+"\n",
-        encoding="utf-8",
-    )
+    # Only the operator summary may be replaced. Source/ACK ledgers are
+    # never touched. Atomic replacement keeps last verdict after hard exit.
+    interim=path.with_name(path.name+".tmp")
+    if path.is_symlink() or interim.is_symlink():
+        raise ValueError("operator report path alias refused")
+    with interim.open("w",encoding="utf-8") as handle:
+        handle.write(json.dumps(report,sort_keys=True,indent=2,allow_nan=False)+"\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(interim,path)
 
 
 async def matrix(root:Path,*,frames:int,max_lag_ms:int,
@@ -47,7 +53,24 @@ async def matrix(root:Path,*,frames:int,max_lag_ms:int,
         raise ValueError("producer cache requires derived cache")
     started=time.monotonic()
     results=[]
+    aborted_for_resources=False
+    _safe_store(root/"matrix_report.json",{
+        "schema":"econith-phase1-public-spool-matrix-progress-v1",
+        "status":"IN_PROGRESS_NOT_CERTIFIED",
+        "completed_attempts":0,
+        "history_gap_free_verified":False,
+        "institutional_phase1_complete":False,
+        "orders_submitted":0,
+        "segments":[],
+    })
     for i in range(1,4):
+        if aborted_for_resources:
+            results.append({
+                "iteration":i,
+                "status":"NOT_ATTEMPTED_HOST_RESOURCE_GUARD",
+                "orders_submitted":0,
+            })
+            continue
         path=root/f"attempt_{i:03d}"
         item={"iteration":i, "status":"FAILED_OR_QUARANTINED_SOURCE"}
         try:
@@ -108,6 +131,14 @@ async def matrix(root:Path,*,frames:int,max_lag_ms:int,
                 item["memory_free_after_bytes"]=after["available_memory_bytes"]
                 item["evidence_after_bytes"]=after["evidence_file_bytes"]
         except Exception as exc:
+            resource_denial=(type(exc) is RuntimeError and (
+                "public spool disk budget insufficient" in str(exc)
+                or "public spool host memory/evidence budget insufficient" in str(exc)
+                or "public spool post-session resource budget insufficient" in str(exc)
+            ))
+            if resource_denial:
+                item["status"]="NOT_ATTEMPTED_HOST_RESOURCE_GUARD" if not path.exists() else "FAILED_POST_SESSION_RESOURCE_GUARD"
+                aborted_for_resources=True
             item["failure_code"]=safe_failure_code(exc)
             item["orders_submitted"]=0
             # A failed original is ALWAYS quarantined. This diagnostic can
@@ -128,12 +159,24 @@ async def matrix(root:Path,*,frames:int,max_lag_ms:int,
             except (OSError,ValueError,TypeError,UnicodeError):
                 pass
         results.append(item)
+        _safe_store(root/"matrix_report.json",{
+            "schema":"econith-phase1-public-spool-matrix-progress-v1",
+            "status":"IN_PROGRESS_NOT_CERTIFIED",
+            "completed_attempts":len(results),
+            "history_gap_free_verified":False,
+            "institutional_phase1_complete":False,
+            "orders_submitted":0,
+            "segments":results,
+        })
         print(json.dumps(item,sort_keys=True),flush=True)
     passed_count=sum(item["status"]=="PASSED" for item in results)
     report={
         "schema":"econith-phase1-public-spool-matrix-v1",
         "mode":"SIMULATION",
-        "attempts":3, "passed":passed_count,
+        "attempts":3,
+        "actual_sources_started":sum((root/f"attempt_{i:03d}").exists() for i in range(1,4)),
+        "skipped_resource_guard":sum(x["status"]=="NOT_ATTEMPTED_HOST_RESOURCE_GUARD" for x in results),
+        "passed":passed_count,
         "failed":3-passed_count,
         "frames_per_attempt":frames,
         "lag_budget_ms":max_lag_ms,
