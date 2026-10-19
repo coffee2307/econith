@@ -70,6 +70,7 @@ class OptInSpotIngressAdapter:
         stage_profile=None,
         on_queue_depth: Callable[[int,int],None] | None = None,
         on_queue_event: Callable[[str,int,int,float | None],None] | None = None,
+        cooperative_reader_yield: bool = False,
     ) -> None:
         if not isinstance(journal, OfflineSpotCaptureJournal):
             raise ValueError("an immutable offline Spot capture journal is required")
@@ -81,6 +82,8 @@ class OptInSpotIngressAdapter:
             raise ValueError("ingress queue diagnostic callback must be callable")
         if on_queue_event is not None and not callable(on_queue_event):
             raise ValueError("FIFO event diagnostic callback must be callable")
+        if type(cooperative_reader_yield) is not bool:
+            raise ValueError("reader scheduling experiment requires explicit bool")
         if snapshot_limit not in (100, 500, 1000, 5000):
             raise ValueError("invalid explicit read-only depth snapshot limit")
         self.journal = journal
@@ -91,6 +94,7 @@ class OptInSpotIngressAdapter:
         self.stage_profile = stage_profile
         self.on_queue_depth = on_queue_depth
         self.on_queue_event = on_queue_event
+        self.cooperative_reader_yield = cooperative_reader_yield
 
     def _clock(self) -> int:
         value = self.clock()
@@ -216,6 +220,12 @@ class OptInSpotIngressAdapter:
                     received = self._clock()
                     count += 1
                     await _queue("ws", raw, received)
+                    # Experiment: let the FIFO writer run if the transport
+                    # repeatedly yields already-buffered WS frames in one
+                    # event-loop turn. Never await available queue capacity,
+                    # alter original receipt timestamps or silently drop data.
+                    if self.cooperative_reader_yield:
+                        await asyncio.sleep(0)
                     if count >= max_frames:
                         # Bounded *successful* research capture: deliberately
                         # stop reading after max_frames; never infer continuity
