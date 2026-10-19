@@ -124,15 +124,18 @@ def decode_response(packet: bytes, key: bytes, expected_sequence: int,
 class PersistentHmacResearchReceiver:
     """One session-owned child; strict sequential send/ACK; bounded protocol."""
 
-    def __init__(self, receiver_db: Path, *, timeout_s: float = 10):
+    def __init__(self, receiver_db: Path, *, timeout_s: float = 10,
+                 reuse_receiver_connection: bool = False):
         if (
             not isinstance(receiver_db,Path) or not receiver_db.is_absolute()
             or receiver_db.is_symlink()
+            or type(reuse_receiver_connection) is not bool
             or type(timeout_s) not in (float,int)
             or not 1 <= timeout_s <= 30
         ):
             raise ValueError("invalid local persistent receiver scope")
         self.path=receiver_db.resolve()
+        self._reuse_receiver_connection=reuse_receiver_connection
         self.timeout_s=timeout_s
         self._process: asyncio.subprocess.Process | None=None
         self._key=secrets.token_bytes(32)
@@ -151,9 +154,14 @@ class PersistentHmacResearchReceiver:
         env=dict(os.environ)
         env[_CHILD_KEY_ENV]=self._key.hex()
         try:
-            self._process=await asyncio.create_subprocess_exec(
+            command=[
                 sys.executable,"-m","ci.phase1_persistent_receiver_worker",
                 "--child","--receiver-db",str(self.path),
+            ]
+            if self._reuse_receiver_connection:
+                command.append("--reuse-receiver-connection")
+            self._process=await asyncio.create_subprocess_exec(
+                *command,
                 stdin=asyncio.subprocess.PIPE,stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,env=env,
                 limit=_MAX_WIRE_BYTES+8,
