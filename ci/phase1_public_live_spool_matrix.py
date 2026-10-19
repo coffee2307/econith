@@ -18,7 +18,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from ci.phase1_public_live_spool_trial import run
-from ci.phase1_public_spool_timed_watch import host_snapshot
+from ci.phase1_cloud_resources import host_snapshot
 from infrastructure.spot_forward_failure_diagnostics import safe_failure_code
 
 
