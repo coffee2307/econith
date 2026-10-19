@@ -26,7 +26,13 @@ _FIELDS = ("raw_committed", "cursor_advanced", "eventbus_published",
 
 
 def available_physical_memory_bytes() -> int | None:
-    """Windows-only, no psutil dependency. Unknown on unsupported hosts."""
+    """Native Windows or Linux/cgroup physical RAM; unknown if unavailable."""
+    if os.name == "posix":
+        try:
+            from ci.phase1_cloud_resources import _linux_memory_available_bytes
+            return _linux_memory_available_bytes()
+        except (RuntimeError,ImportError):
+            return None
     if os.name != "nt":
         return None
 
