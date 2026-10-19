@@ -83,7 +83,8 @@ async def probe(root: Path, *, frames: int, spacing_ms: float,
                 diagnose_pressure: bool = False,
                 experiment_reuse_producer_connections: bool = False,
                 experiment_reuse_receiver_connection: bool = False,
-                experiment_reuse_original_connection: bool = False) -> int:
+                experiment_reuse_original_connection: bool = False,
+                experiment_cooperative_reader_yield: bool = False) -> int:
     old = os.environ.get("ECONITH_PHASE1_STAGE_PROFILE")
     os.environ["ECONITH_PHASE1_STAGE_PROFILE"] = "1"
     started = time.monotonic()
@@ -111,6 +112,7 @@ async def probe(root: Path, *, frames: int, spacing_ms: float,
                     experiment_reuse_producer_connections=experiment_reuse_producer_connections,
                     experiment_reuse_receiver_connection=experiment_reuse_receiver_connection,
                     experiment_reuse_original_connection=experiment_reuse_original_connection,
+                    experiment_cooperative_reader_yield=experiment_cooperative_reader_yield,
                 )
         except Exception as exc:
             # No raw payloads, paths or child secrets in outputs.
@@ -166,6 +168,8 @@ def main() -> int:
     p.add_argument("--output-dir",type=Path,required=True)
     p.add_argument("--frames",type=int,default=240)
     p.add_argument("--spacing-ms",type=float,default=3.0)
+    p.add_argument("--cooperative-reader-yield",action="store_true",
+                   help="OFFLINE full-cache only: opt-in reader event-loop fairness")
     p.add_argument("--reuse-original-connection",action="store_true",
                    help="OFFLINE ONLY: optional source/intent WAL FULL connection A/B")
     p.add_argument("--reuse-receiver-connection",action="store_true",
@@ -186,6 +190,10 @@ def main() -> int:
         or type(a.frames) is not int or not 10<=a.frames<=1000
         or not 0<=a.spacing_ms<=200):
         p.error("refusing non-fresh or unsafe bounded offline configuration")
+    if a.cooperative_reader_yield and not (
+        a.live_spool and a.reuse_original_connection and a.reuse_receiver_connection
+        and a.reuse_producer_connections and a.reuse_derived_connections):
+        p.error("cooperative reader requires full-cache offline spool research")
     if a.reuse_original_connection and (
         not a.live_spool or not a.reuse_receiver_connection
         or not a.reuse_producer_connections or not a.reuse_derived_connections):
@@ -208,7 +216,8 @@ def main() -> int:
                              diagnose_pressure=a.diagnose_pressure,
                              experiment_reuse_producer_connections=a.reuse_producer_connections,
                              experiment_reuse_receiver_connection=a.reuse_receiver_connection,
-                             experiment_reuse_original_connection=a.reuse_original_connection))
+                             experiment_reuse_original_connection=a.reuse_original_connection,
+                             experiment_cooperative_reader_yield=a.cooperative_reader_yield))
 
 
 if __name__=="__main__":
