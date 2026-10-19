@@ -59,6 +59,7 @@ async def test_cloud_full_cache_optins_never_imply_continuity(tmp_path):
         root,clock=clock,metrics=healthy_metrics,single_trial=fake_trial,
         diagnose_pressure=True,reuse_producer_connections=True,
         reuse_receiver_connection=True,reuse_original_connection=True,
+        cooperative_reader_yield=True,
     )
     assert report["target_reached"]
     assert report["passed_segments"]==7
@@ -67,7 +68,7 @@ async def test_cloud_full_cache_optins_never_imply_continuity(tmp_path):
     assert all(all(c[k] is True for k in (
         "reuse_derived_connections","reuse_producer_connections",
         "reuse_receiver_connection","reuse_original_connection",
-        "diagnose_pressure",
+        "diagnose_pressure","cooperative_reader_yield",
     )) for c in calls)
     assert report["continuous_live_market"] is False
     assert report["history_continuity_verified"] is False
@@ -82,4 +83,12 @@ async def test_cloud_original_only_or_receiver_only_refused_before_directory(tmp
     assert not root.exists()
     with pytest.raises(ValueError,match="receiver cache"):
         await timed_watch(root,reuse_receiver_connection=True)
+    assert not root.exists()
+
+
+@pytest.mark.asyncio
+async def test_cooperative_reader_not_permitted_without_full_caches(tmp_path):
+    root=(tmp_path/"guard_fairness").resolve()
+    with pytest.raises(ValueError,match="cooperative reader"):
+        await timed_watch(root,cooperative_reader_yield=True)
     assert not root.exists()
