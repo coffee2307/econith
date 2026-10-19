@@ -26,7 +26,6 @@ jobs:
       ECONITH_MODE: SIMULATION
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
-      EVIDENCE_ROOT: ${{ runner.temp }}/econith-phase1-finite-public
     steps:
       - name: Checkout review-only experiment (no persistent Git credentials)
         uses: actions/checkout@v4
@@ -54,7 +53,7 @@ jobs:
           from pathlib import Path
           import os
           from ci.phase1_cloud_resources import host_snapshot
-          root=Path(os.environ["EVIDENCE_ROOT"])
+          root=Path(os.environ["RUNNER_TEMP"]) / "econith-phase1-finite-public"
           root.mkdir(parents=True,exist_ok=False)
           state=host_snapshot(root)
           print("RUNNER_MEMORY_AVAILABLE_GB",round(state["available_memory_bytes"]/1e9,2))
