@@ -15,6 +15,8 @@ from typing import Callable
 
 WINDOW_S = 5
 MAX_WINDOWS = 48  # 4 minutes per one finite 120s source + catchup
+SUBSECOND_WINDOW_MS = 250
+MAX_SUBSECOND_WINDOWS = 960  # four minutes maximum
 _FIELDS = ("raw_committed", "cursor_advanced", "eventbus_published",
            "checkpoints", "max_pending_originals", "max_admission_age_ms",
            "max_ingress_fifo_depth", "ingress_fifo_observations",
@@ -69,6 +71,11 @@ class BoundedSpoolPressure:
         self._truncated = False
         self._total = {k: 0 for k in _FIELDS[:4]}
         self._peak_backlog = 0
+        self._micro_index = 0
+        self._micro_current = self._new_micro_window()
+        self._micro_windows: list[dict] = []
+        self._micro_truncated = False
+        self._micro_total = {"enqueued":0,"dequeued":0,"writer_completed":0,"overflow":0}
 
     @staticmethod
     def _new_window() -> dict:
@@ -126,6 +133,66 @@ class BoundedSpoolPressure:
         if depth * 10 >= capacity * 9:
             self._current["ingress_fifo_90pct_observations"] += 1
 
+    @staticmethod
+    def _new_micro_window() -> dict:
+        return {
+            "enqueued":0, "dequeued":0, "writer_completed":0,
+            "overflow":0, "peak_fifo_depth":0,
+            "near_full_observations":0, "max_writer_service_ms":0,
+        }
+
+    def _micro_roll(self) -> None:
+        elapsed=max(0,self._clock()-self._t0)
+        target=elapsed//(SUBSECOND_WINDOW_MS*1_000_000)
+        if target<=self._micro_index:
+            return
+        while (self._micro_index<target and
+               len(self._micro_windows)<MAX_SUBSECOND_WINDOWS):
+            self._micro_close()
+            self._micro_index+=1
+            self._micro_current=self._new_micro_window()
+        if self._micro_index<target:
+            self._micro_truncated=True
+            self._micro_index=target
+            self._micro_current=self._new_micro_window()
+
+    def _micro_close(self) -> None:
+        if len(self._micro_windows)>=MAX_SUBSECOND_WINDOWS:
+            self._micro_truncated=True
+            return
+        sample=dict(self._micro_current)
+        sample["elapsed_start_ms"]=self._micro_index*SUBSECOND_WINDOW_MS
+        self._micro_windows.append(sample)
+
+    def fifo_event(self, action: str, depth: int, capacity: int,
+                   duration_ms: float | None = None) -> None:
+        """Only bounded aggregates; no market payload or source identity."""
+        import math
+        if (action not in ("enqueue","dequeue","overflow","writer_complete")
+            or type(depth) is not int or type(capacity) is not int
+            or capacity<=0 or not 0<=depth<=capacity):
+            raise ValueError("invalid bounded FIFO event")
+        if action=="writer_complete":
+            if (type(duration_ms) not in (int,float)
+                or not math.isfinite(duration_ms) or duration_ms<0):
+                raise ValueError("invalid writer service duration")
+        elif duration_ms is not None:
+            raise ValueError("unexpected FIFO duration")
+        self._micro_roll()
+        field=({"enqueue":"enqueued","dequeue":"dequeued",
+                "overflow":"overflow","writer_complete":"writer_completed"}[action])
+        self._micro_total[field]+=1
+        self._micro_current[field]+=1
+        self._micro_current["peak_fifo_depth"]=max(
+            self._micro_current["peak_fifo_depth"],depth)
+        if depth*10>=capacity*9:
+            self._micro_current["near_full_observations"]+=1
+        if duration_ms is not None:
+            self._micro_current["max_writer_service_ms"]=max(
+                self._micro_current["max_writer_service_ms"],
+                int(math.ceil(duration_ms)),
+            )
+
     def receiver_ack(self, duration_ms: float) -> None:
         import math
         if (type(duration_ms) not in (int,float)
@@ -173,6 +240,11 @@ class BoundedSpoolPressure:
             "counters":dict(self._total),
             "peak_pending_originals":self._peak_backlog,
             "windows":list(self._windows),
+            "subsecond_window_ms":SUBSECOND_WINDOW_MS,
+            "max_subsecond_windows":MAX_SUBSECOND_WINDOWS,
+            "subsecond_windows_truncated":self._micro_truncated,
+            "subsecond_fifo_totals":dict(self._micro_total),
+            "subsecond_windows":list(self._micro_windows),
             "host_cpu_field_scope":"process_CPU_time_not_system_utilization",
             "source_coverage_certified":False,
             "event_payloads_or_identifiers_recorded":False,
@@ -184,6 +256,11 @@ class BoundedSpoolPressure:
         remaining = (self._clock() - self._t0) / 1_000_000_000
         span = max(0.001, remaining - self._current_index * WINDOW_S)
         self._close_window(span)
+        self._micro_roll()
+        if len(self._micro_windows)<MAX_SUBSECOND_WINDOWS:
+            self._micro_close()
+        else:
+            self._micro_truncated=True
         with self.path.open("x", encoding="utf-8") as file:
             file.write(json.dumps(self.summary(source_complete=source_complete),
                                   sort_keys=True, indent=2, allow_nan=False) + "\n")
