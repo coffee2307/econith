@@ -221,6 +221,7 @@ async def observe_forward_spot_research(
         adapter = OptInSpotIngressAdapter(
             journal, symbol="BTCUSDT", queue_capacity=queue_capacity,
             stage_profile=profiler,
+            on_queue_depth=(pressure.fifo if pressure is not None else None),
         )
         shadow = IncrementalSpotShadowValidator(
             journal, session_id=session_id, source=source,
@@ -389,13 +390,14 @@ async def observe_forward_spot_research(
                     confirmations = await receiver_client.accept_batch(
                         [envelope], now_ms=max(time.time_ns() // 1_000_000, now),
                     )
-            receiver_ack_max_ms = max(
-                receiver_ack_max_ms, (time.monotonic()-ipc_start)*1000,
-            )
+            ack_round_trip_ms=(time.monotonic()-ipc_start)*1000
+            receiver_ack_max_ms=max(receiver_ack_max_ms,ack_round_trip_ms)
             if len(confirmations) != 1 or confirmations[0].receipt_id != (
                 OfflineIndependentProjectionReceiver._receipt_id(envelope)
             ):
                 raise ForwardSpotResearchError("independent authenticated receiver ACK missing")
+            if pressure is not None:
+                pressure.receiver_ack(ack_round_trip_ms)
             with trace("outbox_receiver_ack"):
                 outbox.ack_receiver(envelope, confirmations[0])
             # Signed receiver ACK may take time: recheck freshness just
