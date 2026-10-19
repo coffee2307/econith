@@ -118,6 +118,7 @@ async def observe_forward_spot_research(
     experiment_reuse_derived_connections: bool = False,
     diagnose_pressure: bool = False,
     experiment_reuse_producer_connections: bool = False,
+    experiment_reuse_receiver_connection: bool = False,
 ) -> ForwardSpotResearchStatus:
     """One real *in-session* research pass (no default startup/auto retry).
 
@@ -146,6 +147,7 @@ async def observe_forward_spot_research(
         or not 100 <= max_projector_lag_ms <= 30000
         or type(max_pending_originals) is not int
         or not 1 <= max_pending_originals <= 1000
+        or type(experiment_reuse_receiver_connection) is not bool
         or type(experiment_reuse_producer_connections) is not bool
         or type(diagnose_pressure) is not bool
         or type(experiment_reuse_derived_connections) is not bool
@@ -168,6 +170,13 @@ async def observe_forward_spot_research(
         (not offline and not allow_experimental_public_spool)
     ):
         raise PermissionError("derived connection reuse requires explicitly bounded research spool")
+    if experiment_reuse_receiver_connection and (
+        not spooled_in_session or not persistent_receiver
+        or not experiment_reuse_derived_connections
+        or not experiment_reuse_producer_connections
+        or (not offline and not allow_experimental_public_spool)
+    ):
+        raise PermissionError("receiver connection cache requires reviewed bounded spool")
     if experiment_reuse_producer_connections and (
         not spooled_in_session or
         (not offline and not allow_experimental_public_spool)
@@ -265,8 +274,12 @@ async def observe_forward_spot_research(
         highest_lag_ms = 0
         published_before_source_close = False
         source_spool_bytes = 0
-        receiver_client = (PersistentHmacResearchReceiver(receiver_db)
-                           if persistent_receiver else None)
+        receiver_client = (
+            PersistentHmacResearchReceiver(
+                receiver_db,
+                reuse_receiver_connection=experiment_reuse_receiver_connection,
+            ) if persistent_receiver else None
+        )
         async def derived_observer(event: Event) -> None:
             if event.payload.get("source") != _SOURCE:
                 raise ForwardSpotResearchError("derived event has untrusted forward provenance")
