@@ -77,7 +77,7 @@ async def test_one_live_socket_duration_fixture_passes_with_raw_intent_independe
         path,allow_public_market_data=True,duration_s=0.15,_fixture=True,
         lease_factory=fake_lease(),clock_preflight=preflight,
     )
-    assert result["verdict"]=="PASSED_BOUNDED_SINGLE_SOCKET_RESEARCH_ONLY",result
+    assert result["verdict"]=="PASSED_BOUNDED_SINGLE_SOCKET_RESEARCH_ONLY",json.dumps(result,sort_keys=True)
     assert result["duration_target_reached"]
     assert result["single_socket_session_started"]
     assert result["snapshot_captures"]==1
