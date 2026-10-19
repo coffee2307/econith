@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import pytest
 
@@ -88,8 +89,10 @@ async def test_host_memory_budget_blocks_public_source(tmp_path,monkeypatch):
                                  resource_guard=True)
     assert not called
     assert report["passed"]==0 and report["failed"]==3
-    assert all(x["status"]=="FAILED_OR_QUARANTINED_SOURCE"
+    assert all(x["status"]=="NOT_ATTEMPTED_HOST_RESOURCE_GUARD"
                for x in report["segments"])
+    assert report["actual_sources_started"]==0
+    assert report["skipped_resource_guard"]==3
     assert report["institutional_phase1_complete"] is False
 
 
@@ -103,3 +106,49 @@ async def test_unreviewed_connection_switch_is_rejected_before_io(tmp_path):
     with pytest.raises(ValueError,match="producer and derived"):
         await operator.matrix(root,frames=1000,max_lag_ms=5000,
                               reuse_receiver_connection=True)
+
+
+@pytest.mark.asyncio
+async def test_matrix_progress_durable_before_next_trial(tmp_path,monkeypatch):
+    observations=[]
+    async def fake_run(path:Path,**kwargs):
+        report=json.loads((path.parent/"matrix_report.json").read_text())
+        observations.append((report["status"],report["completed_attempts"]))
+        path.mkdir()
+        return accepted(kwargs["frames"])
+    monkeypatch.setattr(operator,"run",fake_run)
+    root=(tmp_path/"progress").resolve()
+    root.mkdir()
+    report=await operator.matrix(root,frames=1000,max_lag_ms=5000)
+    assert observations==[
+        ("IN_PROGRESS_NOT_CERTIFIED",0),
+        ("IN_PROGRESS_NOT_CERTIFIED",1),
+        ("IN_PROGRESS_NOT_CERTIFIED",2),
+    ]
+    assert report["actual_sources_started"]==3
+    assert json.loads((root/"matrix_report.json").read_text())["passed"]==3
+
+
+@pytest.mark.asyncio
+async def test_post_source_resource_denial_cannot_be_passed(tmp_path,monkeypatch):
+    async def fake_run(path:Path,**kwargs):
+        path.mkdir()
+        return accepted(kwargs["frames"])
+    samples=[2_000_000_000,1_050_000_000]
+    def host(_root):
+        return {
+            "available_memory_bytes":samples.pop(0),
+            "disk_free_bytes":8_000_000_000,
+            "evidence_file_bytes":10_000_000,
+        }
+    monkeypatch.setattr(operator,"run",fake_run)
+    monkeypatch.setattr(operator,"host_snapshot",host)
+    root=(tmp_path/"post").resolve()
+    root.mkdir()
+    result=await operator.matrix(root,frames=1000,max_lag_ms=5000,
+                                 resource_guard=True)
+    assert result["passed"]==0
+    assert result["actual_sources_started"]==1
+    assert result["segments"][0]["status"]=="FAILED_POST_SESSION_RESOURCE_GUARD"
+    assert result["segments"][1]["status"]=="NOT_ATTEMPTED_HOST_RESOURCE_GUARD"
+    assert result["segments"][2]["status"]=="NOT_ATTEMPTED_HOST_RESOURCE_GUARD"
