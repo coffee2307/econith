@@ -80,6 +80,7 @@ class OfflineSpotCaptureJournal:
         max_body_bytes: int = 262_144, max_frames_per_session: int = 100_000,
         max_age_ms: int = 10_000, max_future_skew_ms: int = 1000,
         forward_capture_audit: bool = False,
+        reuse_connection: bool = False,
     ) -> None:
         if not callable(mode_provider):
             raise ValueError("SIMULATION-only mode provider is required")
@@ -88,11 +89,14 @@ class OfflineSpotCaptureJournal:
             or type(max_frames_per_session) is not int
             or not 1 <= max_frames_per_session <= 1_000_000
             or type(max_age_ms) is not int or max_age_ms < 0
+            or type(reuse_connection) is not bool
             or type(forward_capture_audit) is not bool
             or type(max_future_skew_ms) is not int or max_future_skew_ms < 0
         ):
             raise ValueError("invalid raw-capture resource bounds")
         self.path = Path(path)
+        self._reuse_connection = reuse_connection
+        self._session_connection: sqlite3.Connection | None = None
         self._mode_provider = mode_provider
         self.max_body_bytes = max_body_bytes
         self.max_frames_per_session = max_frames_per_session
@@ -152,14 +156,40 @@ class OfflineSpotCaptureJournal:
 
     @contextmanager
     def _connect(self):
-        conn = sqlite3.connect(self.path, isolation_level=None, timeout=10)
+        # Explicit opt-in single-event-loop research ledger. Each original
+        # plus its capture-intent still commits atomically with WAL/FULL.
+        if self._reuse_connection:
+            if self._session_connection is None:
+                self._session_connection = sqlite3.connect(
+                    self.path, isolation_level=None, timeout=10,
+                )
+                self._session_connection.row_factory = sqlite3.Row
+                self._session_connection.execute("PRAGMA busy_timeout=10000")
+                self._session_connection.execute("PRAGMA foreign_keys=ON")
+            if self._session_connection.in_transaction:
+                raise SpotCaptureError("cached original ledger has unfinished transaction")
+            yield self._session_connection
+        else:
+            conn = sqlite3.connect(self.path, isolation_level=None, timeout=10)
+            try:
+                conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA busy_timeout=10000")
+                conn.execute("PRAGMA foreign_keys=ON")
+                yield conn
+            finally:
+                conn.close()
+
+    def close(self) -> None:
+        db = self._session_connection
+        if db is None:
+            return
+        self._session_connection = None
         try:
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA busy_timeout=10000")
-            conn.execute("PRAGMA foreign_keys=ON")
-            yield conn
+            if db.in_transaction:
+                db.rollback()
+                raise SpotCaptureError("uncommitted original ledger transaction on close")
         finally:
-            conn.close()
+            db.close()
 
     def _simulation_only(self) -> None:
         if self._mode_provider() is not QuantMode.SIMULATION:
