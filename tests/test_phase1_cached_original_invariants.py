@@ -59,7 +59,7 @@ async def test_original_cached_pipeline_matches_independent_intents(tmp_path):
 @pytest.mark.asyncio
 async def test_source_cache_denied_for_untested_public_or_partial_mode(tmp_path):
     root=(tmp_path/"denied").resolve()
-    with pytest.raises(PermissionError,match="offline-only"):
+    with pytest.raises(PermissionError,match="explicit fully reviewed bounded spool"):
         await observe_forward_spot_research(
             output_dir=root,session_id="rec_orig_denied",
             stream=_source(30,60),snapshot_fetch=_snapshot,
