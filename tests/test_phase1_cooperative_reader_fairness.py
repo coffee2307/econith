@@ -134,7 +134,8 @@ async def test_cooperative_reader_still_quarantines_genuinely_slow_writer(tmp_pa
         )
     assert exc.value.reason=="QUEUE_BACKPRESSURE"
     pressure.write(source_complete=False)
-    assert pressure.summary(source_complete=False)["subsecond_fifo_totals"]["overflow"]==1
+    # Both WS and concurrent REST snapshot can independently encounter a full FIFO.
+    assert pressure.summary(source_complete=False)["subsecond_fifo_totals"]["overflow"]>=1
     with sqlite3.connect(root/"original.sqlite") as db:
         assert db.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
         assert db.execute(
