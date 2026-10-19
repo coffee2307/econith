@@ -26,15 +26,23 @@ from infrastructure.spot_public_capture_adapter import (
     OptInSpotIngressAdapter, SpotTransportError, _PUBLIC_WS, _PUBLIC_REST,
 )
 from infrastructure.spot_public_pinned_lease import open_pinned_public_spot_lease
+from infrastructure.spot_forward_owner import exclusive_forward_owner
 
 
 class DurationStream:
     """Yield EVERY delivered source frame until a monotonic deadline; never skip."""
     def __init__(self, source, *, duration_s: float, idle_s: float = 30.0,
-                 monotonic=time.monotonic):
+                 monotonic=time.monotonic,
+                 max_terminal_silence_s: float = 5.0):
         if not (math.isfinite(duration_s) and duration_s > 0):
             raise ValueError("duration must be positive and finite")
+        if (type(max_terminal_silence_s) not in (int,float)
+            or not math.isfinite(max_terminal_silence_s)
+            or not 0.001 <= max_terminal_silence_s <= 30):
+            raise ValueError("invalid terminal source liveness threshold")
         self.source=source
+        self.max_terminal_silence_s=max_terminal_silence_s
+        self.last_frame_monotonic_s=None
         self.duration_s=duration_s
         self.idle_s=idle_s
         self.monotonic=monotonic
@@ -43,6 +51,19 @@ class DurationStream:
         self.read_frames=0
         self.start_monotonic_s=None
         self.end_monotonic_s=None
+
+    def _finish_at_deadline(self) -> None:
+        if (self.last_frame_monotonic_s is None
+            or self.monotonic() - self.last_frame_monotonic_s > self.max_terminal_silence_s):
+            raise SpotTransportError("no sufficiently recent source frame at observation deadline",
+                                     reason="WS_SILENT_AT_DEADLINE")
+        self.target_reached=True
+
+    @property
+    def terminal_silence_s(self):
+        if self.last_frame_monotonic_s is None or self.end_monotonic_s is None:
+            return None
+        return round(max(0.0,self.end_monotonic_s-self.last_frame_monotonic_s),3)
 
     async def __aiter__(self):
         it=aiter(self.source)
@@ -53,19 +74,20 @@ class DurationStream:
             while True:
                 remaining=deadline-self.monotonic()
                 if remaining<=0:
-                    self.target_reached=True
+                    self._finish_at_deadline()
                     return
                 try:
                     raw=await asyncio.wait_for(anext(it),timeout=min(self.idle_s,remaining))
                 except asyncio.TimeoutError as exc:
                     if self.monotonic()>=deadline:
-                        self.target_reached=True
+                        self._finish_at_deadline()
                         return
                     raise SpotTransportError("idle before duration completed",reason="WS_IDLE_TIMEOUT") from exc
                 except StopAsyncIteration as exc:
                     self.early_eof=True
                     raise SpotTransportError("public source EOF before duration",reason="WS_EARLY_EOF") from exc
                 self.read_frames+=1
+                self.last_frame_monotonic_s=self.monotonic()
                 yield raw
         finally:
             self.end_monotonic_s=self.monotonic()
@@ -84,7 +106,7 @@ def _fresh_private_root(root: Path) -> None:
     root.mkdir(parents=False,mode=0o700,exist_ok=False)
 
 
-async def run_trial(root: Path, *, duration_s: float = 90.0,
+async def _run_trial_owned(root: Path, *, duration_s: float = 90.0,
                     allow_public_market_data: bool = False,
                     lease_factory=open_pinned_public_spot_lease,
                     clock_preflight=measure_public_clock,
@@ -96,7 +118,8 @@ async def run_trial(root: Path, *, duration_s: float = 90.0,
         raise ValueError("finite positive duration required")
     if not ((0.1<=duration_s<=180) if _fixture else (60<=duration_s<=180)):
         raise ValueError("production research target must be 60..180s")
-    _fresh_private_root(root)
+    # Caller has already created a fresh private evidence scope and acquired
+    # the exclusive OS owner marker before any clock/network source IO.
     report={"schema":"econith-phase1-single-socket-duration-v1",
             "verdict":"STARTED_NOT_CERTIFIED","mode":"SIMULATION",
             "source":"binance_public_data_only",
@@ -110,7 +133,9 @@ async def run_trial(root: Path, *, duration_s: float = 90.0,
             "default_runtime_cutover":False,
             "hmac_forward_receiver_tested":False,
             "institutional_phase1_complete":False,
-            "orders_submitted":0}
+            "orders_submitted":0,
+            "exclusive_os_owner_fence_held":True,
+            "max_terminal_source_silence_s":5.0}
     journal=None
     stream=None
     started=None
@@ -157,6 +182,7 @@ async def run_trial(root: Path, *, duration_s: float = 90.0,
             )
         report.update({
             "duration_stream_elapsed_s":stream.elapsed_s,
+            "terminal_source_silence_s":stream.terminal_silence_s,
             "websocket_frames":result.websocket_frames,
             "snapshot_captures":result.snapshot_captures,
             "max_fifo_depth":result.queue_high_watermark,
@@ -182,6 +208,7 @@ async def run_trial(root: Path, *, duration_s: float = 90.0,
     finally:
         if stream is not None:
             report["duration_stream_elapsed_s"]=stream.elapsed_s
+            report["terminal_source_silence_s"]=stream.terminal_silence_s
             report["duration_target_reached"]=stream.target_reached
             report["read_frames"]=stream.read_frames
         report["wall_elapsed_s"]=round(time.monotonic()-started,3) if started is not None else 0
@@ -197,6 +224,31 @@ async def run_trial(root: Path, *, duration_s: float = 90.0,
             f.flush()
             os.fsync(f.fileno())
     return report
+
+
+async def run_trial(root: Path, *, duration_s: float = 90.0,
+                    allow_public_market_data: bool = False,
+                    lease_factory=open_pinned_public_spot_lease,
+                    clock_preflight=measure_public_clock,
+                    _fixture: bool = False, adapter_clock_ms=None,
+                    stream_monotonic=time.monotonic) -> dict:
+    """Enforce one unstealable OS owner marker across capture and final audit record."""
+    if allow_public_market_data is not True:
+        raise PermissionError("explicit research-only Binance public opt-in required")
+    if type(duration_s) not in (int,float) or not math.isfinite(duration_s):
+        raise ValueError("finite positive duration required")
+    if not ((0.1<=duration_s<=180) if _fixture else (60<=duration_s<=180)):
+        raise ValueError("production research target must be 60..180s")
+    _fresh_private_root(root)
+    # A process hard-kill skips Python finally, leaving a persistent orphan
+    # marker. Recovery must not auto-steal it, even after lease timeouts.
+    with exclusive_forward_owner(root,role="CAPTURE"):
+        return await _run_trial_owned(
+            root,duration_s=duration_s,allow_public_market_data=True,
+            lease_factory=lease_factory,clock_preflight=clock_preflight,
+            _fixture=_fixture,adapter_clock_ms=adapter_clock_ms,
+            stream_monotonic=stream_monotonic,
+        )
 
 
 def main(argv=None):

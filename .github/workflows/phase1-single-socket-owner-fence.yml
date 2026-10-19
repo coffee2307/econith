@@ -1,0 +1,90 @@
+name: ECONITH Phase1 single-socket owner fencing and crash qualification
+on:
+  push:
+    branches:
+      - 'experiment/phase1-owner-fence-duration-*'
+    paths:
+      - 'ci/phase1_single_socket_duration_trial.py'
+      - 'ci/phase1_single_socket_duration_audit.py'
+      - 'tests/test_phase1_single_socket_duration.py'
+      - '.github/workflows/phase1-single-socket-owner-fence.yml'
+  pull_request:
+    paths:
+      - 'ci/phase1_single_socket_duration_trial.py'
+      - 'ci/phase1_single_socket_duration_audit.py'
+      - 'tests/test_phase1_single_socket_duration.py'
+      - '.github/workflows/phase1-single-socket-owner-fence.yml'
+permissions:
+  contents: read
+jobs:
+  offline-crash-qualification:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Fetch exact immutable HEAD code
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 2 -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_SHA}" \
+            -o "${RUNNER_TEMP}/source.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/source.tar.gz" --strip-components=1
+          test -f tests/test_phase1_single_socket_duration.py
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install exact pinned offline test dependencies
+        run: python -m pip install -q pytest==8.3.5 pytest-asyncio==0.26.0 httpx==0.28.1 websockets==14.2
+      - name: Lock/owner concurrent takeover, OS hard exit, stale socket and raw integrity
+        run: |
+          python -m pytest -q --tb=short tests/test_phase1_single_socket_duration.py
+          python -m py_compile ci/phase1_single_socket_duration_trial.py ci/phase1_single_socket_duration_audit.py
+
+  bounded-public-owner-pilot:
+    needs: offline-crash-qualification
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - name: Checkout immutable research commit archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 2 -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_SHA}" \
+            -o "${RUNNER_TEMP}/source.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/source.tar.gz" --strip-components=1
+          test -f ci/phase1_single_socket_duration_audit.py
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install pinned public research transport; no exchange credentials
+        run: python -m pip install -q httpx==0.28.1 websockets==14.2
+      - name: One Binance public TLS Spot socket for 120s under owner fence
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP}/econith-owner-socket-${GITHUB_RUN_ID}"
+          python -m ci.phase1_single_socket_duration_trial \
+            --allow-public-market-data --acknowledge-not-24h-proof \
+            --duration-s 120 --output-dir "$root"
+          python -m ci.phase1_single_socket_duration_audit --root "$root" \
+            | tee "${RUNNER_TEMP}/owner_socket_audit.json"
+      - name: Stage aggregate report and SQLite audit only
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="${RUNNER_TEMP}/econith-owner-socket-aggregate"
+          root="${RUNNER_TEMP}/econith-owner-socket-${GITHUB_RUN_ID}"
+          mkdir -p "$stage"
+          if [ -f "$root/aggregate_report.json" ]; then cp "$root/aggregate_report.json" "$stage/aggregate_report.json"; fi
+          if [ -f "${RUNNER_TEMP}/owner_socket_audit.json" ]; then cp "${RUNNER_TEMP}/owner_socket_audit.json" "$stage/independent_audit.json"; fi
+      - name: Retain only non-source bounded aggregate (3 days)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: econith-phase1-owner-socket-${{ github.run_id }}
+          path: ${{ runner.temp }}/econith-owner-socket-aggregate/
+          retention-days: 3
+          if-no-files-found: warn
