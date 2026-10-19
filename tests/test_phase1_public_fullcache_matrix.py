@@ -54,13 +54,14 @@ async def test_explicit_full_cache_flags_and_per_trial_host_guard(tmp_path,monke
         reuse_receiver_connection=True,
         reuse_original_connection=True,
         diagnose_pressure=True,resource_guard=True,
+        cooperative_reader_yield=True,
     )
     assert result["passed"]==3 and result["failed"]==0
     assert len(snapshots)==6 and len(called)==3
     assert all(all(kwargs[name] is True for name in (
         "reuse_derived_connections","reuse_producer_connections",
         "reuse_receiver_connection","reuse_original_connection",
-        "diagnose_pressure",
+        "diagnose_pressure","cooperative_reader_yield",
     )) for kwargs in called)
     assert result["original_connection_reuse_experimental"]
     assert result["history_gap_free_verified"] is False
@@ -152,3 +153,12 @@ async def test_post_source_resource_denial_cannot_be_passed(tmp_path,monkeypatch
     assert result["segments"][0]["status"]=="FAILED_POST_SESSION_RESOURCE_GUARD"
     assert result["segments"][1]["status"]=="NOT_ATTEMPTED_HOST_RESOURCE_GUARD"
     assert result["segments"][2]["status"]=="NOT_ATTEMPTED_HOST_RESOURCE_GUARD"
+
+
+@pytest.mark.asyncio
+async def test_cooperative_reader_requires_full_research_profile(tmp_path):
+    root=(tmp_path/"bad_fairness").resolve()
+    root.mkdir()
+    with pytest.raises(ValueError,match="reader fairness"):
+        await operator.matrix(root,frames=1000,max_lag_ms=5000,
+                              cooperative_reader_yield=True)
