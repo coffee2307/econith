@@ -1,0 +1,111 @@
+name: ECONITH Phase 1 cloud finite 10min watch (one-shot)
+
+# Exactly one experimental push branch. No main/PR/schedule.
+on:
+  push:
+    branches:
+      - experiment/phase1-cloud-watch-20261019
+    paths:
+      - .github/workflows/phase1-cloud-watch.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: econith-finite-cloud-watch-20261019
+  cancel-in-progress: false
+
+jobs:
+  research-watch:
+    if: ${{ github.repository == 'coffee2307/econith' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      ECONITH_MODE: SIMULATION
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Download pinned GitHub commit source (no broken submodule checkout)
+        shell: bash
+        run: |
+          curl -fsSL --retry 3 -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_SHA}" \
+            -o "${RUNNER_TEMP}/econith-src.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/econith-src.tar.gz" --strip-components=1
+          test -f ci/phase1_public_spool_timed_watch.py
+          test -f ci/phase1_cloud_watch_audit.py
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Regression and crash-safety tests before network access
+        run: |
+          python -m pytest -q --tb=short \
+            tests/test_phase1_cloud_timed_watch.py \
+            tests/test_phase1_public_spool_timed_watch.py \
+            tests/test_phase1_cached_original_invariants.py \
+            tests/test_phase1_cached_receiver_invariants.py \
+            tests/test_phase1_spool_physical_kill.py
+      - name: Preflight runner memory and disk
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          from ci.phase1_cloud_resources import host_snapshot
+          root=Path(os.environ["RUNNER_TEMP"])/"econith-watch-preflight"
+          root.mkdir(parents=True,exist_ok=False)
+          state=host_snapshot(root)
+          print("RUNNER_FREE_MEMORY_GB",round(state["available_memory_bytes"]/1e9,2))
+          print("RUNNER_FREE_DISK_GB",round(state["disk_free_bytes"]/1e9,2))
+          assert state["available_memory_bytes"]>=1_500_000_000
+          assert state["disk_free_bytes"]>=2_000_000_000
+          PY
+      - name: Public research finite multisegment watch (10min target / 15min hard cap)
+        run: |
+          python -m ci.phase1_public_spool_timed_watch \
+            --allow-public-market-data \
+            --accept-experimental-spool \
+            --accept-unverified-intersegment-gaps \
+            --reuse-producer-connections \
+            --reuse-receiver-connection \
+            --reuse-original-connection \
+            --diagnose-pressure \
+            --output-dir "${{ runner.temp }}/econith-phase1-cloud-watch" \
+            --min-watch-s 600 \
+            --max-watch-s 900
+      - name: Inspect every completed source using read-only SQLite
+        if: ${{ always() }}
+        run: |
+          python -m ci.phase1_cloud_watch_audit \
+            --root "${{ runner.temp }}/econith-phase1-cloud-watch"
+      - name: Stage only public-safe aggregate reports
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          src="${{ runner.temp }}/econith-phase1-cloud-watch"
+          dest="${{ runner.temp }}/econith-watch-aggregates"
+          mkdir -p "$dest"
+          for name in watch_report.json cloud_watch_audit.json; do
+            if [ -f "$src/$name" ]; then cp "$src/$name" "$dest/$name"; fi
+          done
+          for i in $(seq -w 1 16); do
+            index=$(printf '%03d' "$((10#$i))")
+            for name in projector_lag.json spool_pressure.json stage_latency.json; do
+              if [ -f "$src/attempt_$index/$name" ]; then
+                mkdir -p "$dest/attempt_$index"
+                cp "$src/attempt_$index/$name" "$dest/attempt_$index/$name"
+              fi
+            done
+          done
+          echo "Original SQLite, raw Binance frames, HMAC keys and Windows user files were NOT uploaded."
+      - name: Preserve short-lived aggregate evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: econith-phase1-cloud-watch-${{ github.run_id }}
+          path: ${{ runner.temp }}/econith-watch-aggregates/
+          retention-days: 3
+          if-no-files-found: warn
