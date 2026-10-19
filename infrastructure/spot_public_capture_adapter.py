@@ -68,6 +68,7 @@ class OptInSpotIngressAdapter:
         queue_capacity: int = 128,
         snapshot_limit: int = 1000,
         stage_profile=None,
+        on_queue_depth: Callable[[int,int],None] | None = None,
     ) -> None:
         if not isinstance(journal, OfflineSpotCaptureJournal):
             raise ValueError("an immutable offline Spot capture journal is required")
@@ -75,6 +76,8 @@ class OptInSpotIngressAdapter:
         journal._symbol(symbol)
         if type(queue_capacity) is not int or not 2 <= queue_capacity <= 8192:
             raise ValueError("queue_capacity must be between 2 and 8192")
+        if on_queue_depth is not None and not callable(on_queue_depth):
+            raise ValueError("ingress queue diagnostic callback must be callable")
         if snapshot_limit not in (100, 500, 1000, 5000):
             raise ValueError("invalid explicit read-only depth snapshot limit")
         self.journal = journal
@@ -83,6 +86,7 @@ class OptInSpotIngressAdapter:
         self.queue_capacity = queue_capacity
         self.snapshot_limit = snapshot_limit
         self.stage_profile = stage_profile
+        self.on_queue_depth = on_queue_depth
 
     def _clock(self) -> int:
         value = self.clock()
@@ -166,8 +170,12 @@ class OptInSpotIngressAdapter:
             try:
                 fifo.put_nowait((kind, data, ts))
                 high_watermark = max(high_watermark, fifo.qsize())
+                if self.on_queue_depth is not None:
+                    self.on_queue_depth(fifo.qsize(),self.queue_capacity)
             except asyncio.QueueFull as exc:
                 high_watermark = max(high_watermark, self.queue_capacity)
+                if self.on_queue_depth is not None:
+                    self.on_queue_depth(self.queue_capacity,self.queue_capacity)
                 raise SpotTransportError(
                     "ingress backpressure overflow: abort session",
                     reason="QUEUE_BACKPRESSURE",
