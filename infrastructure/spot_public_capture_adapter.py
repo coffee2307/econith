@@ -69,6 +69,7 @@ class OptInSpotIngressAdapter:
         snapshot_limit: int = 1000,
         stage_profile=None,
         on_queue_depth: Callable[[int,int],None] | None = None,
+        on_queue_event: Callable[[str,int,int,float | None],None] | None = None,
     ) -> None:
         if not isinstance(journal, OfflineSpotCaptureJournal):
             raise ValueError("an immutable offline Spot capture journal is required")
@@ -78,6 +79,8 @@ class OptInSpotIngressAdapter:
             raise ValueError("queue_capacity must be between 2 and 8192")
         if on_queue_depth is not None and not callable(on_queue_depth):
             raise ValueError("ingress queue diagnostic callback must be callable")
+        if on_queue_event is not None and not callable(on_queue_event):
+            raise ValueError("FIFO event diagnostic callback must be callable")
         if snapshot_limit not in (100, 500, 1000, 5000):
             raise ValueError("invalid explicit read-only depth snapshot limit")
         self.journal = journal
@@ -87,6 +90,7 @@ class OptInSpotIngressAdapter:
         self.snapshot_limit = snapshot_limit
         self.stage_profile = stage_profile
         self.on_queue_depth = on_queue_depth
+        self.on_queue_event = on_queue_event
 
     def _clock(self) -> int:
         value = self.clock()
@@ -172,10 +176,14 @@ class OptInSpotIngressAdapter:
                 high_watermark = max(high_watermark, fifo.qsize())
                 if self.on_queue_depth is not None:
                     self.on_queue_depth(fifo.qsize(),self.queue_capacity)
+                if self.on_queue_event is not None:
+                    self.on_queue_event("enqueue",fifo.qsize(),self.queue_capacity,None)
             except asyncio.QueueFull as exc:
                 high_watermark = max(high_watermark, self.queue_capacity)
                 if self.on_queue_depth is not None:
                     self.on_queue_depth(self.queue_capacity,self.queue_capacity)
+                if self.on_queue_event is not None:
+                    self.on_queue_event("overflow",self.queue_capacity,self.queue_capacity,None)
                 raise SpotTransportError(
                     "ingress backpressure overflow: abort session",
                     reason="QUEUE_BACKPRESSURE",
@@ -236,6 +244,9 @@ class OptInSpotIngressAdapter:
                 while not (reader_done and (not snapshot_started or snapshot_done)):
                     kind, value, received = await fifo.get()
                     high_watermark = max(high_watermark, fifo.qsize() + 1)
+                    measured_writer_at_ns = time.monotonic_ns()
+                    if self.on_queue_event is not None and kind in ("ws","snapshot"):
+                        self.on_queue_event("dequeue",fifo.qsize(),self.queue_capacity,None)
                     if kind in ("ws_error", "snapshot_error"):
                         reason = (
                             "WS_READ_FAILED" if kind == "ws_error"
@@ -299,6 +310,9 @@ class OptInSpotIngressAdapter:
                         snapshot_done = True
                     else:
                         raise SpotTransportError("unrecognized ingest capture event")
+                    if self.on_queue_event is not None:
+                        writer_ms = (time.monotonic_ns()-measured_writer_at_ns)/1_000_000
+                        self.on_queue_event("writer_complete",fifo.qsize(),self.queue_capacity,writer_ms)
             if captured_snapshots != 1:
                 raise SpotTransportError(
                     "frame bound reached before synchronized snapshot"
