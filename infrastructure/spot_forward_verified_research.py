@@ -173,12 +173,13 @@ async def observe_forward_spot_research(
     ):
         raise PermissionError("derived connection reuse requires explicitly bounded research spool")
     if experiment_reuse_original_connection and (
-        not offline or not spooled_in_session
+        not spooled_in_session
         or not experiment_reuse_derived_connections
         or not experiment_reuse_producer_connections
         or not experiment_reuse_receiver_connection
+        or (not offline and not allow_experimental_public_spool)
     ):
-        raise PermissionError("original ledger cache is offline-only full-profile experiment")
+        raise PermissionError("original ledger cache requires explicit fully reviewed bounded spool")
     if experiment_reuse_receiver_connection and (
         not spooled_in_session or not persistent_receiver
         or not experiment_reuse_derived_connections
