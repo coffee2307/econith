@@ -16,7 +16,11 @@ from typing import Callable
 WINDOW_S = 5
 MAX_WINDOWS = 48  # 4 minutes per one finite 120s source + catchup
 _FIELDS = ("raw_committed", "cursor_advanced", "eventbus_published",
-           "checkpoints", "max_pending_originals", "max_admission_age_ms")
+           "checkpoints", "max_pending_originals", "max_admission_age_ms",
+           "max_ingress_fifo_depth", "ingress_fifo_observations",
+           "ingress_fifo_90pct_observations", "max_receiver_ack_ms",
+           "receiver_ack_observations", "receiver_ack_over_50ms",
+           "receiver_ack_over_250ms", "receiver_ack_over_500ms")
 
 
 def available_physical_memory_bytes() -> int | None:
@@ -109,6 +113,36 @@ class BoundedSpoolPressure:
             self._current["max_pending_originals"], backlog,
         )
         self._peak_backlog = max(self._peak_backlog, backlog)
+
+    def fifo(self, depth: int, capacity: int) -> None:
+        if (type(depth) is not int or type(capacity) is not int
+            or capacity <= 0 or not 0 <= depth <= capacity):
+            raise ValueError("invalid bounded ingress FIFO depth")
+        self._roll()
+        self._current["max_ingress_fifo_depth"] = max(
+            self._current["max_ingress_fifo_depth"],depth,
+        )
+        self._current["ingress_fifo_observations"] += 1
+        if depth * 10 >= capacity * 9:
+            self._current["ingress_fifo_90pct_observations"] += 1
+
+    def receiver_ack(self, duration_ms: float) -> None:
+        import math
+        if (type(duration_ms) not in (int,float)
+            or not math.isfinite(duration_ms) or duration_ms < 0):
+            raise ValueError("invalid HMAC receiver round trip")
+        self._roll()
+        value=int(math.ceil(duration_ms))
+        self._current["max_receiver_ack_ms"]=max(
+            self._current["max_receiver_ack_ms"],value,
+        )
+        self._current["receiver_ack_observations"]+=1
+        if duration_ms > 50:
+            self._current["receiver_ack_over_50ms"]+=1
+        if duration_ms > 250:
+            self._current["receiver_ack_over_250ms"]+=1
+        if duration_ms > 500:
+            self._current["receiver_ack_over_500ms"]+=1
 
     def projected(self) -> None:
         self._incr("cursor_advanced")
