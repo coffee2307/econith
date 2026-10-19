@@ -39,3 +39,50 @@ jobs:
         run: |
           python -m unittest -v tests.test_phase1_spot_multiasset_ohlcv
           python -m py_compile ci/phase1_spot_multiasset_ohlcv.py ci/phase1_spot_multiasset_ohlcv_audit.py
+  public-finite-pilot:
+    name: Opt-in guarded public Spot 600-candle capture and independent audit
+    needs: offline-admission
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Fetch pinned source commit archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 2 \
+            -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_SHA}" \
+            -o "${RUNNER_TEMP}/source.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/source.tar.gz" --strip-components=1
+          test -f ci/phase1_spot_multiasset_ohlcv.py
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Public read-only Binance 3 symbols x 2 intervals x 100 closed bars, no orders
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP}/econith-ohlcv-${GITHUB_RUN_ID}"
+          python -m ci.phase1_spot_multiasset_ohlcv \
+            --allow-public-market-data --acknowledge-finite-not-coverage \
+            --output-dir "$root"
+          python -m ci.phase1_spot_multiasset_ohlcv_audit --root "$root" \
+            | tee "${RUNNER_TEMP}/ohlcv_independent_audit.json"
+      - name: Stage aggregate-only report; raw JSON source stays private on ephemeral runner
+        if: always()
+        shell: bash
+        run: |
+          stage="${RUNNER_TEMP}/public-aggregate"
+          mkdir -p "$stage"
+          root="${RUNNER_TEMP}/econith-ohlcv-${GITHUB_RUN_ID}"
+          if [ -f "$root/aggregate_report.json" ]; then cp "$root/aggregate_report.json" "$stage/aggregate_report.json"; fi
+          if [ -f "${RUNNER_TEMP}/ohlcv_independent_audit.json" ]; then cp "${RUNNER_TEMP}/ohlcv_independent_audit.json" "$stage/independent_audit.json"; fi
+      - name: Upload no-source-bytes bounded quality evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: econith-phase1-ohlcv-finite-${{ github.run_id }}
+          path: ${{ runner.temp }}/public-aggregate/
+          retention-days: 3
+          if-no-files-found: warn
