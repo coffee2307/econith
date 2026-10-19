@@ -1,0 +1,82 @@
+name: ECONITH Phase1 single-socket wall-clock research pilot
+on:
+  push:
+    branches:
+      - 'experiment/phase1-single-socket-duration-*'
+    paths:
+      - 'ci/phase1_single_socket_duration_trial.py'
+      - 'ci/phase1_single_socket_duration_audit.py'
+      - 'tests/test_phase1_single_socket_duration.py'
+      - '.github/workflows/phase1-single-socket-duration.yml'
+  pull_request:
+    paths:
+      - 'ci/phase1_single_socket_duration_trial.py'
+      - 'ci/phase1_single_socket_duration_audit.py'
+      - 'tests/test_phase1_single_socket_duration.py'
+      - '.github/workflows/phase1-single-socket-duration.yml'
+permissions:
+  contents: read
+jobs:
+  qualify-offline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Obtain immutable source by commit SHA
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 2 -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_SHA}" \
+            -o "${RUNNER_TEMP}/source.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/source.tar.gz" --strip-components=1
+          test -f tests/test_phase1_single_socket_duration.py
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install bounded test dependencies
+        run: python -m pip install -q pytest==8.3.5 pytest-asyncio==0.26.0 httpx==0.28.1 websockets==14.2
+      - name: Deterministic source socket duration, tamper and fault gates
+        run: python -m pytest -q tests/test_phase1_single_socket_duration.py
+  public-single-socket-pilot:
+    needs: qualify-offline
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - name: Fetch pinned immutable source
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 2 -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_SHA}" \
+            -o "${RUNNER_TEMP}/source.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/source.tar.gz" --strip-components=1
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install read-only public Spot transport
+        run: python -m pip install -q httpx==0.28.1 websockets==14.2
+      - name: Observe one public TLS socket for 90 seconds; no order execution
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP}/econith-one-socket-${GITHUB_RUN_ID}"
+          python -m ci.phase1_single_socket_duration_trial \
+            --allow-public-market-data --acknowledge-not-24h-proof \
+            --duration-s 90 --output-dir "$root"
+          python -m ci.phase1_single_socket_duration_audit --root "$root" \
+            | tee "${RUNNER_TEMP}/one_socket_audit.json"
+      - name: Publish only bounded non-source metadata
+        if: always()
+        run: |
+          set -euo pipefail
+          stage="${RUNNER_TEMP}/one-socket-aggregate"
+          root="${RUNNER_TEMP}/econith-one-socket-${GITHUB_RUN_ID}"
+          mkdir -p "$stage"
+          if [ -f "$root/aggregate_report.json" ]; then cp "$root/aggregate_report.json" "$stage/aggregate_report.json"; fi
+          if [ -f "${RUNNER_TEMP}/one_socket_audit.json" ]; then cp "${RUNNER_TEMP}/one_socket_audit.json" "$stage/independent_audit.json"; fi
+      - name: Upload aggregate-only proof; never raw SQLite
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: econith-phase1-one-socket-${{ github.run_id }}
+          path: ${{ runner.temp }}/one-socket-aggregate/
+          retention-days: 3
+          if-no-files-found: warn
