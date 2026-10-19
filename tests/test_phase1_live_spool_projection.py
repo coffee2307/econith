@@ -37,10 +37,17 @@ async def test_spool_projects_before_source_closes_and_seals_consistently(tmp_pa
         while time.monotonic()<deadline:
             db=root/"independent_receiver.sqlite"
             if db.is_file():
-                with sqlite3.connect(db) as con:
-                    count=con.execute(
-                        "SELECT COUNT(*) FROM offline_independent_projection_receipts"
-                    ).fetchone()[0]
+                try:
+                    with sqlite3.connect(db) as con:
+                        count=con.execute(
+                            "SELECT COUNT(*) FROM offline_independent_projection_receipts"
+                        ).fetchone()[0]
+                except sqlite3.OperationalError as exc:
+                    # A child creates its DB path before its schema exists.
+                    # Only that initialization race may be retried.
+                    if "no such table: offline_independent_projection_receipts" not in str(exc):
+                        raise
+                    count=0
                 if count>=3:
                     with sqlite3.connect(root/"original.sqlite") as con:
                         assert con.execute(
