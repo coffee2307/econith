@@ -79,7 +79,12 @@ def test_invalid_fifo_diagnostic_sample_refused(tmp_path,action,depth,capacity,d
 
 @pytest.mark.asyncio
 async def test_fast_burst_overflows_without_source_acceptance(tmp_path):
-    from tests.test_spot_public_capture_adapter import raw, trade
+    import time
+    def raw_trade(i):
+        now=time.time_ns()//1_000_000
+        trade={"e":"aggTrade","s":"BTCUSDT","E":now,"T":now-10,
+               "a":i,"f":i,"l":i,"p":"100","q":"0.2","m":False}
+        return json.dumps({"stream":"btcusdt@aggTrade","data":trade}).encode()
     root=(tmp_path/"overflow").resolve()
     root.mkdir()
     journal=OfflineSpotCaptureJournal(
@@ -96,7 +101,7 @@ async def test_fast_burst_overflows_without_source_acceptance(tmp_path):
 
     async def immediate_source():
         for i in range(100,160):
-            yield raw(trade(i))
+            yield raw_trade(i)
 
     async def no_rest(*_args):
         raise AssertionError("REST should not run without depth")
