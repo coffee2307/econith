@@ -24,7 +24,8 @@ async def run(root:Path,*,frames:int,timeout_s:float,max_lag_ms:int,
               reuse_derived_connections:bool=False,
               diagnose_pressure:bool=False,
               reuse_producer_connections:bool=False,
-              reuse_receiver_connection:bool=False)->dict:
+              reuse_receiver_connection:bool=False,
+              reuse_original_connection:bool=False)->dict:
     await measure_public_clock(
         max_abs_offset_ms=3000,max_rtt_ms=2000,
     )
@@ -40,6 +41,7 @@ async def run(root:Path,*,frames:int,timeout_s:float,max_lag_ms:int,
         diagnose_pressure=diagnose_pressure,
         experiment_reuse_producer_connections=reuse_producer_connections,
         experiment_reuse_receiver_connection=reuse_receiver_connection,
+        experiment_reuse_original_connection=reuse_original_connection,
     )
     if (not result.session_complete or not result.publication_in_session
         or not result.all_receipts_independent or result.orders_submitted
@@ -61,6 +63,7 @@ async def run(root:Path,*,frames:int,timeout_s:float,max_lag_ms:int,
         "pressure_diagnostic_opt_in":diagnose_pressure,
         "producer_connection_reuse_experimental":reuse_producer_connections,
         "receiver_connection_reuse_experimental":reuse_receiver_connection,
+        "original_connection_reuse_experimental":reuse_original_connection,
     }
 
 
@@ -68,6 +71,8 @@ def main(argv:list[str]|None=None)->int:
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--allow-public-market-data",action="store_true")
     p.add_argument("--accept-experimental-spool",action="store_true")
+    p.add_argument("--reuse-original-connection",action="store_true",
+                   help="research-only opt-in raw+intent WAL/FULL capture DB cache")
     p.add_argument("--reuse-receiver-connection",action="store_true",
                    help="research-only: keep receiver child SQLite WAL/FULL connection per session")
     p.add_argument("--reuse-producer-connections",action="store_true",
@@ -83,6 +88,10 @@ def main(argv:list[str]|None=None)->int:
     args=p.parse_args(argv)
     if (not args.allow_public_market_data
         or not args.accept_experimental_spool
+        or (args.reuse_original_connection and not (
+            args.reuse_receiver_connection
+            and args.reuse_producer_connections
+            and args.reuse_derived_connections))
         or (args.reuse_receiver_connection and not (
             args.reuse_producer_connections and args.reuse_derived_connections))
         or (args.reuse_producer_connections and not args.reuse_derived_connections)
@@ -100,7 +109,8 @@ def main(argv:list[str]|None=None)->int:
                                reuse_derived_connections=args.reuse_derived_connections,
                                diagnose_pressure=args.diagnose_pressure,
                                reuse_producer_connections=args.reuse_producer_connections,
-                               reuse_receiver_connection=args.reuse_receiver_connection))
+                               reuse_receiver_connection=args.reuse_receiver_connection,
+                               reuse_original_connection=args.reuse_original_connection))
     except Exception as exc:
         print(json.dumps({
             "verdict":"FAILED_OR_QUARANTINED_SOURCE",
