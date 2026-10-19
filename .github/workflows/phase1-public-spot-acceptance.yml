@@ -1,0 +1,51 @@
+name: Phase 1 public Spot acceptance (manual only)
+
+# This workflow is NEVER triggered on push, pull_request, schedule or deploy.
+# GitHub only registers workflow_dispatch after this workflow exists on
+# default branch. While it is draft-only, use the offline CI and local CLI.
+on:
+  workflow_dispatch:
+    inputs:
+      allow_public_market_data:
+        description: "I authorize a short read-only public Binance Spot capture; no keys or orders"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  public-spot-acceptance:
+    if: ${{ inputs.allow_public_market_data == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout selected review branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned research dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Public market-data-only Binance WSS/REST acceptance
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python -m ci.phase1_public_spot_acceptance \
+            --allow-public-market-data \
+            --output-dir "${{ runner.temp }}/econith-phase1-public" \
+            --symbol BTCUSDT \
+            --max-frames 500 \
+            --timeout-s 45 \
+            --max-attempts 2
+      - name: Preserve private audit evidence even after a failed check
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-public-spot-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/econith-phase1-public/
+          retention-days: 3
+          if-no-files-found: warn

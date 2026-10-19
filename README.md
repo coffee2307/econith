@@ -1068,3 +1068,42 @@ Trọng tâm tiếp theo không phải “viết lại kiến trúc”, mà là:
 6. **chỉ sau đó** mới cân nhắc live keys và `FULLY_AUTONOMOUS`.
 
 Xem **§0 Báo cáo trạng thái** làm nguồn sự thật vận hành hàng ngày; xem `KHKT_Evaluation/final_report/EXECUTIVE_SUMMARY.md` cho claim khoa học.
+
+---
+
+## Repository governance / Phase 0 (2026-10-17)
+
+- [Domain ownership and migration map](docs/architecture/REPOSITORY_DOMAIN_MAP.md):
+  Quant, World, Data, CI, execution and safety boundaries.
+- [Full repository hygiene audit](docs/audits/PHASE0_REPOSITORY_HYGIENE_20261017.md):
+  tracked dependency cleanup, duplicate/empty file review, protected
+  scientific evidence, outstanding blockers.
+- [Safe read-only Git inventory](ci/repo_hygiene_check.py):
+  `python -m ci.repo_hygiene_check --root . --enforce`.
+- `node_modules/` is no longer checked into Git; restore root development
+  packages with `npm ci` (and use `cd dashboard && npm ci` for the UI).
+- Do NOT treat `REALITY` as permission to place live orders. Quant execution
+  remains research-/paper-only until independently approved. The GitHub
+  Actions, full E2E and legal gates must pass first.
+
+
+### Safe local startup with optional Social (2026-10-17)
+
+`npm run setup` and `npm run dev` use the root npm lockfile and never
+terminate another application simply because it occupies ports 3001 or 5001.
+`econith_social` is an unresolved optional Git gitlink in this checkout:
+if its `package.json` and `dev` command are absent, development runs only
+the Docker Core stack, with an explicit warning rather than crashing or
+claiming Social was initialized.
+
+When an authorized, complete `econith_social` checkout exists, both
+services can start. To require the sidecar and **fail safely** if it is absent,
+set `ECONITH_REQUIRE_SOCIAL=1` before `npm run setup` or `npm run dev`.
+An occupied port is reported by Docker or the application, not forcibly
+cleared by killing its process. No real-capital trading is enabled by either
+script.
+
+Checks: `node --test tests/node/runtime_services.test.mjs` (pure, no
+Docker/exchange launch); Docker Compose syntax is separately checked in CI,
+and full production image builds are maintained in
+`.github/workflows/container-images.yml`.

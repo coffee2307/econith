@@ -6,10 +6,11 @@ legacy ``ExchangeBridge`` (mock TWAP UI telemetry) with the advanced
 
 The Sentinel-gated ``ai.signal -> order.intent`` chain is unchanged. This bridge
 subscribes to the authoritative ``order.intent`` topic and routes execution
-purely on the active :class:`~core.mode.QuantMode`:
+on the active :class:`~core.mode.QuantMode`:
 
-    REALITY     -> CCXTBinanceBridge live Binance session; publishes ``quant.fill``
-    SIMULATION  -> CCXTBinanceBridge synthetic fills;       publishes ``quant.fill``
+    REALITY     -> intentionally BLOCKED until durable order admission and
+                   broker reconciliation are independently certified
+    SIMULATION  -> ABIDES/CCXT synthetic fills; publishes ``quant.fill``
 
 In both modes the cockpit flight-log is fed from a single, authoritative
 ``quant.fill`` stream, eliminating the previous ledger duplication. The legacy
@@ -128,6 +129,20 @@ class QuantExecutionBridge:
                     f"DROP {payload.symbol} {payload.side.value} — {gate.reason} "
                     f"(net={gate.expected_net:.6f}, fees={gate.expected_fees:.6f})"
                 ),
+            )
+            return
+
+        # Independent hard deny until a durable, broker-reconciled admission
+        # service has been integrated and formally approved. Even future
+        # verified OOS edge forecasts must not silently unlock exchange orders.
+        if current_mode() is QuantMode.REALITY:
+            await self._bus.publish(
+                "order.rejected",
+                symbol=payload.symbol,
+                side=payload.side.value,
+                quantity=payload.quantity,
+                reason="durable_order_admission_not_certified",
+                gate={} if gate is None else gate.as_dict(),
             )
             return
 

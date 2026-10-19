@@ -1,0 +1,33 @@
+name: world-calibration
+
+on:
+  workflow_dispatch:
+  # Weekly rigorous synthetic calibration, off the quick PR critical path.
+  # GitHub schedule runs on the default branch after this workflow is merged.
+  schedule:
+    - cron: "17 2 * * 1"
+
+jobs:
+  full-world-research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install World calibration dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy==1.26.4 pandas==2.2.3 pyarrow==18.1.0
+      - name: Full World skew calibration on synthetic research panel
+        run: |
+          python scripts/calibrate_world.py --output /tmp/econith-world-full/calibration.json
+      - name: Check generated calibration artifact
+        run: |
+          python -c "import json; from pathlib import Path; p=Path('/tmp/econith-world-full/calibration.json'); d=json.loads(p.read_text()); assert len(d['features']) >= 3; assert d['meta']['dt_policy'] == '1/252'"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: world-calibration-coefficients
+          path: /tmp/econith-world-full/calibration.json
+          retention-days: 14

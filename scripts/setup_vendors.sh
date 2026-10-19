@@ -2,9 +2,9 @@
 #
 # ECONITH :: scripts/setup_vendors.sh
 #
-# Lean vendor puller. For each vendor in vendors/manifest.json it performs a
+# Lean vendor puller. For each vendor in archive/vendors/manifest.json it performs a
 # blob-less, sparse, pinned checkout of ONLY the core-logic subtrees (never the
-# full repo). Upstream source lands in vendors/<name>/ and stays untracked.
+# full repo). Upstream source lands in archive/vendors/<name>/ and stays untracked.
 #
 #   bash scripts/setup_vendors.sh                # pull every P0 vendor
 #   bash scripts/setup_vendors.sh openbb qlib    # pull a subset by name
@@ -14,7 +14,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VENDORS="$ROOT/vendors"
+VENDORS="$ROOT/archive/vendors"
 MANIFEST="$VENDORS/manifest.json"
 STRICT="${STRICT:-0}"
 
@@ -64,11 +64,16 @@ pull_vendor() {
     return 0
   fi
 
+  if [[ ! "$commit" =~ ^[0-9a-f]{40}$ ]]; then
+    die "$name: commit must be a full 40-character lowercase hex SHA"
+  fi
   log "== $name =="
   if [ -d "$dest/.git" ]; then
     log "$name: repo present, syncing to pinned commit"
   else
-    rm -rf "$dest"
+    if [ -e "$dest" ]; then
+      die "$name: destination exists but is not a Git checkout; refusing destructive overwrite: $dest"
+    fi
     mkdir -p "$dest"
     git -C "$dest" init -q
     git -C "$dest" remote add origin "$repo"

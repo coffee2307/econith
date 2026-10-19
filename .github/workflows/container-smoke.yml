@@ -1,0 +1,298 @@
+name: container-smoke
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+
+on:
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - "requirements*.txt"
+      - "main.py"
+      - "core/**"
+      - "api/**"
+      - "bridges/**"
+      - "quant/**"
+      - "config/**"
+      - "sentinel/**"
+      - ".github/workflows/container-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-backend-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Configure offline synthetic CI environment (no exchange credentials)
+        run: |
+          cat > .env <<'EOF'
+          APP_ENV=development
+          API_AUTH_ENABLED=true
+          API_KEYS=CI_DUMMY_KEY_FOR_DISPOSABLE_RUNNER
+          BINANCE_EXECUTION_ENV=demo
+          BINANCE_MARKET_DATA_MODE=mock
+          BINANCE_CCXT_DEFAULT_TYPE=spot
+          BINANCE_DEMO_API_KEY=
+          BINANCE_DEMO_API_SECRET=
+          BINANCE_TRADE_API_KEY=
+          BINANCE_TRADE_API_SECRET=
+          WORLD_SIMULATION_DEFAULT=false
+          HYPOTHESIS_USE_LLM=false
+          EOF
+      - name: Start only databases and backend, no social or exchange accounts
+        run: docker compose -f docker-compose.yml up --build -d backend_core
+      - name: Assert responsive backend health and synthetic data provenance
+        run: |
+          python - <<'PY'
+          import json
+          import time
+          import urllib.error
+          import urllib.request
+
+          url = "http://127.0.0.1:8000/api/v1/health"
+          deadline = time.monotonic() + 120
+          last_error = None
+          while time.monotonic() < deadline:
+              try:
+                  with urllib.request.urlopen(url, timeout=4) as response:
+                      data = json.load(response)
+                  assert data.get("status") == "ok", data
+                  assert data.get("mock") is True, data
+                  source = (data.get("market_data") or {}).get("source")
+                  assert source == "synthetic_mock", data
+                  print("SAFE_BACKEND_SMOKE_PASS", data["status"], source)
+                  break
+              except (OSError, ValueError) as exc:
+                  last_error = exc
+                  time.sleep(2)
+          else:
+              raise SystemExit(f"backend startup or health assertion failed: {last_error}")
+          PY
+      - name: Verify denied control command is audited and state DB is writable
+        run: |
+          python - <<'PY'
+          import urllib.error
+          import urllib.request
+          routes = (
+              "/api/v1/mode",
+              "/api/v1/runtime/pause",
+              "/api/v1/quant/simulation/reset",
+              "/api/v1/world/reset",
+          )
+          for route in routes:
+              req = urllib.request.Request(
+                  "http://127.0.0.1:8000" + route,
+                  data=b'{}',
+                  headers={"Content-Type": "application/json"},
+                  method="POST",
+              )
+              try:
+                  urllib.request.urlopen(req, timeout=8)
+              except urllib.error.HTTPError as exc:
+                  assert exc.code == 401, (
+                      f"unprotected mutation {route}: HTTP {exc.code}"
+                  )
+              else:
+                  raise SystemExit(f"auth gate accepted anonymous mutation {route}")
+          print("UNAUTHORIZED_MUTATIONS_REJECTED", len(routes))
+          PY
+          docker compose -f docker-compose.yml exec -T backend_core python - <<'PY'
+          import json
+          import sqlite3
+          from pathlib import Path
+
+          audit = Path("/app/logs/econith_audit.log")
+          state = Path("/app/runtime-state/econith.sqlite")
+          trade_state = Path("/app/runtime-state/trades.sqlite")
+          assert audit.is_file() and state.is_file() and trade_state.is_file(), (
+              audit, state, trade_state
+          )
+          entries = [json.loads(line) for line in audit.read_text(encoding="utf-8").splitlines()]
+          for route in (
+              "/api/v1/mode",
+              "/api/v1/runtime/pause",
+              "/api/v1/quant/simulation/reset",
+              "/api/v1/world/reset",
+          ):
+              assert any(row.get("decision") == "DENY" and row.get("path") == route
+                         for row in entries), f"missing durable DENY audit {route}"
+          for file in (state, trade_state):
+              with sqlite3.connect(file) as connection:
+                  assert connection.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+          print("DURABLE_AUDIT_AND_BOTH_SQLITE_JOURNALS_PASS")
+          PY
+      - name: State and audit data survive backend container restart
+        run: |
+          docker compose -f docker-compose.yml exec -T backend_core python - <<'PY'
+          import sqlite3
+          from pathlib import Path
+          for name in ("econith.sqlite", "trades.sqlite"):
+              p = Path("/app/runtime-state") / name
+              with sqlite3.connect(p) as db:
+                  db.execute(
+                      "CREATE TABLE IF NOT EXISTS phase0_persistence_probe "
+                      "(key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+                  )
+                  db.execute(
+                      "INSERT OR REPLACE INTO phase0_persistence_probe VALUES (?, ?)",
+                      ("runner-check", "preserve-across-restart"),
+                  )
+          print("PERSISTENCE_PROBE_WRITTEN")
+          PY
+          docker compose -f docker-compose.yml restart backend_core
+          python - <<'PY'
+          import json
+          import time
+          import urllib.request
+          deadline = time.monotonic() + 90
+          while time.monotonic() < deadline:
+              try:
+                  with urllib.request.urlopen(
+                      "http://127.0.0.1:8000/api/v1/health", timeout=5
+                  ) as response:
+                      payload = json.load(response)
+                  assert payload["status"] == "ok"
+                  assert payload["mock"] is True
+                  print("BACKEND_RESTART_HEALTH_PASS")
+                  break
+              except (OSError, ValueError, AssertionError):
+                  time.sleep(2)
+          else:
+              raise SystemExit("backend failed health after stateful restart")
+          PY
+          docker compose -f docker-compose.yml exec -T backend_core python - <<'PY'
+          import json
+          import sqlite3
+          from pathlib import Path
+          for name in ("econith.sqlite", "trades.sqlite"):
+              with sqlite3.connect(Path("/app/runtime-state") / name) as db:
+                  value = db.execute(
+                      "SELECT value FROM phase0_persistence_probe WHERE key = ?",
+                      ("runner-check",),
+                  ).fetchone()
+                  assert value == ("preserve-across-restart",), (name, value)
+          entries = [
+              json.loads(line)
+              for line in Path("/app/logs/econith_audit.log").read_text(
+                  encoding="utf-8"
+              ).splitlines()
+          ]
+          assert any(row.get("decision") == "DENY" for row in entries)
+          print("RESTART_PERSISTENCE_TWO_JOURNALS_AND_AUDIT_PASS")
+          PY
+      - name: PostgreSQL full logical backup and isolated restore drill
+        run: |
+          # Entirely disposable CI postgres; no secrets from GitHub or an actual DB.
+          # Restore into a NEW database rather than overwrite the source.
+          docker compose -f docker-compose.yml exec -T postgres psql \
+            -X -v ON_ERROR_STOP=1 -U econith -d econith <<'SQL'
+          CREATE TABLE IF NOT EXISTS public.phase05_restore_probe (
+            id INTEGER PRIMARY KEY,
+            payload TEXT NOT NULL
+          );
+          INSERT INTO public.phase05_restore_probe (id, payload)
+          VALUES (17, 'synthetic-restore-marker')
+          ON CONFLICT (id) DO UPDATE SET payload = EXCLUDED.payload;
+          SQL
+          dump_file="${RUNNER_TEMP}/econith-disposable-postgres.dump"
+          # -Fc is PostgreSQL's restorable custom format (all DB tables/schema).
+          docker compose -f docker-compose.yml exec -T postgres pg_dump \
+            -U econith -d econith --format=custom --no-owner --no-acl \
+            > "$dump_file"
+          test -s "$dump_file"
+          docker compose -f docker-compose.yml exec -T postgres createdb \
+            -U econith econith_phase05_restored
+          docker compose -f docker-compose.yml exec -T postgres pg_restore \
+            -U econith -d econith_phase05_restored \
+            --no-owner --no-acl --exit-on-error < "$dump_file"
+          restored="$(docker compose -f docker-compose.yml exec -T postgres \
+            psql -X -A -t -v ON_ERROR_STOP=1 -U econith \
+            -d econith_phase05_restored \
+            -c "SELECT payload FROM public.phase05_restore_probe WHERE id=17")"
+          test "$restored" = "synthetic-restore-marker"
+          # Source table is still present; the restore never replaced production data.
+          source_value="$(docker compose -f docker-compose.yml exec -T postgres \
+            psql -X -A -t -v ON_ERROR_STOP=1 -U econith \
+            -d econith \
+            -c "SELECT payload FROM public.phase05_restore_probe WHERE id=17")"
+          test "$source_value" = "$restored"
+          docker compose -f docker-compose.yml exec -T postgres dropdb \
+            -U econith econith_phase05_restored
+          rm -f "$dump_file"
+          echo POSTGRES_FULL_LOGICAL_BACKUP_ISOLATED_RESTORE_PASS
+      - name: SIGKILL backend crash must preserve committed journals and audit
+        run: |
+          # Distinct from a graceful 'compose restart': terminate the process
+          # abruptly, then explicitly re-create the backend without deps.
+          docker compose -f docker-compose.yml kill -s SIGKILL backend_core
+          docker compose -f docker-compose.yml up -d --no-deps backend_core
+          python - <<'PY'
+          import json
+          import time
+          import urllib.request
+          end = time.monotonic() + 90
+          while time.monotonic() < end:
+              try:
+                  with urllib.request.urlopen(
+                      "http://127.0.0.1:8000/api/v1/health", timeout=5
+                  ) as response:
+                      status = json.load(response)
+                  assert status["status"] == "ok", status
+                  assert status["mock"] is True, status
+                  print("SIGKILL_BACKEND_RESTART_HEALTH_PASS")
+                  break
+              except (OSError, AssertionError, ValueError):
+                  time.sleep(2)
+          else:
+              raise SystemExit("backend failed to recover after SIGKILL")
+          PY
+          docker compose -f docker-compose.yml exec -T backend_core python - <<'PY'
+          import json
+          import sqlite3
+          from pathlib import Path
+          for name in ("econith.sqlite", "trades.sqlite"):
+              with sqlite3.connect(Path("/app/runtime-state") / name) as db:
+                  assert db.execute("PRAGMA quick_check").fetchone()[0] == "ok"
+                  marker = db.execute(
+                      "SELECT value FROM phase0_persistence_probe WHERE key=?",
+                      ("runner-check",),
+                  ).fetchone()
+                  assert marker == ("preserve-across-restart",), (name, marker)
+          lines = Path("/app/logs/econith_audit.log").read_text(
+              encoding="utf-8"
+          ).splitlines()
+          assert any(json.loads(line).get("decision") == "DENY" for line in lines)
+          print("SIGKILL_COMMITTED_STATE_AND_AUDIT_RECOVERED_PASS")
+          PY
+      - name: Production database outage must fail closed, never fork to SQLite
+        run: |
+          docker compose -f docker-compose.yml run --rm --no-deps -T \
+            -e APP_ENV=production \
+            -e DATABASE_URL=postgresql://ci:unusable@127.0.0.1:1/econith \
+            --entrypoint python backend_core -c '
+          import asyncio
+          from config.database import init_database, is_fallback
+          try:
+              asyncio.run(init_database())
+          except RuntimeError as exc:
+              assert str(exc) == "Primary PostgreSQL database unavailable"
+              assert is_fallback() is False
+              print("PRODUCTION_DB_OUTAGE_FAIL_CLOSED_PASS")
+          else:
+              raise AssertionError("production accepted an unavailable database")
+          '
+      - name: Collect sanitized container diagnostics on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml ps && docker compose -f docker-compose.yml logs --tail=80 backend_core
+      - name: Shut down disposable Docker stack
+        if: always()
+        run: docker compose -f docker-compose.yml down -v --remove-orphans

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import infrastructure.websocket.streamer as streamer_module
 from infrastructure.websocket.streamer import BinanceWebSocketStreamer
+from core.mode import QuantMode
 
 
 class _Bus:
@@ -23,6 +24,7 @@ def _environment(mode: str = "live") -> SimpleNamespace:
 
 
 def test_public_binance_feed_is_default_without_credentials(monkeypatch) -> None:
+    monkeypatch.setattr(streamer_module, "current_mode", lambda: QuantMode.REALITY)
     monkeypatch.setattr(streamer_module, "get_environment", lambda: _environment())
     streamer = BinanceWebSocketStreamer(_Bus(), SimpleNamespace(running=True, multiplier=1))
 
@@ -45,6 +47,7 @@ def test_mock_feed_requires_explicit_configuration(monkeypatch) -> None:
 
 
 def test_published_frames_include_source_provenance(monkeypatch) -> None:
+    monkeypatch.setattr(streamer_module, "current_mode", lambda: QuantMode.REALITY)
     monkeypatch.setattr(streamer_module, "get_environment", lambda: _environment())
     bus = _Bus()
     streamer = BinanceWebSocketStreamer(bus, SimpleNamespace(running=True, multiplier=1))
@@ -53,3 +56,15 @@ def test_published_frames_include_source_provenance(monkeypatch) -> None:
 
     assert bus.events[-1][1]["source"] == "binance_public"
     assert streamer.status()["connected"] is True
+
+
+def test_public_binance_feed_is_labeled_separately_during_simulation(monkeypatch) -> None:
+    """Do not misrepresent real prices as capital-bearing execution."""
+    monkeypatch.setattr(streamer_module, "get_environment", lambda: _environment())
+    monkeypatch.setattr(streamer_module, "current_mode", lambda: QuantMode.SIMULATION)
+    bus = _Bus()
+    streamer = BinanceWebSocketStreamer(bus, SimpleNamespace(running=True, multiplier=1))
+    assert streamer.is_mock is False
+    assert streamer.data_source == "binance_public_simulation"
+    asyncio.run(streamer._emit("md.aggTrade", {"p": "85000.00"}))
+    assert bus.events[-1][1]["source"] == "binance_public_simulation"

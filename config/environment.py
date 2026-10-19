@@ -102,6 +102,14 @@ class Environment(BaseSettings):
         default="sqlite:///./datasets/econith.sqlite", alias="DATABASE_URL"
     )
     redis_url: str = Field(default="redis://redis:6379/0", alias="REDIS_URL")
+    # StateRecorder has its own synchronous SQLite journal, independent of the
+    # configured SQLAlchemy primary database. Keep legacy default outside Docker.
+    state_recorder_db_path: str = Field(
+        default="datasets/econith.sqlite", alias="STATE_RECORDER_DB_PATH"
+    )
+    trade_state_db_path: str = Field(
+        default="datasets/trades.sqlite", alias="TRADE_STATE_DB_PATH"
+    )
 
     # --- Sentinel risk governance ----------------------------------------
     # Tunable thresholds. Defaults are strict (production). For local dev

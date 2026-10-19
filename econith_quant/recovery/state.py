@@ -12,6 +12,7 @@ import logging
 import time
 
 from infrastructure.storage.sqlite import SQLiteStore
+from config.environment import get_environment
 
 logger = logging.getLogger("econith.quant.recovery.state")
 
@@ -20,7 +21,7 @@ class TradeStateStore:
     """SQLite-backed ledger of order intents and lifecycle transitions."""
 
     def __init__(self, store: SQLiteStore | None = None) -> None:
-        self._store = store or SQLiteStore(path="datasets/trades.sqlite")
+        self._store = store if store is not None else SQLiteStore(path=get_environment().trade_state_db_path)
         self._init_schema()
 
     def _init_schema(self) -> None:

@@ -157,6 +157,29 @@ def _label_one_symbol(sym_df, cfg: RewardConfig, horizons: dict[str, int]):
     return sym_df
 
 
+def _purge_train_overlap(train, source_ts, first_holdout_ms, horizons):
+    """Drop train rows whose *actual observed* label endpoint reaches holdout.
+
+    Using only ts + horizon is insufficient on sparse feeds: searchsorted may
+    select an event much later than the nominal horizon. Check ALL finite
+    forward labels (not just the shortest/primary one) and the earliest global
+    holdout timestamp so asynchronous assets cannot train on test-era prices.
+    No endpoint columns enter the model feature store.
+    """
+    timestamps = train["ts_ms"].to_numpy(dtype="int64")
+    keep = np.ones(len(train), dtype=bool)
+    for column, horizon_ms in horizons.items():
+        observed = np.isfinite(train[column].to_numpy(dtype="float64"))
+        indexes = np.searchsorted(source_ts, timestamps + horizon_ms, side="left")
+        before_test = np.zeros(len(train), dtype=bool)
+        present = indexes < len(source_ts)
+        before_test[present] = source_ts[indexes[present]] < first_holdout_ms
+        # Missing long-horizon labels remain missing. Their actual targets do
+        # not exist and therefore cannot introduce future price information.
+        keep &= ~observed | before_test
+    return train.iloc[np.flatnonzero(keep)].copy()
+
+
 def label_dataset(
     input_dir: str,
     output_path: str,
@@ -172,6 +195,13 @@ def label_dataset(
             f"unknown --horizon-preset {horizon_preset!r}; "
             f"choose from {sorted(HORIZON_PRESETS)}"
         )
+    if (
+        not isinstance(holdout_ratio, (int, float))
+        or isinstance(holdout_ratio, bool)
+        or not np.isfinite(holdout_ratio)
+        or not 0.0 < holdout_ratio < 1.0
+    ):
+        raise ValueError("holdout_ratio must be finite and strictly between 0 and 1")
     horizons = HORIZON_PRESETS[horizon_preset]
     primary = next(iter(horizons))
 
@@ -201,24 +231,55 @@ def label_dataset(
     train_parts: list = []
     holdout_parts: list = []
     per_symbol_stats: dict[str, int] = {}
+    pending: list = []
 
-    # CRITICAL FIX: isolate every asset. No global cross-symbol sort ever runs.
+    # Label independently per asset. Determine the earliest timestamp that ANY
+    # asset enters the holdout before allowing rows into training.
     for symbol, group in df.groupby("symbol", sort=True):
+        source_ms = np.sort(group["ts_ms"].to_numpy(dtype="int64"))
+        if (
+            len(source_ms) == 0
+            or np.any(source_ms <= 0)
+            or np.any(np.diff(source_ms) <= 0)
+        ):
+            raise ValueError(f"{symbol}: source timestamps must be positive and unique")
         labeled = _label_one_symbol(group.copy(), cfg, horizons)
         if labeled is None:
             logger.warning("skipping %s -- insufficient forward-window history", symbol)
             continue
-        # Per-symbol chronological split (never shuffle -> no look-ahead leak).
         split = int(len(labeled) * (1.0 - holdout_ratio))
-        train_parts.append(labeled.iloc[:split])
-        holdout_parts.append(labeled.iloc[split:])
+        if not 0 < split < len(labeled):
+            raise ValueError(f"{symbol}: insufficient rows for train/holdout split")
+        pending.append((
+            symbol, labeled.iloc[:split].copy(), labeled.iloc[split:].copy(),
+            source_ms, len(labeled),
+        ))
         per_symbol_stats[str(symbol)] = len(labeled)
-        logger.info("labeled %s: %d rows (%d train / %d holdout)",
-                    symbol, len(labeled), split, len(labeled) - split)
 
-    if not train_parts:
+    if not pending:
         raise SystemExit(
             "no symbol had enough forward-window history -- collect longer sessions"
+        )
+
+    first_holdout_ms = min(
+        int(test["ts_ms"].iloc[0]) for _, _, test, _, _ in pending
+    )
+    purged_train_rows = 0
+    for symbol, before_purge, holdout, source_ms, labeled_rows in pending:
+        train = _purge_train_overlap(
+            before_purge, source_ms, first_holdout_ms, horizons
+        )
+        removed = len(before_purge) - len(train)
+        purged_train_rows += removed
+        if train.empty:
+            raise ValueError(
+                f"{symbol}: no causally eligible training rows after holdout purge"
+            )
+        train_parts.append(train)
+        holdout_parts.append(holdout)
+        logger.info(
+            "labeled %s: %d rows (%d train / %d purged / %d holdout)",
+            symbol, labeled_rows, len(train), removed, len(holdout),
         )
 
     # Re-assemble. Global sort here is SAFE: labels are already computed per
@@ -244,6 +305,8 @@ def label_dataset(
         "symbols": per_symbol_stats,
         "train_rows": len(train_df),
         "holdout_rows": len(holdout_df),
+        "purged_train_rows": purged_train_rows,
+        "first_holdout_ts_ms": first_holdout_ms,
         "labeled_output": str(out),
         "holdout_output": str(holdout_path),
         "horizon_preset": horizon_preset,

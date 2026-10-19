@@ -1,0 +1,416 @@
+"""Finite multi-session forward research endurance controls (offline fixtures)."""
+from __future__ import annotations
+
+import asyncio
+import sqlite3
+
+import pytest
+
+from infrastructure.spot_forward_supervisor import (
+    ForwardSupervisorError, _verify_one, run_forward_research_supervisor,
+)
+from infrastructure.spot_forward_verified_research import observe_forward_spot_research
+from tests.test_spot_forward_verified_research import _NOW, snapshot, source
+
+
+async def genuine_fixture(root, session_id, iteration):
+    # Actual immutable source -> post-COMMIT shadow -> HMAC child ->
+    # independently owned consumer SQLite chain, never a mocked success.
+    return await observe_forward_spot_research(
+        output_dir=root,session_id=session_id,
+        stream=source(_NOW()),snapshot_fetch=snapshot,
+        max_frames=20,timeout_s=20,
+    )
+
+
+def _db(root):
+    return sqlite3.connect(root/"forward_supervisor.sqlite")
+
+
+@pytest.mark.asyncio
+async def test_failed_socket_opens_outage_next_fresh_session_restores_current_only(tmp_path):
+    root=(tmp_path/"research_trials").resolve()
+    async def sometimes_fails(directory, sid, attempt):
+        if attempt == 2:
+            raise ConnectionResetError("forced disconnect with no independent ACK")
+        return await genuine_fixture(directory,sid,attempt)
+
+    state=await run_forward_research_supervisor(
+        output_dir=root,allow_public_network=True,attempts=3,
+        max_frames=20,timeout_s=20,capture_factory=sometimes_fails,
+    )
+    assert state.mode=="SIMULATION"
+    assert state.state=="FINISHED_BOUNDED_RESEARCH"
+    assert state.attempts==3
+    assert state.accepted_sessions==2
+    assert state.failed_sessions==1
+    assert state.incomplete_attempts==0
+    assert state.outage_windows==1
+    assert state.open_outages==0
+    assert state.total_receiver_receipts==8
+    assert state.total_originals==12
+    assert state.max_queue_high_watermark>0
+    assert state.peak_recorded_storage_bytes>0
+    assert not state.history_continuity_verified
+    assert not state.historical_gaps_recovered
+    assert not state.continuous_live_market
+    assert not state.execution_started
+    assert state.orders_submitted==0
+    with _db(root) as db:
+        rows=db.execute("""
+            SELECT iteration,session_id,status,failure_code,receiver_acks
+            FROM forward_watch_attempt ORDER BY iteration
+        """).fetchall()
+        outage=db.execute("""
+            SELECT opened_ms,restored_ms,coverage_verified,last_failure_code
+            FROM forward_watch_outage
+        """).fetchone()
+    assert [r[2] for r in rows]==["PASSED","FAILED","PASSED"]
+    assert len({row[1] for row in rows})==3
+    assert rows[1][3]=="ConnectionResetError"
+    assert rows[0][4]==rows[2][4]==4
+    assert rows[1][4]==0
+    assert outage[1]>=outage[0]
+    assert outage[2]==0  # fresh book != historical gap recovery
+    assert outage[3]=="ConnectionResetError"
+    assert not (root/"attempt_002"/"original.sqlite").exists()
+    assert (root/"attempt_003"/"original.sqlite").exists()
+    assert not (root/".forward_producer.lock").exists()
+
+
+@pytest.mark.asyncio
+async def test_supervisor_never_accepts_unbacked_or_forged_session_receipt(tmp_path):
+    root=(tmp_path/"no_source").resolve()
+    from infrastructure.spot_forward_verified_research import ForwardSpotResearchStatus
+
+    async def fabricated(directory,sid,index):
+        # Source/receiver DBs do not exist, even though claimed fields look
+        # like a successful forward graph.
+        return ForwardSpotResearchStatus(
+            mode="SIMULATION",session_id=sid,
+            original_records=6,verified_trades=3,
+            forwarded_trades=2,forwarded_books=2,
+            pre_sync_trades_not_forwarded=1,receiver_receipts=4,
+            primary_derived_receipts=6,named_derived_receipts=12,
+            book_final_update_id=103,all_receipts_independent=True,
+            research_only=True,publication_in_session=True,
+            session_complete=True,history_continuity_verified=False,
+            continuous_live_market=False,execution_started=False,
+            orders_submitted=0,queue_high_watermark=1,
+        )
+
+    with pytest.raises(ForwardSupervisorError,match="incomplete independent durable evidence"):
+        await run_forward_research_supervisor(
+            output_dir=root,allow_public_network=True,attempts=1,
+            max_frames=20,capture_factory=fabricated,
+        )
+    # Evidence-integrity faults stop the supervisor, while a durable
+    # FAILED/outage row documents the rejected claim for operator review.
+    with _db(root) as db:
+        assert db.execute(
+            "SELECT status FROM forward_watch_attempt"
+        ).fetchone()[0]=="FAILED"
+        assert db.execute(
+            "SELECT COUNT(*) FROM forward_watch_outage WHERE restored_ms IS NULL"
+        ).fetchone()[0]==1
+    with _db(root) as db:
+        reason=db.execute(
+            "SELECT failure_code FROM forward_watch_attempt"
+        ).fetchone()[0]
+    assert reason=="ForwardSupervisorError"
+
+
+@pytest.mark.asyncio
+async def test_preflight_rejection_is_durable_and_opens_no_socket(tmp_path):
+    root=(tmp_path/"bad_clock").resolve()
+    opened=[]
+    async def bad_clock():
+        return False
+    async def never(directory,sid,index):
+        opened.append(index)
+        raise AssertionError("public market socket must not start")
+    with pytest.raises(ForwardSupervisorError,match="clock"):
+        await run_forward_research_supervisor(
+            output_dir=root,allow_public_network=True,
+            attempts=2,max_frames=20,
+            capture_factory=never,clock_check=bad_clock,
+        )
+    assert not opened
+    with _db(root) as db:
+        row=db.execute(
+            "SELECT status,failure_code FROM forward_watch_attempt"
+        ).fetchone()
+        assert row==("FAILED","ForwardSupervisorError")
+        assert db.execute(
+            "SELECT COUNT(*) FROM forward_watch_outage"
+        ).fetchone()[0]==1
+    assert not (root/"attempt_001").exists()
+    assert not (root/".forward_producer.lock").exists()
+
+
+@pytest.mark.asyncio
+async def test_cancellation_keeps_start_marker_without_false_success(tmp_path):
+    root=(tmp_path/"stopped").resolve()
+    entered=asyncio.Event()
+    block=asyncio.Event()
+    async def held(directory,sid,index):
+        entered.set()
+        await block.wait()
+        return await genuine_fixture(directory,sid,index)
+    task=asyncio.create_task(run_forward_research_supervisor(
+        output_dir=root,allow_public_network=True,
+        attempts=2,max_frames=20,capture_factory=held,
+    ))
+    await asyncio.wait_for(entered.wait(),timeout=5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    with _db(root) as db:
+        rows=db.execute(
+            "SELECT status FROM forward_watch_attempt"
+        ).fetchall()
+    assert rows==[("STARTED",)]
+    assert not (root/".forward_producer.lock").exists()
+    with pytest.raises(ValueError,match="configuration"):
+        await run_forward_research_supervisor(
+            output_dir=root,allow_public_network=True,
+            attempts=1,max_frames=20,capture_factory=held,
+        )
+
+
+@pytest.mark.asyncio
+async def test_bounded_policy_rejects_unapproved_network_and_storage_limits(tmp_path):
+    root=(tmp_path/"refused").resolve()
+    with pytest.raises(PermissionError):
+        await run_forward_research_supervisor(output_dir=root)
+    for kwargs in (
+        {"attempts":17},{"attempts":16,"max_frames":2001},
+        {"max_frames":9},{"timeout_s":500},
+        {"max_total_storage_bytes":100},
+        {"max_book_staleness_ms":0},
+    ):
+        with pytest.raises(ValueError):
+            await run_forward_research_supervisor(
+                output_dir=root,allow_public_network=True,
+                capture_factory=genuine_fixture,**kwargs,
+            )
+    with pytest.raises(ForwardSupervisorError,match="clock"):
+        await run_forward_research_supervisor(
+            output_dir=root,allow_public_network=True,
+        )
+    assert not root.exists()
+
+
+@pytest.mark.asyncio
+async def test_source_alteration_is_detected_independently_after_success(tmp_path):
+    root=(tmp_path/"altered_source").resolve()
+    state=await run_forward_research_supervisor(
+        output_dir=root,allow_public_network=True,attempts=1,
+        max_frames=20,timeout_s=20,capture_factory=genuine_fixture,
+    )
+    assert state.accepted_sessions==1
+    with _db(root) as db:
+        sid=db.execute(
+            "SELECT session_id FROM forward_watch_attempt"
+        ).fetchone()[0]
+    source_dir=root/"attempt_001"
+    with sqlite3.connect(source_dir/"original.sqlite") as db:
+        db.execute("""
+            UPDATE offline_spot_capture_records SET raw_blob=?
+            WHERE capture_id=(SELECT MIN(capture_id)
+                               FROM offline_spot_capture_records)
+        """,(b'{"tampered":true}',))
+    from infrastructure.spot_forward_verified_research import ForwardSpotResearchStatus
+    forged=ForwardSpotResearchStatus(
+        mode="SIMULATION",session_id=sid,original_records=6,
+        verified_trades=3,forwarded_trades=2,forwarded_books=2,
+        pre_sync_trades_not_forwarded=1,receiver_receipts=4,
+        primary_derived_receipts=6,named_derived_receipts=12,
+        book_final_update_id=103,all_receipts_independent=True,
+        research_only=True,publication_in_session=True,
+        session_complete=True,history_continuity_verified=False,
+        continuous_live_market=False,execution_started=False,
+        orders_submitted=0,queue_high_watermark=1,
+    )
+    with pytest.raises(Exception):
+        _verify_one(source_dir,forged)
+
+
+@pytest.mark.asyncio
+async def test_receiver_receipt_fingerprint_tamper_rejected_after_success(tmp_path):
+    root=(tmp_path/"altered_ack").resolve()
+    captured={}
+    async def capture(directory,sid,index):
+        value=await genuine_fixture(directory,sid,index)
+        captured["status"]=value
+        return value
+    outcome=await run_forward_research_supervisor(
+        output_dir=root,allow_public_network=True,attempts=1,
+        max_frames=20,timeout_s=20,capture_factory=capture,
+    )
+    assert outcome.accepted_sessions==1
+    with sqlite3.connect(
+        root/"attempt_001"/"independent_receiver.sqlite"
+    ) as db:
+        db.execute("""
+            UPDATE offline_independent_projection_receipts
+            SET projection_fingerprint=?
+            WHERE ingest_id=(
+                SELECT MIN(ingest_id)
+                FROM offline_independent_projection_receipts
+            )
+        """,("0"*64,))
+    # Source-owned receiver revalidation rejects altered canonical receipts
+    # even earlier than the supervisor's independent envelope identity gate.
+    from infrastructure.market_cross_process_delivery import CrossProcessDeliveryError
+    with pytest.raises((CrossProcessDeliveryError,ForwardSupervisorError),
+                       match="fingerprint|receipt"):
+        _verify_one(root/"attempt_001",captured["status"])
+
+
+@pytest.mark.asyncio
+async def test_two_forward_sessions_use_exactly_one_persistent_child_each(tmp_path):
+    root=(tmp_path/"persist_supervisor").resolve()
+
+    async def persistent_fixture(directory,sid,index):
+        return await observe_forward_spot_research(
+            output_dir=directory,session_id=sid,
+            stream=source(_NOW()),snapshot_fetch=snapshot,
+            max_frames=20,timeout_s=20,persistent_receiver=True,
+        )
+
+    report=await run_forward_research_supervisor(
+        output_dir=root,allow_public_network=True,attempts=2,
+        max_frames=20,timeout_s=20,capture_factory=persistent_fixture,
+        persistent_receiver=True,
+    )
+    assert report.accepted_sessions==2
+    assert report.failed_sessions==0
+    assert report.total_receiver_receipts==8
+    assert report.receiver_process_starts==2
+    assert report.max_receiver_ack_latency_ms>0
+    assert not report.history_continuity_verified
+    assert not report.continuous_live_market
+    with _db(root) as db:
+        rows=db.execute("""
+            SELECT receiver_process_starts,max_receiver_ack_latency_ms,
+                   receiver_acks,queue_high_watermark
+            FROM forward_watch_attempt ORDER BY iteration
+        """).fetchall()
+    assert len(rows)==2
+    assert [x[0] for x in rows]==[1,1]
+    assert all(x[1]>0 and x[2]==4 and x[3]>0 for x in rows)
+    assert not (root/".forward_producer.lock").exists()
+
+
+@pytest.mark.asyncio
+async def test_hour_watch_clock_circuit_opens_after_three_consecutive_preflights(tmp_path):
+    from infrastructure.spot_public_capture_adapter import SpotTransportError
+    from ci.phase1_operator_lab import inspect_trial
+    trial=(tmp_path/"clock_circuit").resolve()
+    output=trial/"evidence"
+    clock_attempts=[]
+    opened=[]
+
+    async def denied_public_time():
+        clock_attempts.append(len(clock_attempts)+1)
+        raise SpotTransportError(
+            "public exchange clock TLS connection timeout",
+            reason="CLOCK_PREFLIGHT_CONNECT_TIMEOUT",
+        )
+
+    async def no_socket(directory,sid,iteration):
+        opened.append(iteration)
+        raise AssertionError("connection forbidden on failed clock gate")
+
+    result=await run_forward_research_supervisor(
+        output_dir=output,allow_public_network=True,
+        attempts=2048,max_frames=20,timeout_s=20,
+        watch_duration_s=3600.0,persistent_receiver=True,
+        max_consecutive_clock_failures=3,
+        clock_check=denied_public_time,capture_factory=no_socket,
+    )
+    assert len(clock_attempts)==3
+    assert opened==[]
+    assert result.attempts==3
+    assert result.state=="NETWORK_PREFLIGHT_CIRCUIT_OPEN"
+    assert result.failed_sessions==3
+    assert result.accepted_sessions==0
+    assert result.incomplete_attempts==0
+    assert result.outage_windows==1
+    assert result.open_outages==1
+    assert result.unobserved_session_boundaries==2
+    assert result.orders_submitted==0
+    assert result.watch_target_reached is False
+    assert not (output/".forward_producer.lock").exists()
+    with _db(output) as conn:
+        assert conn.execute("""
+            SELECT completion_code,completed_at_ms FROM forward_watch_plan
+        """).fetchone()[0]=="NETWORK_PREFLIGHT_CIRCUIT_OPEN"
+        rows=conn.execute("""
+            SELECT iteration,status,failure_code
+            FROM forward_watch_attempt ORDER BY iteration
+        """).fetchall()
+    assert rows==[
+        (i,"FAILED","SPOT_TRANSPORT_CLOCK_PREFLIGHT_CONNECT_TIMEOUT")
+        for i in (1,2,3)
+    ]
+    report=inspect_trial(trial)
+    assert report["verdict"]=="FAILED_OR_QUARANTINED_SOURCE"
+    assert report["completion_code"]=="NETWORK_PREFLIGHT_CIRCUIT_OPEN"
+    assert report["failed"]==3 and report["incomplete"]==0
+    assert report["open_outages"]==1
+    assert report["gap_free_history_verified"] is False
+
+
+@pytest.mark.asyncio
+async def test_network_circuit_counts_only_consecutive_preflight_failures(tmp_path):
+    from infrastructure.spot_public_capture_adapter import SpotTransportError
+    root=(tmp_path/"clock_reset").resolve()
+    attempted=0
+    async def preflight():
+        nonlocal attempted
+        attempted+=1
+        if attempted==2:
+            raise SpotTransportError(
+                "other transport error",reason="WS_READ_FAILED",
+            )
+        raise SpotTransportError(
+            "public clock HTTP timeout",
+            reason="CLOCK_PREFLIGHT_CONNECT_TIMEOUT",
+        )
+    async def never_capture(directory,sid,iteration):
+        raise AssertionError("no transport for failed preflight")
+    result=await run_forward_research_supervisor(
+        output_dir=root,allow_public_network=True,
+        attempts=100,max_frames=20,timeout_s=20,
+        watch_duration_s=3600.0,persistent_receiver=True,
+        max_consecutive_clock_failures=3,
+        clock_check=preflight,capture_factory=never_capture,
+    )
+    # 1 clock failure, then unrelated failure resets counter,
+    # then 3 consecutive clock failures -> stop at attempt 5.
+    assert attempted==5
+    assert result.attempts==5
+    assert result.failed_sessions==5
+    assert result.incomplete_attempts==0
+    assert result.state=="NETWORK_PREFLIGHT_CIRCUIT_OPEN"
+
+
+def test_hour_network_circuit_requires_watch_and_bounded_threshold(tmp_path):
+    from ci.phase1_forward_endurance_trial import parser,validate
+    base=["--allow-public-market-data",
+          "--output-dir",str((tmp_path/"trial").resolve()),
+          "--persistent-receiver","--single-socket","--attempts","5",
+          "--max-frames","20"]
+    for extra in (
+        ["--max-consecutive-clock-failures","3"],
+        ["--watch-hours","1.0","--max-consecutive-clock-failures","1"],
+        ["--watch-hours","1.0","--max-consecutive-clock-failures","11"],
+    ):
+        with pytest.raises(ValueError,match="invalid bounded"):
+            validate(parser().parse_args(base+extra))
+    good=parser().parse_args(
+        base+["--watch-hours","1.0","--max-consecutive-clock-failures","3"]
+    )
+    validate(good)

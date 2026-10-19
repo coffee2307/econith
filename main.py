@@ -32,7 +32,8 @@ import os
 from contextlib import asynccontextmanager
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -72,6 +73,7 @@ from infrastructure.observability.alerts import get_alert_dispatcher, register_r
 from infrastructure.preprocessing.pipeline import MarketDataPipeline
 from infrastructure.storage.recorder import StateRecorder
 from infrastructure.websocket.streamer import BinanceWebSocketStreamer
+from infrastructure.spot_verified_cutover_gate import enforce_verified_only_spot_ingress
 from quant.ccxt_bridge import CCXTBinanceBridge
 from sentinel.manager import Sentinel
 
@@ -88,6 +90,49 @@ components: dict[str, object] = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Refuse a false verified-only configuration before DB/engine/network startup.
+    ingress_policy = enforce_verified_only_spot_ingress()
+    if ingress_policy == "verified_forward_preview":
+        # Explicit read-only PUBLIC forward research, one finite capture only.
+        # No engine, CCXT, order bridge, legacy streamer, or mutation routes.
+        from pathlib import Path
+        from infrastructure.spot_verified_forward_preview_runtime import (
+            start_verified_forward_preview,
+        )
+        preview = await start_verified_forward_preview(
+            output_dir=Path(os.environ["ECONITH_SPOT_FORWARD_PREVIEW_OUTPUT_DIR"]),
+        )
+        components["verified_research_runtime"] = preview
+        app.state.verified_only_research = True
+        try:
+            yield
+        finally:
+            app.state.verified_only_research = False
+            await preview.close()
+            components.clear()
+        return
+    if ingress_policy == "verified_only":
+        # Dedicated finite, original-byte-backed SIMULATION research runtime.
+        # Important: engine, CCXT, order bridge, macro providers and legacy
+        # depth20 streamer are NEVER initialized in this branch.
+        from pathlib import Path
+        from infrastructure.spot_verified_research_runtime import (
+            start_verified_research_runtime,
+        )
+        research = await start_verified_research_runtime(
+            original_db=Path(os.environ["ECONITH_SPOT_VERIFIED_REPLAY_DB"]),
+            session_id=os.environ["ECONITH_SPOT_VERIFIED_REPLAY_SESSION"],
+            output_dir=Path(os.environ["ECONITH_SPOT_VERIFIED_REPLAY_OUTPUT_DIR"]),
+        )
+        components["verified_research_runtime"] = research
+        app.state.verified_only_research = True
+        try:
+            yield
+        finally:
+            app.state.verified_only_research = False
+            await research.close()
+            components.clear()
+        return
     env = get_environment()
     boot_locale = bootstrap_locale_from_env()
     logger.info("dashboard operator locale bootstrapped -> %s", boot_locale)
@@ -350,6 +395,27 @@ app.add_middleware(
 # Guarded API security: gate sensitive mutating routes + audit-trail every
 # operator state-mutation command (no-op auth when API_AUTH_ENABLED is false).
 install_api_security(app, settings)
+
+
+@app.middleware("http")
+async def _verified_only_research_surface(request: Request, call_next):
+    # The existing app registers many legacy mutation/quant/world routes at
+    # import time. NEVER expose those handlers in historical verified-only mode
+    # (even GETs could initialize execution engine singletons on demand).
+    if getattr(request.app.state, "verified_only_research", False):
+        permitted = f"{settings.api_prefix}/market/verified/status"
+        if request.url.path != permitted or request.method != "GET":
+            return JSONResponse({"detail": "research-only route not available"}, status_code=404)
+    return await call_next(request)
+
+
+@app.get(f"{settings.api_prefix}/market/verified/status")
+async def verified_market_research_status() -> dict:
+    research = components.get("verified_research_runtime")
+    if research is None:
+        raise HTTPException(status_code=404, detail="verified research runtime not active")
+    from dataclasses import asdict
+    return asdict(research.status)
 
 
 # --- typed request bodies ----------------------------------------------------
@@ -755,6 +821,9 @@ async def cockpit_snapshot_alias() -> dict:
 # --- live metrics WebSocket (consumed by the Next.js dashboard) --------------
 @app.websocket(f"{settings.api_prefix}/stream/metrics")
 async def stream_metrics(ws: WebSocket) -> None:
+    if getattr(ws.app.state, "verified_only_research", False):
+        await ws.close(code=1008)
+        return
     await ws.accept()
     hub = _hub()
     try:

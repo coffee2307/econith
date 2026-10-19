@@ -17,6 +17,7 @@ import logging
 
 from core.event_bus import Event, EventBus
 from infrastructure.storage.sqlite import SQLiteStore
+from config.environment import get_environment
 
 logger = logging.getLogger("econith.infra.storage.recorder")
 
@@ -26,7 +27,7 @@ class StateRecorder:
 
     def __init__(self, bus: EventBus, store: SQLiteStore | None = None, tick_every: int = 25) -> None:
         self._bus = bus
-        self._store = store or SQLiteStore()
+        self._store = store if store is not None else SQLiteStore(get_environment().state_recorder_db_path)
         self._tick_every = max(1, tick_every)
         self._tick_count = 0
         self._init_schema()

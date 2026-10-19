@@ -47,8 +47,8 @@ COPY sentinel/ ./sentinel/
 COPY archive/vendors/manifest.json ./archive/vendors/manifest.json
 COPY main.py ./
 
-RUN mkdir -p /app/logs /app/datasets /app/models/registry \
-  && chown -R econith:econith /app/logs /app/datasets /app/models
+RUN mkdir -p /app/logs /app/datasets /app/runtime-state /app/models/registry \
+  && chown -R econith:econith /app/logs /app/datasets /app/runtime-state /app/models
 
 USER econith
 EXPOSE 8000

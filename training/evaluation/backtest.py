@@ -195,6 +195,35 @@ def compute_metrics(
 SignalFn = Callable[[Any], Any]
 
 
+def _signal_feature_frame(group: Any) -> Any:
+    """Give strategy code features, never evaluator outcomes or future labels.
+
+    This prevents the simplest oracle strategy from reading the very returns
+    being scored. It is NOT a proof that an arbitrary user-supplied signal
+    function is causal: a function can still inspect later feature rows.
+    """
+    exact = {
+        "target", "label", "label_end", "reward", "future",
+        "outcome", "realized_return", "actual_return", "y_true",
+    }
+    prefixes = (
+        "forward_return_", "forward_", "future_", "target_", "label_",
+        "reward_", "outcome_", "realized_", "next_", "&-",
+    )
+    suffixes = ("_target", "_label", "_outcome", "_future")
+    safe_columns = [
+        c for c in group.columns
+        if not (
+            str(c).lower() in exact
+            or str(c).lower().startswith(prefixes)
+            or str(c).lower().endswith(suffixes)
+        )
+    ]
+    # Deep copy: mutations inside an untrusted signal_fn must not change the
+    # authoritative data used by the performance evaluator.
+    return group.loc[:, safe_columns].copy(deep=True)
+
+
 class BacktestEngine:
     """Streams feature Parquet and simulates net-of-cost execution per symbol."""
 
@@ -249,7 +278,7 @@ class BacktestEngine:
                 logger.warning("frame lacks %s; skipping symbol", cfg.return_column)
                 continue
             fwd = _safe(g[cfg.return_column].to_numpy(), np)
-            pos = _safe(signal_fn(g), np)
+            pos = _safe(signal_fn(_signal_feature_frame(g)), np)
             if pos.shape[0] != fwd.shape[0]:
                 logger.warning("signal length mismatch; skipping symbol")
                 continue

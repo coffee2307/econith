@@ -183,7 +183,8 @@ def test_execution_status_degraded_on_network_drop(monkeypatch) -> None:
 
     assert status["execution_routing"] == "DEGRADED", status
     assert status["exchange_live"] is False
-    assert "unreachable" in status["detail"].lower()
+    assert "authenticated exchange" in status["detail"].lower()
+    assert "orders are rejected" in status["detail"].lower()
 
 
 def test_execution_status_live_when_authenticated(monkeypatch) -> None:
