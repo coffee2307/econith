@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ci.phase1_public_live_spool_trial import run as trial
+from ci.phase1_cloud_resources import host_snapshot as portable_host_snapshot
 from infrastructure.spot_forward_failure_diagnostics import safe_failure_code
 
 
@@ -32,7 +33,7 @@ class WatchPolicy:
     source_timeout_s: float = 120.0
     max_storage_bytes: int = 500_000_000
     min_free_disk_bytes: int = 2_000_000_000
-    min_free_memory_bytes: int = 1_000_000_000
+    min_free_memory_bytes: int = 1_500_000_000
     per_segment_hard_timeout_s: float = 240.0
 
     def validate(self) -> None:
@@ -133,10 +134,18 @@ def _valid_session(source: dict,frames: int,lag_budget:int)->bool:
 
 async def timed_watch(
     root: Path, *, policy: WatchPolicy = WatchPolicy(),
-    single_trial=trial, clock=time.monotonic, metrics=host_snapshot,
+    single_trial=trial, clock=time.monotonic, metrics=portable_host_snapshot,
     diagnose_pressure: bool = False,
+    reuse_producer_connections: bool = False,
+    reuse_receiver_connection: bool = False,
+    reuse_original_connection: bool = False,
 ) -> dict:
     policy.validate()
+    if reuse_original_connection and not (
+        reuse_receiver_connection and reuse_producer_connections):
+        raise ValueError("full original cache requires reviewed receiver/producer path")
+    if reuse_receiver_connection and not reuse_producer_connections:
+        raise ValueError("receiver cache requires producer cache")
     if (not root.is_absolute() or root.exists() or root!=root.resolve()
         or root.parent.is_symlink()):
         raise ValueError("fresh absolute non-aliased research evidence root required")
@@ -156,6 +165,10 @@ async def timed_watch(
         "default_runtime_cutover":False,
         "orders_submitted":0,
         "diagnose_pressure":diagnose_pressure,
+        "derived_connection_reuse_experimental":True,
+        "producer_connection_reuse_experimental":reuse_producer_connections,
+        "receiver_connection_reuse_experimental":reuse_receiver_connection,
+        "original_connection_reuse_experimental":reuse_original_connection,
     }
     _write_report(root,report)
     for number in range(1,policy.max_segments+1):
@@ -199,6 +212,13 @@ async def timed_watch(
             }
             if diagnose_pressure:
                 trial_args["diagnose_pressure"]=True
+            for active,name in (
+                (reuse_producer_connections,"reuse_producer_connections"),
+                (reuse_receiver_connection,"reuse_receiver_connection"),
+                (reuse_original_connection,"reuse_original_connection"),
+            ):
+                if active:
+                    trial_args[name]=True
             source=await asyncio.wait_for(
                 single_trial(path,**trial_args),
                 timeout=min(policy.per_segment_hard_timeout_s,remaining),
@@ -287,6 +307,12 @@ def main(argv=None)->int:
     p.add_argument("--allow-public-market-data",action="store_true")
     p.add_argument("--accept-experimental-spool",action="store_true")
     p.add_argument("--accept-unverified-intersegment-gaps",action="store_true")
+    p.add_argument("--reuse-producer-connections",action="store_true",
+                   help="opt-in producer outbox/checkpoint FULL SQLite connection cache")
+    p.add_argument("--reuse-receiver-connection",action="store_true",
+                   help="opt-in independent HMAC receiver child SQLite cache")
+    p.add_argument("--reuse-original-connection",action="store_true",
+                   help="opt-in source/intent WAL FULL SQLite cache")
     p.add_argument("--diagnose-pressure",action="store_true",
                    help="record bounded per-segment pressure and stage diagnostic reports")
     p.add_argument("--output-dir",required=True,type=Path)
@@ -295,12 +321,18 @@ def main(argv=None)->int:
     a=p.parse_args(argv)
     if (not a.allow_public_market_data
         or not a.accept_experimental_spool
-        or not a.accept_unverified_intersegment_gaps):
-        p.error("three separate explicit bounded public research consents required")
+        or not a.accept_unverified_intersegment_gaps
+        or (a.reuse_original_connection and not (
+            a.reuse_receiver_connection and a.reuse_producer_connections))
+        or (a.reuse_receiver_connection and not a.reuse_producer_connections)):
+        p.error("explicit consents and reviewed full-cache prerequisites required")
     policy=WatchPolicy(min_watch_s=a.min_watch_s,max_watch_s=a.max_watch_s)
     try:
         result=asyncio.run(timed_watch(
             a.output_dir,policy=policy,diagnose_pressure=a.diagnose_pressure,
+            reuse_producer_connections=a.reuse_producer_connections,
+            reuse_receiver_connection=a.reuse_receiver_connection,
+            reuse_original_connection=a.reuse_original_connection,
         ))
     except Exception as exc:
         print(json.dumps({
