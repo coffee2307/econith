@@ -41,7 +41,12 @@ async def matrix(root:Path,*,frames:int,max_lag_ms:int,
                  reuse_receiver_connection:bool=False,
                  reuse_original_connection:bool=False,
                  diagnose_pressure:bool=False,
-                 resource_guard:bool=False)->dict:
+                 resource_guard:bool=False,
+                 cooperative_reader_yield:bool=False)->dict:
+    if cooperative_reader_yield and not (
+        reuse_original_connection and reuse_receiver_connection
+        and reuse_producer_connections and reuse_derived_connections):
+        raise ValueError("reader fairness requires all reviewed caches")
     if (reuse_original_connection and not (
         reuse_receiver_connection and reuse_producer_connections
         and reuse_derived_connections)):
@@ -93,6 +98,7 @@ async def matrix(root:Path,*,frames:int,max_lag_ms:int,
                 (reuse_receiver_connection,"reuse_receiver_connection"),
                 (reuse_original_connection,"reuse_original_connection"),
                 (diagnose_pressure,"diagnose_pressure"),
+                (cooperative_reader_yield,"cooperative_reader_yield"),
             ):
                 if enabled:
                     public_run_args[key]=True
@@ -126,6 +132,7 @@ async def matrix(root:Path,*,frames:int,max_lag_ms:int,
                 "receiver_cache_opt_in":reuse_receiver_connection,
                 "original_cache_opt_in":reuse_original_connection,
                 "pressure_diagnostic_opt_in":diagnose_pressure,
+                "cooperative_reader_yield_experimental":cooperative_reader_yield,
             }
             if after is not None:
                 item["memory_free_after_bytes"]=after["available_memory_bytes"]
@@ -185,6 +192,7 @@ async def matrix(root:Path,*,frames:int,max_lag_ms:int,
         "receiver_connection_reuse_experimental":reuse_receiver_connection,
         "original_connection_reuse_experimental":reuse_original_connection,
         "pressure_diagnostic_opt_in":diagnose_pressure,
+                "cooperative_reader_yield_experimental":cooperative_reader_yield,
         "host_resource_guard":resource_guard,
         "duration_s":round(time.monotonic()-started,3),
         "verdict":("PASSED_FINITE_PUBLIC_SPOOL_3X1000_RESEARCH_ONLY"
@@ -205,6 +213,8 @@ def main(argv:list[str]|None=None)->int:
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--allow-public-market-data",action="store_true")
     p.add_argument("--accept-experimental-spool",action="store_true")
+    p.add_argument("--cooperative-reader-yield",action="store_true",
+                   help="opt-in reader fairness, requires all experimental caches")
     p.add_argument("--reuse-original-connection",action="store_true",
                    help="explicit finite original+intent WAL/FULL session cache")
     p.add_argument("--reuse-receiver-connection",action="store_true",
@@ -220,6 +230,9 @@ def main(argv:list[str]|None=None)->int:
     p.add_argument("--max-lag-ms",type=int,default=5000)
     a=p.parse_args(argv)
     if (not a.allow_public_market_data or not a.accept_experimental_spool
+        or (a.cooperative_reader_yield and not (
+            a.reuse_original_connection and a.reuse_receiver_connection
+            and a.reuse_producer_connections and a.reuse_derived_connections))
         or (a.reuse_original_connection and not (
             a.reuse_receiver_connection and a.reuse_producer_connections
             and a.reuse_derived_connections))
@@ -240,6 +253,7 @@ def main(argv:list[str]|None=None)->int:
         reuse_original_connection=a.reuse_original_connection,
         diagnose_pressure=a.diagnose_pressure,
         resource_guard=True,
+        cooperative_reader_yield=a.cooperative_reader_yield,
     ))
     print(json.dumps({
         "verdict":report["verdict"],"passed":report["passed"],
