@@ -1,0 +1,214 @@
+name: ECONITH Phase1 one-shot full research campaign
+
+# Deliberately isolated: never scheduled, never on main, no public-data work on PR.
+on:
+  push:
+    branches:
+      - experiment/phase1-cloud-campaign-20261019
+    paths:
+      - .github/workflows/phase1-research-campaign.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: econith-phase1-one-shot-20261019
+  cancel-in-progress: false
+
+env:
+  ECONITH_MODE: SIMULATION
+  PYTHONUNBUFFERED: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  qualification:
+    name: Offline deterministic A-B and crash gates
+    if: ${{ github.repository == 'coffee2307/econith' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Fetch immutable commit (avoid orphan gitlink checkout)
+        shell: bash
+        run: |
+          curl -fsSL --retry 3 -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_SHA}" -o "${RUNNER_TEMP}/source.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/source.tar.gz" --strip-components=1
+          test -f tests/test_phase1_cooperative_reader_fairness.py
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned research libraries
+        run: |
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Guard regression, full commit, independent HMAC and crash safety
+        run: |
+          python -m pytest -q --tb=short \
+            tests/test_phase1_cooperative_reader_fairness.py \
+            tests/test_phase1_subsecond_fifo_burst.py \
+            tests/test_phase1_subsecond_forensics.py \
+            tests/test_phase1_spool_pressure_diagnostics.py \
+            tests/test_spot_public_capture_adapter.py \
+            tests/test_phase1_cached_original_invariants.py \
+            tests/test_phase1_cached_receiver_invariants.py \
+            tests/test_phase1_spool_physical_kill.py \
+            tests/test_phase1_public_fullcache_matrix.py \
+            tests/test_phase1_cloud_timed_watch.py
+      - name: Paired 240-frame source tests on same cloud host
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="${RUNNER_TEMP}/econith-qualification"
+          mkdir "$base"
+          common=(--frames 240 --spacing-ms 5 --live-spool --reuse-derived-connections --reuse-producer-connections --reuse-receiver-connection --reuse-original-connection --diagnose-pressure)
+          python -m ci.phase1_offline_burst_probe --output-dir "$base/baseline" "${common[@]}" > "$base/baseline_result.json"
+          python -m ci.phase1_offline_burst_probe --output-dir "$base/cooperative" "${common[@]}" --cooperative-reader-yield > "$base/cooperative_result.json"
+          python - <<'PY'
+          from pathlib import Path
+          import json,os
+          root=Path(os.environ["RUNNER_TEMP"])/"econith-qualification"
+          for label in ("baseline","cooperative"):
+              result=json.loads((root/f"{label}_result.json").read_text())
+              print("OFFLINE_RESEARCH",label,"verdict",result["result"],
+                    "cursor",result.get("original_cursor"),
+                    "queue",result.get("queue_peak"),
+                    "max_lag",result.get("max_source_delivery_lag_ms"))
+              assert result["result"]=="BOUNDED_OFFLINE_PASS"
+              assert result["originals"]==result["original_cursor"]==241
+              assert result["receiver_receipts"]==239
+              assert result["queue_peak"]<128
+              assert result["max_source_delivery_lag_ms"]<=5000
+              assert result["orders_submitted"]==0
+          PY
+      - name: Preserve non-source summaries
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: econith-phase1-campaign-offline-${{ github.run_id }}
+          path: ${{ runner.temp }}/econith-qualification/*_result.json
+          retention-days: 3
+          if-no-files-found: warn
+
+  finite_matrix:
+    name: Three separately reconciled real Binance finite sources
+    needs: qualification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Fetch pinned source archive
+        run: |
+          curl -fsSL --retry 3 -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_SHA}" -o "${RUNNER_TEMP}/source.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/source.tar.gz" --strip-components=1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Fail-closed runner memory and disk check
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from ci.phase1_cloud_resources import host_snapshot
+          import os
+          root=Path(os.environ["RUNNER_TEMP"])/"phase1-cloud-preflight"
+          root.mkdir()
+          s=host_snapshot(root)
+          print("MEMORY_GB",round(s["available_memory_bytes"]/1e9,2))
+          print("DISK_GB",round(s["disk_free_bytes"]/1e9,2))
+          assert s["available_memory_bytes"]>=1_500_000_000
+          assert s["disk_free_bytes"]>=2_000_000_000
+          PY
+      - name: Finite public Spot 3x1000 with explicit original/receiver/producer/derived caches and cooperative reader
+        run: |
+          python -m ci.phase1_public_live_spool_matrix \
+            --allow-public-market-data --accept-experimental-spool \
+            --reuse-derived-connections --reuse-producer-connections \
+            --reuse-receiver-connection --reuse-original-connection \
+            --cooperative-reader-yield --diagnose-pressure \
+            --output-dir "${{ runner.temp }}/econith-campaign-matrix" \
+            --frames 1000 --max-lag-ms 5000
+      - name: Audit original, source intent, cursor, independent HMAC receipt and checkpoint
+        if: ${{ always() }}
+        run: |
+          python -m ci.phase1_cloud_matrix_audit --root "${{ runner.temp }}/econith-campaign-matrix"
+      - name: Stage only bounded diagnostics, never raw SQLite
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          src="${RUNNER_TEMP}/econith-campaign-matrix"
+          dest="${RUNNER_TEMP}/econith-matrix-summary"
+          mkdir -p "$dest"
+          for f in matrix_report.json cloud_audit.json; do
+            if [ -f "$src/$f" ]; then cp "$src/$f" "$dest/$f"; fi
+          done
+          for i in 001 002 003; do
+            for f in spool_pressure.json projector_lag.json stage_latency.json; do
+              if [ -f "$src/attempt_$i/$f" ]; then
+                mkdir -p "$dest/attempt_$i"
+                cp "$src/attempt_$i/$f" "$dest/attempt_$i/$f"
+              fi
+            done
+          done
+      - name: Upload finite-matrix aggregate-only evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: econith-phase1-campaign-matrix-${{ github.run_id }}
+          path: ${{ runner.temp }}/econith-matrix-summary/
+          retention-days: 3
+          if-no-files-found: warn
+
+  timed_watch:
+    name: Conditional bounded 600-second segmented watch
+    needs: finite_matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 27
+    steps:
+      - name: Download immutable source archive
+        run: |
+          curl -fsSL --retry 3 -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_SHA}" -o "${RUNNER_TEMP}/source.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/source.tar.gz" --strip-components=1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Bounded public segmented 10-minute research watch, refuse any failure
+        run: |
+          python -m ci.phase1_public_spool_timed_watch \
+            --allow-public-market-data --accept-experimental-spool \
+            --accept-unverified-intersegment-gaps \
+            --reuse-producer-connections --reuse-receiver-connection \
+            --reuse-original-connection --cooperative-reader-yield \
+            --diagnose-pressure \
+            --output-dir "${{ runner.temp }}/econith-campaign-watch" \
+            --min-watch-s 600 --max-watch-s 900
+      - name: Independent read-only proof of every started session
+        if: ${{ always() }}
+        run: |
+          python -m ci.phase1_cloud_watch_audit --root "${{ runner.temp }}/econith-campaign-watch"
+      - name: Stage audit reports only, with UNKNOWN inter-session history
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          src="${RUNNER_TEMP}/econith-campaign-watch"
+          dest="${RUNNER_TEMP}/econith-watch-summary"
+          mkdir -p "$dest"
+          for f in watch_report.json cloud_watch_audit.json; do
+            if [ -f "$src/$f" ]; then cp "$src/$f" "$dest/$f"; fi
+          done
+          for i in $(seq 1 16); do
+            index=$(printf '%03d' "$i")
+            for f in spool_pressure.json projector_lag.json stage_latency.json; do
+              if [ -f "$src/attempt_$index/$f" ]; then
+                mkdir -p "$dest/attempt_$index"
+                cp "$src/attempt_$index/$f" "$dest/attempt_$index/$f"
+              fi
+            done
+          done
+      - name: Upload only public-safe aggregate watch artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: econith-phase1-campaign-watch-${{ github.run_id }}
+          path: ${{ runner.temp }}/econith-watch-summary/
+          retention-days: 3
+          if-no-files-found: warn
