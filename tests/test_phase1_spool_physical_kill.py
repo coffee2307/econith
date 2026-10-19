@@ -26,10 +26,13 @@ def _count(path,sql):
         return db.execute(sql).fetchone()[0]
 
 
-@pytest.mark.parametrize("cached_producer,cached_receiver",
-                         [(False,False),(True,False),(True,True)])
+@pytest.mark.parametrize(
+    "cached_producer,cached_receiver,cached_original",
+    [(False,False,False),(True,False,False),
+     (True,True,False),(True,True,True)],
+)
 def test_os_hard_exit_after_checkpoint_blocks_unreviewed_restart(
-    tmp_path,cached_producer,cached_receiver,
+    tmp_path,cached_producer,cached_receiver,cached_original,
 ):
     root=(tmp_path/"physical_hard_exit").resolve()
     program=r'''
@@ -60,11 +63,12 @@ asyncio.run(observe_forward_spot_research(
     max_projector_lag_ms=5000,
     experiment_reuse_producer_connections=bool(int(sys.argv[2])),
     experiment_reuse_receiver_connection=bool(int(sys.argv[3])),
+    experiment_reuse_original_connection=bool(int(sys.argv[4])),
 ))
 '''
     result=subprocess.run(
         [sys.executable,"-c",program,str(root),str(int(cached_producer)),
-         str(int(cached_receiver))],
+         str(int(cached_receiver)),str(int(cached_original))],
         capture_output=True,text=True,timeout=60,
     )
     assert result.returncode==47, result.stderr[-1200:]
