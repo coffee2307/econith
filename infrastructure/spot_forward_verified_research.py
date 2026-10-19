@@ -119,6 +119,7 @@ async def observe_forward_spot_research(
     diagnose_pressure: bool = False,
     experiment_reuse_producer_connections: bool = False,
     experiment_reuse_receiver_connection: bool = False,
+    experiment_reuse_original_connection: bool = False,
 ) -> ForwardSpotResearchStatus:
     """One real *in-session* research pass (no default startup/auto retry).
 
@@ -147,6 +148,7 @@ async def observe_forward_spot_research(
         or not 100 <= max_projector_lag_ms <= 30000
         or type(max_pending_originals) is not int
         or not 1 <= max_pending_originals <= 1000
+        or type(experiment_reuse_original_connection) is not bool
         or type(experiment_reuse_receiver_connection) is not bool
         or type(experiment_reuse_producer_connections) is not bool
         or type(diagnose_pressure) is not bool
@@ -170,6 +172,13 @@ async def observe_forward_spot_research(
         (not offline and not allow_experimental_public_spool)
     ):
         raise PermissionError("derived connection reuse requires explicitly bounded research spool")
+    if experiment_reuse_original_connection and (
+        not offline or not spooled_in_session
+        or not experiment_reuse_derived_connections
+        or not experiment_reuse_producer_connections
+        or not experiment_reuse_receiver_connection
+    ):
+        raise PermissionError("original ledger cache is offline-only full-profile experiment")
     if experiment_reuse_receiver_connection and (
         not spooled_in_session or not persistent_receiver
         or not experiment_reuse_derived_connections
@@ -217,6 +226,7 @@ async def observe_forward_spot_research(
         provider = lambda: QuantMode.SIMULATION
         journal = OfflineSpotCaptureJournal(
             root / "original.sqlite", mode_provider=provider, forward_capture_audit=True,
+            reuse_connection=experiment_reuse_original_connection,
         )
         adapter = OptInSpotIngressAdapter(
             journal, symbol="BTCUSDT", queue_capacity=queue_capacity,
@@ -639,6 +649,8 @@ async def observe_forward_spot_research(
                             checkpoints.close()
                         finally:
                             try:
+                                journal.close()
+                            finally:
                                 if lag_diagnostic is not None:
                                     lag_diagnostic.write(source_complete=completed)
                             finally:
