@@ -70,11 +70,16 @@ class OfflineIndependentProjectionReceiver:
         self, path: str | Path, *,
         mode_provider: Callable[[], QuantMode],
         max_projection_bytes: int = 65536,
+        reuse_connection: bool = False,
     ) -> None:
         if not callable(mode_provider):
             raise ValueError("SIMULATION-only provider required")
         if type(max_projection_bytes) is not int or not 128 <= max_projection_bytes <= 4_194_304:
             raise ValueError("invalid receiver payload size bound")
+        if type(reuse_connection) is not bool:
+            raise ValueError("receiver connection reuse must be explicit boolean")
+        self._reuse_connection = reuse_connection
+        self._session_connection: sqlite3.Connection | None = None
         self.path = Path(path)
         self.mode_provider = mode_provider
         self.max_projection_bytes = max_projection_bytes
@@ -99,13 +104,36 @@ class OfflineIndependentProjectionReceiver:
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.path, isolation_level=None, timeout=10)
+        if self._reuse_connection:
+            if self._session_connection is None:
+                self._session_connection=sqlite3.connect(
+                    self.path,isolation_level=None,timeout=10,
+                )
+                self._session_connection.row_factory=sqlite3.Row
+                self._session_connection.execute("PRAGMA busy_timeout=10000")
+            if self._session_connection.in_transaction:
+                raise CrossProcessDeliveryError("unfinished receiver transaction")
+            yield self._session_connection
+        else:
+            conn=sqlite3.connect(self.path,isolation_level=None,timeout=10)
+            try:
+                conn.row_factory=sqlite3.Row
+                conn.execute("PRAGMA busy_timeout=10000")
+                yield conn
+            finally:
+                conn.close()
+
+    def close(self) -> None:
+        db=self._session_connection
+        if db is None:
+            return
+        self._session_connection=None
         try:
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA busy_timeout=10000")
-            yield conn
+            if db.in_transaction:
+                db.rollback()
+                raise CrossProcessDeliveryError("receiver connection closed with uncommitted work")
         finally:
-            conn.close()
+            db.close()
 
     def _simulation_only(self) -> None:
         if self.mode_provider() is not QuantMode.SIMULATION:
