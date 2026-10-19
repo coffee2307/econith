@@ -14,6 +14,10 @@ def inspect(root:Path)->dict:
     db_file=root/"original.sqlite"
     if not report_file.is_file() or report_file.is_symlink() or db_file.is_symlink() or not db_file.is_file():
         raise ValueError("missing or aliased evidence")
+    owner_marker=root/".forward_producer.lock"
+    if owner_marker.is_symlink():
+        raise ValueError("unsafe owner marker link")
+    orphan_marker_present=owner_marker.exists()
     report=json.loads(report_file.read_text(encoding="utf-8"))
     if report.get("schema")!="econith-phase1-single-socket-duration-v1":
         raise ValueError("wrong audit source schema")
@@ -65,6 +69,11 @@ def inspect(root:Path)->dict:
         and report.get("queue_capacity")==128
         and report.get("freshness_cap_ms")==5000
         and report.get("depth_status")=="SYNCED"
+        and report.get("exclusive_os_owner_fence_held") is True
+        and report.get("max_terminal_source_silence_s")==5.0
+        and type(report.get("terminal_source_silence_s")) in (float,int)
+        and 0<=report["terminal_source_silence_s"]<=5.0
+        and not orphan_marker_present
         and session["symbol"]=="BTCUSDT"
         and session["source"]=="binance_public_simulation"
         and session["closed_at_ms"] is not None
@@ -74,6 +83,7 @@ def inspect(root:Path)->dict:
         "schema":"econith-phase1-single-socket-duration-independent-audit-v1",
         "verdict":"PASSED_ONE_SOURCE_ORIGINAL_INTEGRITY_ONLY" if accepted else "NOT_ACCEPTED",
         "source_sessions":1,
+        "orphan_owner_marker_present":orphan_marker_present,
         "originals":len(ids),"capture_intents":len(intents),
         "frames":frames,"snapshots":counts["snapshot"],
         "original_digest_mismatches":0,
