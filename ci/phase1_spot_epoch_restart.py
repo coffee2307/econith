@@ -162,7 +162,7 @@ def _fresh_first_receipt(root:Path)->int:
 
 async def run_offline_epoch_restart(
     root:Path,*,first_lease_factory,second_lease_factory,clock_preflight,
-    duration_s:float=2.65,max_frames_per_segment:int=12,
+    duration_s:float=3.8,max_frames_per_segment:int=12,
     explicit_offline_operator_restart_approval:bool=False,
 ) -> dict:
     """Two separate source sockets/SQLite roots. NEVER retry within one epoch."""
@@ -218,7 +218,11 @@ async def run_offline_epoch_restart(
             receiver_batch_size=8,reuse_receiver_connection=True,
         )
         if recovered.get("verdict")!="PASSED_BOUNDED_CO_RUNNING_HMAC_SEGMENTS_RESEARCH_ONLY":
-            raise ValueError("fresh source epoch was not independently accepted")
+            raise ValueError(
+                "fresh source epoch not accepted; source_class="
+                +str(recovered.get("source_failure_class"))
+                +", source_code="+str(recovered.get("source_failure_code"))
+            )
         independent=audit_hmac(second,co_run=True)
         if independent.get("verdict")!="PASSED_LOCAL_CORUN_RECEIVER_CHECKPOINT_CHAIN_ONLY":
             raise ValueError("fresh epoch HMAC independent audit refused")
