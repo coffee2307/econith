@@ -1,0 +1,107 @@
+name: ECONITH Phase1 batched persistent HMAC receiver offline + public bounded
+on:
+  push:
+    branches:
+      - 'experiment/phase1-hmac-batch-qualification-*'
+    paths:
+      - 'ci/phase1_rotating_spot_source.py'
+      - 'ci/phase1_rotating_corun_hmac.py'
+      - 'ci/phase1_public_corun_hmac_pilot.py'
+      - 'ci/phase1_public_corun_hmac_audit.py'
+      - 'tests/test_phase1_public_corun_gate.py'
+      - 'infrastructure/spot_forward_recovery.py'
+      - 'ci/phase1_rotating_hmac_handoff.py'
+      - '.github/workflows/phase1-hmac-batch-public.yml'
+  pull_request:
+    paths:
+      - 'ci/phase1_rotating_spot_source.py'
+      - 'ci/phase1_rotating_corun_hmac.py'
+      - 'ci/phase1_public_corun_hmac_pilot.py'
+      - 'ci/phase1_public_corun_hmac_audit.py'
+      - 'tests/test_phase1_public_corun_gate.py'
+      - '.github/workflows/phase1-public-corun-hmac.yml'
+permissions:
+  contents: read
+jobs:
+  qualify-public-optin-offline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Pin exact commit as source (not branch head)
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 2 -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_SHA}" \
+            -o "${RUNNER_TEMP}/source.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/source.tar.gz" --strip-components=1
+          test -f tests/test_phase1_public_corun_gate.py
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Pin test dependencies and existing research components
+        run: |
+          python -m pip install -q -r requirements.txt -r requirements-dev.txt
+          python -m pip install -q pytest==8.3.5 pytest-asyncio==0.26.0 httpx==0.28.1 websockets==14.2
+      - name: No-network consent, strict public-source identity and co-run crash/ACK fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest -q --tb=short tests/test_phase1_public_corun_gate.py tests/test_phase1_rotating_corun_hmac.py tests/test_phase1_rotating_hmac_handoff.py
+          python -m py_compile ci/phase1_rotating_spot_source.py ci/phase1_rotating_corun_hmac.py ci/phase1_public_corun_hmac_pilot.py ci/phase1_public_corun_hmac_audit.py
+  public-120s-corun-research:
+    needs: qualify-public-optin-offline
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Pin exact same successful source commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 2 -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_SHA}" \
+            -o "${RUNNER_TEMP}/source.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/source.tar.gz" --strip-components=1
+          test -f ci/phase1_public_corun_hmac_pilot.py
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install read-only public source and authenticated child IPC prerequisites
+        run: |
+          python -m pip install -q -r requirements.txt
+          python -m pip install -q httpx==0.28.1 websockets==14.2
+      - name: One Binance Public TLS Spot socket + co-running nontrading research receiver
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP}/econith-public-corun-${GITHUB_RUN_ID}"
+          python -m ci.phase1_public_corun_hmac_pilot \
+            --allow-public-market-data --allow-hmac-research \
+            --acknowledge-not-24h-proof --duration-s 120 \
+            --frames-per-segment 450 --receiver-batch-size 8 \
+            --reuse-receiver-connection --output-dir "$root"
+          python -m ci.phase1_public_corun_hmac_audit --root "$root" \
+            | tee "${RUNNER_TEMP}/econith-public-corun-audit.json"
+      - name: Stage small aggregate reports only (no raw frames, SQLite or IPC keys)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="${RUNNER_TEMP}/econith-public-corun-aggregate-only"
+          root="${RUNNER_TEMP}/econith-public-corun-${GITHUB_RUN_ID}"
+          mkdir -p "$stage"
+          for name in aggregate_report.json hmac_corun_aggregate.json hmac_corun_quarantine.json; do
+            if [ -f "$root/$name" ]; then cp "$root/$name" "$stage/$name"; fi
+          done
+          if [ -f "${RUNNER_TEMP}/econith-public-corun-audit.json" ]; then
+            cp "${RUNNER_TEMP}/econith-public-corun-audit.json" "$stage/independent_audit.json"
+          fi
+      - name: Upload aggregate-only results for independent review (3-day retention)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: econith-public-corun-hmac-${{ github.run_id }}
+          path: ${{ runner.temp }}/econith-public-corun-aggregate-only/
+          retention-days: 3
+          if-no-files-found: warn

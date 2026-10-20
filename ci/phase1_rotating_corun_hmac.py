@@ -32,6 +32,8 @@ async def co_run_rotating_hmac(
     explicit_public_research_approval:bool=False,
     max_handoff_age_s:float=20.0,
     inject_segment_failure:int|None=None,
+    receiver_batch_size:int=1,
+    reuse_receiver_connection:bool=False,
 ) -> dict:
     if ((explicit_offline_fixture_approval is True)
         == (explicit_public_research_approval is True)):
@@ -48,6 +50,9 @@ async def co_run_rotating_hmac(
             and type(max_frames_per_segment) is int
             and 250<=max_frames_per_segment<=650))
 
+        or type(receiver_batch_size) is not int
+        or not 1<=receiver_batch_size<=8
+        or type(reuse_receiver_connection) is not bool
         or not isinstance(root,Path) or not root.is_absolute()
         or type(max_handoff_age_s) not in (int,float)
         or not math.isfinite(max_handoff_age_s)
@@ -78,6 +83,8 @@ async def co_run_rotating_hmac(
         "concurrent_segments_completed":0,
         "segment_handoff_lag_max_ms":0,"segment_backlog_peak":0,
         "segment_queue_capacity":2,
+        "receiver_batch_size":receiver_batch_size,
+        "receiver_connection_reuse":reuse_receiver_connection,
         "segment_handoff_age_budget_ms":int(max_handoff_age_s*1000),
     }
 
@@ -99,7 +106,11 @@ async def co_run_rotating_hmac(
                     # source reader's asyncio loop, rather than blocking WSS.
                     evidence=await asyncio.to_thread(
                         lambda: asyncio.run(
-                            handoff_one_sealed_segment(sd,seal,seal["index"])
+                            handoff_one_sealed_segment(
+                                sd,seal,seal["index"],
+                                receiver_batch_size=receiver_batch_size,
+                                reuse_receiver_connection=reuse_receiver_connection,
+                            )
                         )
                     )
                     interval_ms=round((time.monotonic()-admitted_at)*1000,3)

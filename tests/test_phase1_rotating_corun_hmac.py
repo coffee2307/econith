@@ -172,6 +172,7 @@ async def lease(*,allow_public_market_data):
 asyncio.run(co_run_rotating_hmac(
     Path(sys.argv[1]),duration_s=3,max_frames_per_segment=12,
     explicit_offline_fixture_approval=True,
+    receiver_batch_size=8,reuse_receiver_connection=True,
     lease_factory=lease,clock_preflight=clock))
 '''
     r=subprocess.run([sys.executable,"-c",program,str(root)],
@@ -188,3 +189,33 @@ asyncio.run(co_run_rotating_hmac(
         assert db.execute("SELECT COUNT(*) FROM offline_independent_projection_receipts").fetchone()[0]>=1
     with pytest.raises(ValueError,match="operator review"):
         inspect_hmac(root,co_run=True)
+
+
+@pytest.mark.asyncio
+async def test_authenticated_eight_receipt_batch_with_receiver_connection_reuse(tmp_path):
+    """Eight individually persisted ACKs per authenticated HMAC request."""
+    root=(tmp_path/"hmac_batch_eight").resolve()
+    result=await co_run_rotating_hmac(
+        root,duration_s=2.65,max_frames_per_segment=12,
+        lease_factory=stream_fixture,clock_preflight=clock,
+        explicit_offline_fixture_approval=True,
+        receiver_batch_size=8,reuse_receiver_connection=True,
+    )
+    assert result["verdict"]=="PASSED_BOUNDED_CO_RUNNING_HMAC_SEGMENTS_RESEARCH_ONLY",result
+    assert result["receiver_batch_size"]==8
+    assert result["receiver_connection_reuse"] is True
+    assert result["reconstructed_projections"]==result["independent_receiver_receipts"]==result["forward_checkpoints"]
+    assert result["named_subscriber_receipts"]==2*result["derived_receipts"]
+    assert inspect_hmac(root,co_run=True)["verdict"]=="PASSED_LOCAL_CORUN_RECEIVER_CHECKPOINT_CHAIN_ONLY"
+
+
+@pytest.mark.asyncio
+async def test_invalid_or_unauthorized_research_batch_size_rejected(tmp_path):
+    root=(tmp_path/"invalid_batch").resolve()
+    with pytest.raises(ValueError):
+        await co_run_rotating_hmac(
+            root,duration_s=2.65,max_frames_per_segment=12,
+            lease_factory=stream_fixture,clock_preflight=clock,
+            explicit_offline_fixture_approval=True,receiver_batch_size=33,
+        )
+    assert not root.exists()

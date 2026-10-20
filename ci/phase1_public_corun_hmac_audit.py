@@ -44,6 +44,9 @@ def inspect_public(root:Path)->dict:
         and 0<=source["original_commit_age_ms_max"]<=5000
         and sum(hist.values())==proof["raw_original_events"]
         and source.get("journal_disk_bytes_peak",200_000_000)<=150_000_000
+        and type(co.get("receiver_batch_size")) is int
+        and 1<=co["receiver_batch_size"]<=8
+        and type(co.get("receiver_connection_reuse")) is bool
         and co.get("segment_handoff_age_budget_ms")==25000
         and 0<co.get("segment_handoff_lag_max_ms",999999)<=25000
         and 1<=co.get("segment_backlog_peak",3)<=2
@@ -74,6 +77,8 @@ def inspect_public(root:Path)->dict:
         "source_original_commit_age_ms_max":source["original_commit_age_ms_max"],
         "source_original_commit_age_histogram":hist,
         "hmac_projections":proof["source_projections"],
+        "receiver_batch_size":co["receiver_batch_size"],
+        "receiver_connection_reuse":co["receiver_connection_reuse"],
         "receiver_owned_ack":proof["receiver_owned_receipts"],
         "forward_checkpoints":proof["forward_checkpoints"],
         "segment_handoff_lag_max_ms":co["segment_handoff_lag_max_ms"],

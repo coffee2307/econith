@@ -59,6 +59,8 @@ async def recover_staged_forward_spot(
     reconstruct_missing: bool = False,
     max_book_staleness_ms: int = 2500,
     persistent_receiver: bool = False,
+    receiver_batch_size: int = 1,
+    reuse_receiver_connection: bool = False,
 ) -> ForwardStagedRecoveryReport:
     """Operator-invoked proof for staged rows; never resumes raw capture."""
     if (
@@ -67,6 +69,11 @@ async def recover_staged_forward_spot(
         or type(max_envelopes) is not int or not 1 <= max_envelopes <= 2000
         or type(reconstruct_missing) is not bool
         or type(persistent_receiver) is not bool
+        or type(reuse_receiver_connection) is not bool
+        or type(receiver_batch_size) is not int
+        or not 1 <= receiver_batch_size <= 8
+        or (receiver_batch_size != 1 and not persistent_receiver)
+        or (reuse_receiver_connection and not persistent_receiver)
         or type(max_book_staleness_ms) is not int
         or not 100 <= max_book_staleness_ms <= 30000
     ):
@@ -176,63 +183,72 @@ async def recover_staged_forward_spot(
             consumer.register(bus)
 
         persistent_client = (
-            PersistentHmacResearchReceiver(receiver_path)
+            PersistentHmacResearchReceiver(
+                receiver_path,reuse_receiver_connection=reuse_receiver_connection,
+            )
             if persistent_receiver else None
         )
         await bus.start()
         try:
             if persistent_client is not None:
                 await persistent_client.start()
-            for row in items:
-                e = row.envelope
-                data = json.loads(e.projection_json)
-                original = journal.verify_captured_record(session_id, e.ingest_id)
-                if (
-                    data["source_available_at_ms"] != original.received_at_ms
-                    or data["source_capture_id"] != e.ingest_id
-                    or data["topic"] not in ("md.aggTrade","md.depth")
-                ):
-                    raise ForwardOutboxError("original data diverges from staged envelope")
-                # Re-send EXACT original wire intent; signed receiver-owned receipt
-                # is idempotent even after a crash between its COMMIT and our ACK.
-                now_ms = max(__import__("time").time_ns() // 1_000_000,
-                             e.available_at_ms)
+            # Receiver IPC batching is opt-in. Every member is still an
+            # individually source-bound HMAC envelope and a separate SQLite
+            # COMMIT. An uncertain partial batch ACK must fail closed; an
+            # operator can replay the exact source prefix idempotently.
+            for base in range(0,len(items),receiver_batch_size):
+                batch=[row.envelope for row in items[base:base+receiver_batch_size]]
+                payloads=[]
+                for e in batch:
+                    data=json.loads(e.projection_json)
+                    original=journal.verify_captured_record(session_id,e.ingest_id)
+                    if (
+                        data["source_available_at_ms"] != original.received_at_ms
+                        or data["source_capture_id"] != e.ingest_id
+                        or data["topic"] not in ("md.aggTrade","md.depth")
+                    ):
+                        raise ForwardOutboxError("original data diverges from staged envelope")
+                    payloads.append(data)
+                now_ms=max(__import__("time").time_ns()//1_000_000,
+                           *(e.available_at_ms for e in batch))
                 if persistent_client is None:
-                    confirmations = await asyncio.to_thread(
+                    confirmations=await asyncio.to_thread(
                         accept_batch_via_authenticated_subprocess,
-                        [e], receiver_db=receiver_path, now_ms=now_ms,
+                        batch,receiver_db=receiver_path,now_ms=now_ms,
                     )
                 else:
-                    # Still one independent SQLite COMMIT/HMAC ACK per
-                    # envelope. We reuse only the authenticated child process,
-                    # not ACKs or delivery status; uncertain ACK fails closed.
-                    confirmations = await persistent_client.accept_batch(
-                        [e], now_ms=now_ms,
+                    confirmations=await persistent_client.accept_batch(
+                        batch,now_ms=now_ms,
                     )
-                if len(confirmations) != 1:
-                    raise ForwardOutboxError("independent receiver ACK unavailable")
-                outbox.ack_receiver(e, confirmations[0])
-                topic = data["topic"]
-                if topic == "md.aggTrade":
-                    wanted["md.ticker"] += 1
-                    wanted["indicator.volume_delta"] += 1
-                    ordinal = wanted["md.ticker"]
-                else:
-                    wanted["indicator.obi"] += 1
-                    ordinal = wanted["indicator.obi"]
-                await pub.publish_raw_confirmed(
-                    topic, frame=data["full_verified_frame"],
-                    **({"symbol":"BTCUSDT"} if topic == "md.depth" else {}),
-                    source=_SOURCE, historical_replay=False, forward_research=True,
-                    available_at_ms=e.available_at_ms,
-                    verified_session_id=session_id,
-                    verified_source_record_id=data["source_record_id"],
-                    verified_source_ordinal=ordinal,
-                    verified_source_available_at_ms=e.available_at_ms,
-                    receiver_receipt_id=confirmations[0].receipt_id,
-                )
-                await bus.wait_verified_idle(timeout_s=20)
-                outbox.ack_derived(e)
+                if len(confirmations)!=len(batch):
+                    raise ForwardOutboxError("partial or missing independent batch ACK")
+                for e,data,receipt in zip(batch,payloads,confirmations):
+                    # Intentionally preserve one ACK transition and one
+                    # independent observer publish per original. Crash
+                    # injection after receiver COMMIT/before this ACK remains
+                    # meaningful even if later batch receipts already exist.
+                    outbox.ack_receiver(e,receipt)
+                    topic=data["topic"]
+                    if topic=="md.aggTrade":
+                        wanted["md.ticker"]+=1
+                        wanted["indicator.volume_delta"]+=1
+                        ordinal=wanted["md.ticker"]
+                    else:
+                        wanted["indicator.obi"]+=1
+                        ordinal=wanted["indicator.obi"]
+                    await pub.publish_raw_confirmed(
+                        topic,frame=data["full_verified_frame"],
+                        **({"symbol":"BTCUSDT"} if topic=="md.depth" else {}),
+                        source=_SOURCE,historical_replay=False,
+                        forward_research=True,available_at_ms=e.available_at_ms,
+                        verified_session_id=session_id,
+                        verified_source_record_id=data["source_record_id"],
+                        verified_source_ordinal=ordinal,
+                        verified_source_available_at_ms=e.available_at_ms,
+                        receiver_receipt_id=receipt.receipt_id,
+                    )
+                    await bus.wait_verified_idle(timeout_s=20)
+                    outbox.ack_derived(e)
             actual = {topic:primary.verified_count(session_id, topic) for topic in _TOPICS}
             if actual != wanted:
                 raise ForwardOutboxError("primary derived receipt count not replayed")
