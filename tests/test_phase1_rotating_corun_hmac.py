@@ -41,7 +41,11 @@ async def stream_fixture(*,allow_public_market_data,segment_size:int=12):
                     ts=time.time_ns()//1_000_000
                     body={"stream":"btcusdt@depth@100ms","data":{
                         "e":"depthUpdate","E":ts,"s":"BTCUSDT",
-                        "U":state["id"],"u":state["id"],
+                        # Binance Spot diff intervals may overlap. A first
+                        # event spanning [U,U+1] bridges REST snapshot ID=U
+                        # immediately; no scheduler-dependent second packet.
+                        "U":state["id"],
+                        "u":state["id"]+(1 if (state["id"]-101)%segment_size==0 else 0),
                         "b":[["100","2"]],"a":[]}}
                     yield json.dumps(body,separators=(",",":")).encode()
                     # Fixture-only barrier: no second WS frame may overtake
