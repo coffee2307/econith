@@ -272,7 +272,7 @@ async def test_authenticated_eight_receipt_batch_with_receiver_connection_reuse(
         explicit_offline_fixture_approval=True,
         receiver_batch_size=8,reuse_receiver_connection=True,
     )
-    assert result["verdict"]=="PASSED_BOUNDED_CO_RUNNING_HMAC_SEGMENTS_RESEARCH_ONLY",result
+    assert result["verdict"]=="PASSED_BOUNDED_CO_RUNNING_HMAC_SEGMENTS_RESEARCH_ONLY",json.dumps(result,sort_keys=True)
     assert result["receiver_batch_size"]==8
     assert result["receiver_connection_reuse"] is True
     assert result["reconstructed_projections"]==result["independent_receiver_receipts"]==result["forward_checkpoints"]
