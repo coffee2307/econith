@@ -23,6 +23,8 @@ def main(argv=None)->int:
     p.add_argument("--acknowledge-not-24h-proof",action="store_true")
     p.add_argument("--duration-s",type=float,default=120.)
     p.add_argument("--frames-per-segment",type=int,default=450)
+    p.add_argument("--receiver-batch-size",type=int,choices=range(1,9),default=1)
+    p.add_argument("--reuse-receiver-connection",action="store_true")
     p.add_argument("--output-dir",type=Path,required=True)
     a=p.parse_args(argv)
     if not (a.allow_public_market_data
@@ -37,6 +39,8 @@ def main(argv=None)->int:
             clock_preflight=measure_public_clock,
             explicit_public_research_approval=True,
             max_handoff_age_s=25.,
+            receiver_batch_size=a.receiver_batch_size,
+            reuse_receiver_connection=a.reuse_receiver_connection,
         ))
     except (Exception,) as exc:
         print(json.dumps({"verdict":"REFUSED_OR_QUARANTINED",
@@ -47,7 +51,8 @@ def main(argv=None)->int:
           "source_ws_frames","sealed_segment_count","reconstructed_projections",
           "independent_receiver_receipts","forward_checkpoints",
           "concurrent_segments_completed","segment_handoff_lag_max_ms",
-          "segment_backlog_peak","source_original_commit_age_ms_max",
+          "segment_backlog_peak","receiver_batch_size","receiver_connection_reuse",
+          "source_original_commit_age_ms_max",
           "source_queue_high_watermark","process_peak_rss_kib_linux",
           "process_cpu_user_s","process_cpu_system_s",
           "source_journal_disk_peak_bytes","orders_submitted")

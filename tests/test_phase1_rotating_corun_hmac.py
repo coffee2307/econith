@@ -172,6 +172,7 @@ async def lease(*,allow_public_market_data):
 asyncio.run(co_run_rotating_hmac(
     Path(sys.argv[1]),duration_s=3,max_frames_per_segment=12,
     explicit_offline_fixture_approval=True,
+    receiver_batch_size=8,reuse_receiver_connection=True,
     lease_factory=lease,clock_preflight=clock))
 '''
     r=subprocess.run([sys.executable,"-c",program,str(root)],
@@ -188,3 +189,70 @@ asyncio.run(co_run_rotating_hmac(
         assert db.execute("SELECT COUNT(*) FROM offline_independent_projection_receipts").fetchone()[0]>=1
     with pytest.raises(ValueError,match="operator review"):
         inspect_hmac(root,co_run=True)
+
+    # Verified OS subprocess death. This is a synthetic *operator-reviewed*
+    # local recovery only: production code never unlinks orphan markers.
+    child=root/"segments"/"0000"
+    with sqlite3.connect(recv.resolve().as_uri()+"?mode=ro",uri=True) as db:
+        prior={
+            (row[0],row[1]) for row in db.execute(
+                "SELECT ingest_id,receipt_id FROM offline_independent_projection_receipts"
+            )
+        }
+    assert len(prior)>=2, "must exercise multiple already-COMMITted batched ACKs"
+    (root/".forward_producer.lock").unlink()
+    (child/".forward_producer.lock").unlink()
+    from infrastructure.spot_forward_recovery import recover_staged_forward_spot
+    session=json.loads((child/"seal.json").read_text())["session_id"]
+    recovered=asyncio.run(recover_staged_forward_spot(
+        root=child,session_id=session,max_envelopes=1000,
+        reconstruct_missing=True,max_book_staleness_ms=5000,
+        persistent_receiver=True,receiver_batch_size=8,
+        reuse_receiver_connection=True,
+    ))
+    assert recovered.staged_envelopes==recovered.receiver_receipts==recovered.forward_checkpoints
+    assert recovered.source_coverage_certified is False
+    assert recovered.session_certified is False
+    with sqlite3.connect(recv.resolve().as_uri()+"?mode=ro",uri=True) as db:
+        after={
+            (row[0],row[1]) for row in db.execute(
+                "SELECT ingest_id,receipt_id FROM offline_independent_projection_receipts"
+            )
+        }
+    assert prior.issubset(after)
+    assert len(after)==recovered.receiver_receipts
+    assert len(after)==len({identity for identity,digest in after})
+    # Even though one sealed segment recovers correctly, the overall source
+    # was interrupted and must NOT become a globally certified source.
+    with pytest.raises((ValueError,FileNotFoundError)):
+        inspect_hmac(root,co_run=True)
+
+
+@pytest.mark.asyncio
+async def test_authenticated_eight_receipt_batch_with_receiver_connection_reuse(tmp_path):
+    """Eight individually persisted ACKs per authenticated HMAC request."""
+    root=(tmp_path/"hmac_batch_eight").resolve()
+    result=await co_run_rotating_hmac(
+        root,duration_s=2.65,max_frames_per_segment=12,
+        lease_factory=stream_fixture,clock_preflight=clock,
+        explicit_offline_fixture_approval=True,
+        receiver_batch_size=8,reuse_receiver_connection=True,
+    )
+    assert result["verdict"]=="PASSED_BOUNDED_CO_RUNNING_HMAC_SEGMENTS_RESEARCH_ONLY",result
+    assert result["receiver_batch_size"]==8
+    assert result["receiver_connection_reuse"] is True
+    assert result["reconstructed_projections"]==result["independent_receiver_receipts"]==result["forward_checkpoints"]
+    assert result["named_subscriber_receipts"]==2*result["derived_receipts"]
+    assert inspect_hmac(root,co_run=True)["verdict"]=="PASSED_LOCAL_CORUN_RECEIVER_CHECKPOINT_CHAIN_ONLY"
+
+
+@pytest.mark.asyncio
+async def test_invalid_or_unauthorized_research_batch_size_rejected(tmp_path):
+    root=(tmp_path/"invalid_batch").resolve()
+    with pytest.raises(ValueError):
+        await co_run_rotating_hmac(
+            root,duration_s=2.65,max_frames_per_segment=12,
+            lease_factory=stream_fixture,clock_preflight=clock,
+            explicit_offline_fixture_approval=True,receiver_batch_size=33,
+        )
+    assert not root.exists()

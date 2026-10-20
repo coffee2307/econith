@@ -42,7 +42,9 @@ def _fsync_json(path: Path, data: dict) -> None:
         os.fsync(f.fileno())
 
 
-async def handoff_one_sealed_segment(sd:Path, seal:dict, index:int)->dict:
+async def handoff_one_sealed_segment(sd:Path, seal:dict, index:int, *,
+                                     receiver_batch_size:int=1,
+                                     reuse_receiver_connection:bool=False)->dict:
     """Research-only sealed-segment handoff under a separately held GLOBAL owner.
 
     This method does NOT inspect the whole source root, claim global ownership,
@@ -92,6 +94,8 @@ async def handoff_one_sealed_segment(sd:Path, seal:dict, index:int)->dict:
         root=sd,session_id=sid,max_envelopes=1000,
         reconstruct_missing=True,max_book_staleness_ms=5000,
         persistent_receiver=True,
+        receiver_batch_size=receiver_batch_size,
+        reuse_receiver_connection=reuse_receiver_connection,
     )
     if (not proof.source_session_closed
         or not proof.original_eligibility_rescan_verified
