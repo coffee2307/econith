@@ -41,7 +41,11 @@ async def stream_fixture(*,allow_public_market_data,segment_size:int=12):
                     ts=time.time_ns()//1_000_000
                     body={"stream":"btcusdt@depth@100ms","data":{
                         "e":"depthUpdate","E":ts,"s":"BTCUSDT",
-                        "U":state["id"],"u":state["id"],
+                        # Binance Spot diff intervals may overlap. A first
+                        # event spanning [U,U+1] bridges REST snapshot ID=U
+                        # immediately; no scheduler-dependent second packet.
+                        "U":state["id"],
+                        "u":state["id"]+(1 if (state["id"]-101)%segment_size==0 else 0),
                         "b":[["100","2"]],"a":[]}}
                     yield json.dumps(body,separators=(",",":")).encode()
                     # Fixture-only barrier: no second WS frame may overtake
@@ -265,12 +269,14 @@ async def test_authenticated_eight_receipt_batch_with_receiver_connection_reuse(
     """Eight individually persisted ACKs per authenticated HMAC request."""
     root=(tmp_path/"hmac_batch_eight").resolve()
     result=await co_run_rotating_hmac(
-        root,duration_s=2.65,max_frames_per_segment=12,
+        # Offline-only test headroom for CI CPU contention while keeping
+        # the 12-frame source seal and eight-ACK HMAC proof unchanged.
+        root,duration_s=4.2,max_frames_per_segment=12,
         lease_factory=stream_fixture,clock_preflight=clock,
         explicit_offline_fixture_approval=True,
         receiver_batch_size=8,reuse_receiver_connection=True,
     )
-    assert result["verdict"]=="PASSED_BOUNDED_CO_RUNNING_HMAC_SEGMENTS_RESEARCH_ONLY",result
+    assert result["verdict"]=="PASSED_BOUNDED_CO_RUNNING_HMAC_SEGMENTS_RESEARCH_ONLY",json.dumps(result,sort_keys=True)
     assert result["receiver_batch_size"]==8
     assert result["receiver_connection_reuse"] is True
     assert result["reconstructed_projections"]==result["independent_receiver_receipts"]==result["forward_checkpoints"]

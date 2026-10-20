@@ -41,6 +41,7 @@ export const en: Dictionary = {
   nav: {
     overview: "Overview",
     quant: "ECONITH Quant",
+    research: "Research",
     world: "ECONITH World",
     worldSubtitle: "Macro-geopolitical simulation with multi-agent exchange",
     social: "ECONITH Social",
