@@ -17,6 +17,7 @@ import time
 from ci.phase1_rotating_hmac_handoff import handoff_one_sealed_segment, _fsync_json
 from ci.phase1_rotating_spot_source import run_rotation
 from ci.phase1_rotating_hmac_audit import inspect as independent_receipt_audit
+from ci.phase1_public_spot_acceptance import measure_public_clock
 from infrastructure.spot_public_capture_adapter import SpotTransportError
 from infrastructure.spot_public_pinned_lease import open_pinned_public_spot_lease
 
@@ -28,13 +29,25 @@ async def co_run_rotating_hmac(
     root:Path, *, duration_s:float, max_frames_per_segment:int,
     lease_factory,clock_preflight,
     explicit_offline_fixture_approval:bool=False,
+    explicit_public_research_approval:bool=False,
     max_handoff_age_s:float=20.0,
     inject_segment_failure:int|None=None,
 ) -> dict:
-    if explicit_offline_fixture_approval is not True:
-        raise PermissionError("explicit nontrading offline research approval required")
-    if (lease_factory is open_pinned_public_spot_lease
-        or not callable(lease_factory) or not callable(clock_preflight)
+    if ((explicit_offline_fixture_approval is True)
+        == (explicit_public_research_approval is True)):
+        raise PermissionError("exactly one research-only offline/public consent required")
+    public=explicit_public_research_approval is True
+    if (not callable(lease_factory) or not callable(clock_preflight)
+        or (public and (
+            lease_factory is not open_pinned_public_spot_lease
+            or clock_preflight is not measure_public_clock))
+        or (not public and lease_factory is open_pinned_public_spot_lease)
+        or (public and not (
+            type(duration_s) in (int,float) and math.isfinite(duration_s)
+            and 90<=duration_s<=150
+            and type(max_frames_per_segment) is int
+            and 250<=max_frames_per_segment<=650))
+
         or not isinstance(root,Path) or not root.is_absolute()
         or type(max_handoff_age_s) not in (int,float)
         or not math.isfinite(max_handoff_age_s)
@@ -52,6 +65,7 @@ async def co_run_rotating_hmac(
     result={
         "schema":_SCHEMA,"verdict":"INCOMPLETE_NOT_CERTIFIED",
         "mode":"SIMULATION","source_reader_attached_during_hmac":True,
+        "public_read_only_market_source":public,
         "source_socket_count_observed":1,
         "postseal_handoff_only":False,"per_segment_postseal_delivery":True,
         "unobserved_venue_history_certified":False,
@@ -64,6 +78,7 @@ async def co_run_rotating_hmac(
         "concurrent_segments_completed":0,
         "segment_handoff_lag_max_ms":0,"segment_backlog_peak":0,
         "segment_queue_capacity":2,
+        "segment_handoff_age_budget_ms":int(max_handoff_age_s*1000),
     }
 
     async def worker():
@@ -152,6 +167,16 @@ async def co_run_rotating_hmac(
                 or result["reconstructed_projections"]!=result["forward_checkpoints"]
                 or result["named_subscriber_receipts"]!=2*result["derived_receipts"]):
                 raise RuntimeError("HMAC child receipt/derived/checkpoint parity mismatch")
+            result["source_original_commit_age_ms_max"]=source_report.get("original_commit_age_ms_max")
+            result["source_original_commit_age_histogram"]=source_report.get("original_commit_age_ms_histogram")
+            result["source_queue_high_watermark"]=source_report.get("source_queue_high_watermark")
+            result["adapter_queue_capacity"]=source_report.get("adapter_queue_capacity")
+            result["source_ws_frames"]=source_report.get("committed_ws_frames")
+            result["source_socket_observed_duration_s"]=source_report.get("duration_stream_elapsed_s")
+            result["source_journal_disk_peak_bytes"]=source_report.get("journal_disk_bytes_peak")
+            result["process_peak_rss_kib_linux"]=source_report.get("process_peak_rss_kib_linux")
+            result["process_cpu_user_s"]=source_report.get("process_cpu_user_s")
+            result["process_cpu_system_s"]=source_report.get("process_cpu_system_s")
             result["verdict"]=_PASS
             _fsync_json(root/"hmac_corun_aggregate.json",result)
         except BaseException as exc:
@@ -171,7 +196,9 @@ async def co_run_rotating_hmac(
             root,allow_public_market_data=True,duration_s=duration_s,
             max_frames_per_segment=max_frames_per_segment,
             lease_factory=lease_factory,clock_preflight=clock_preflight,
-            _fixture=True,_on_segment_sealed=on_segment,
+            _fixture=not public,
+            _public_corun_authorized=public,
+            _on_segment_sealed=on_segment,
             _on_capture_complete=on_source_complete,
         )
     finally:
