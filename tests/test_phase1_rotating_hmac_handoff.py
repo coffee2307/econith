@@ -53,7 +53,7 @@ async def capture(root:Path):
     out=await run_rotation(root,allow_public_market_data=True,
        duration_s=.55,max_frames_per_segment=12,_fixture=True,
        lease_factory=fake_lease,clock_preflight=clock)
-    assert out["verdict"]=="PASSED_BOUNDED_SOURCE_ROTATION_RESEARCH_ONLY",out
+    assert out["verdict"]=="PASSED_BOUNDED_SOURCE_ROTATION_RESEARCH_ONLY",json.dumps(out,sort_keys=True)
     assert len(out["segments"])>=2
     return out
 
@@ -142,7 +142,7 @@ asyncio.run(reconcile_sealed_rotation(
     with sqlite3.connect(raw.resolve().as_uri()+"?mode=ro",uri=True) as db:
         assert db.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
         assert db.execute("SELECT COUNT(*) FROM offline_independent_projection_receipts").fetchone()[0]>=1
-    with pytest.raises(ValueError,match="owner"):
+    with pytest.raises(ValueError,match="operator review"):
         independent_audit(root)
     with pytest.raises(HandoffRefused,match="owner"):
         await reconcile_sealed_rotation(root,explicit_operator_approval=True)
