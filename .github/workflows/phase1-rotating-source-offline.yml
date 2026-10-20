@@ -41,3 +41,52 @@ jobs:
         run: |
           python -m pytest -q --tb=short tests/test_phase1_rotating_source.py
           python -m py_compile infrastructure/spot_public_capture_adapter.py ci/phase1_rotating_spot_source.py ci/phase1_rotating_source_audit.py
+
+  public-bounded-rotating-originals:
+    needs: bounded-offline-rotation
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Fetch exact immutable source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 2 -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_SHA}" \
+            -o "${RUNNER_TEMP}/source.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/source.tar.gz" --strip-components=1
+          test -f ci/phase1_rotating_spot_source.py
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Read-only Binance public transport packages
+        run: python -m pip install -q httpx==0.28.1 websockets==14.2
+      - name: One public socket and continuous reader across multiple 300-frame SQLite journals
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP}/econith-rotating-source-${GITHUB_RUN_ID}"
+          python -m ci.phase1_rotating_spot_source \
+            --allow-public-market-data --acknowledge-rotation-not-gap-free \
+            --duration-s 120 --frames-per-segment 300 --output-dir "$root"
+          python -m ci.phase1_rotating_source_audit --root "$root" \
+            | tee "${RUNNER_TEMP}/rotation_independent_audit.json"
+      - name: Stage aggregate metadata only, never original SQLite
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="${RUNNER_TEMP}/econith-rotating-public-aggregate"
+          root="${RUNNER_TEMP}/econith-rotating-source-${GITHUB_RUN_ID}"
+          mkdir -p "$stage"
+          if [ -f "$root/aggregate_report.json" ]; then cp "$root/aggregate_report.json" "$stage/aggregate_report.json"; fi
+          if [ -f "${RUNNER_TEMP}/rotation_independent_audit.json" ]; then cp "${RUNNER_TEMP}/rotation_independent_audit.json" "$stage/independent_audit.json"; fi
+      - name: Upload aggregate only for 3 days
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: econith-phase1-rotating-source-${{ github.run_id }}
+          path: ${{ runner.temp }}/econith-rotating-public-aggregate/
+          retention-days: 3
+          if-no-files-found: warn
