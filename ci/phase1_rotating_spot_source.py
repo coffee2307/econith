@@ -161,7 +161,7 @@ async def _capture_owned(root: Path, *,duration_s:float,max_frames_per_segment:i
                     max_body_bytes=262144,max_frames_per_session=max_frames_per_segment+1,
                     max_age_ms=5000,forward_capture_audit=True,reuse_connection=True,
                 )
-                sid="rot_"+secrets.token_hex(8)
+                sid="rec_rot_"+secrets.token_hex(8)
                 adapter=OptInSpotIngressAdapter(
                     journal,symbol="BTCUSDT",queue_capacity=128,
                     cooperative_reader_yield=True,accept_source_stamped_frames=True,
