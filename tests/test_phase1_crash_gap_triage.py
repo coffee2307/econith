@@ -118,8 +118,8 @@ def test_rehashed_original_intent_rejected_against_immutable_outbox(closed_sourc
             "SELECT raw_blob FROM offline_spot_capture_records WHERE capture_id=?",
             (cid,),
         ).fetchone()[0]
-        assert b"BTCUSDT" in raw
-        forged = raw.replace(b"BTCUSDT", b"ETHUSDT")
+        assert b'"lastUpdateId": 100' in raw
+        forged = raw.replace(b'"lastUpdateId": 100', b'"lastUpdateId": 101')
         digest = hashlib.sha256(forged).hexdigest()
         db.execute(
             "UPDATE offline_spot_capture_records SET raw_blob=?,sha256=? WHERE capture_id=?",
