@@ -59,7 +59,7 @@ async def fake_lease(*,allow_public_market_data):
 
 async def capture(root:Path):
     out=await run_rotation(root,allow_public_market_data=True,
-       duration_s=.55,max_frames_per_segment=12,_fixture=True,
+       duration_s=3.0,max_frames_per_segment=12,_fixture=True,
        lease_factory=fake_lease,clock_preflight=clock)
     assert out["verdict"]=="PASSED_BOUNDED_SOURCE_ROTATION_RESEARCH_ONLY",json.dumps(out,sort_keys=True)
     assert len(out["segments"])>=2
