@@ -52,7 +52,7 @@ async def fake_lease(*,allow_public_market_data):
         async def snapshot(self,symbol,limit):
             assert symbol=="BTCUSDT"
             state["snapshot_index"]+=1
-            return json.dumps({"lastUpdateId":100+12*(state["snapshot_index"]-1),
+            return json.dumps({"lastUpdateId":101+12*(state["snapshot_index"]-1),
                 "bids":[["100","2"]],"asks":[["102","2"]]}).encode()
     yield Socket()
 
