@@ -155,6 +155,41 @@ async def test_startup_fault_propagates_without_unverified_fallback(
     assert getattr(main.app.state, "verified_only_research", False) is False
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["verified_only", "verified_forward_preview"])
+async def test_shutdown_exception_always_clears_protected_runtime_components(
+    monkeypatch, tmp_path, kind,
+):
+    configure(monkeypatch, tmp_path, kind)
+    import main
+
+    if kind == "verified_only":
+        import infrastructure.spot_verified_research_runtime as adapter
+        method = "start_verified_research_runtime"
+    else:
+        import infrastructure.spot_verified_forward_preview_runtime as adapter
+        method = "start_verified_forward_preview"
+
+    class BrokenClose(OfflineStub):
+        async def close(self):
+            self.closed = True
+            raise RuntimeError("INJECTED_RESEARCH_CLOSE_FAILURE")
+
+    obj = BrokenClose()
+
+    async def start(**kwargs):
+        return obj
+
+    monkeypatch.setattr(adapter, method, start)
+    with pytest.raises(RuntimeError, match="INJECTED_RESEARCH_CLOSE_FAILURE"):
+        async with main.app.router.lifespan_context(main.app):
+            assert main.app.state.verified_only_research is True
+            assert main.components["verified_research_runtime"] is obj
+    assert obj.closed is True
+    assert main.components == {}
+    assert main.app.state.verified_only_research is False
+
+
 @pytest.mark.parametrize("kind", ["verified_only", "verified_forward_preview"])
 def test_missing_policy_consent_never_falls_back_to_legacy(
     monkeypatch, tmp_path, kind,
