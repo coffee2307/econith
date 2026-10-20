@@ -143,7 +143,7 @@ async def test_rotation_tampered_original_cannot_pass_independent_audit(tmp_path
         duration_s=.65,max_frames_per_segment=16,_fixture=True,
         lease_factory=lease_fixture(),clock_preflight=public_clock,
     )
-    assert report["verdict"]=="PASSED_BOUNDED_SOURCE_ROTATION_RESEARCH_ONLY",report
+    assert report["verdict"]=="PASSED_BOUNDED_SOURCE_ROTATION_RESEARCH_ONLY",json.dumps(report,sort_keys=True)
     path=root/"segments"/"0001"/"original.sqlite"
     with sqlite3.connect(path) as db:
         db.execute("UPDATE offline_spot_capture_records SET raw_blob=? WHERE capture_id=(SELECT MIN(capture_id) FROM offline_spot_capture_records)",(b"{}",))
