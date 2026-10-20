@@ -1,0 +1,85 @@
+name: ECONITH P1-12 public source and co-running HMAC forensic gate
+
+on:
+  pull_request:
+    paths:
+      - "ci/phase1_public_corun_hmac_acceptance.py"
+      - "ci/phase1_rotating_hmac_audit.py"
+      - "tests/test_phase1_public_corun_hmac_acceptance.py"
+      - ".github/workflows/phase1-p112-public-corun-hmac.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-corun-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install offline research dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Verify bounded HMAC proof gates and hostile negative fixtures
+        run: |
+          python -m pytest -q --tb=short \
+            tests/test_phase1_public_corun_hmac_acceptance.py \
+            tests/test_phase1_rotating_corun_hmac.py
+
+  bounded-public-spot-corun:
+    needs: offline-corun-contracts
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install isolated read-only HMAC and public Spot dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: One public Binance TLS socket with sealed-segment HMAC/checkpoint audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          private="${RUNNER_TEMP}/econith-p112-private-${GITHUB_RUN_ID}"
+          python -m ci.phase1_public_corun_hmac_acceptance \
+            --allow-public-market-data \
+            --enable-independent-hmac-receiver \
+            --acknowledge-not-continuous-24h \
+            --duration-s 120 \
+            --frames-per-segment 450 \
+            --max-handoff-age-s 30 \
+            --output-dir "$private" \
+            | tee "${RUNNER_TEMP}/p112_bounded_aggregate.json"
+          python -m ci.phase1_rotating_hmac_audit \
+            --co-run --root "$private" \
+            | tee "${RUNNER_TEMP}/p112_readonly_chain_audit.json"
+      - name: Stage aggregate-only reports (NEVER private SQLite or raw WS)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="${RUNNER_TEMP}/p112_public_aggregate_only"
+          mkdir -p "$stage"
+          if [ -f "${RUNNER_TEMP}/p112_bounded_aggregate.json" ]; then
+            cp "${RUNNER_TEMP}/p112_bounded_aggregate.json" "$stage/aggregate.json"
+          fi
+          if [ -f "${RUNNER_TEMP}/p112_readonly_chain_audit.json" ]; then
+            cp "${RUNNER_TEMP}/p112_readonly_chain_audit.json" "$stage/local_forensic.json"
+          fi
+      - name: Upload sanitized 3-day aggregate, not source originals or receiver keys
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: econith-p112-public-aggregate-${{ github.run_id }}
+          path: ${{ runner.temp }}/p112_public_aggregate_only/
+          retention-days: 3
+          if-no-files-found: warn
