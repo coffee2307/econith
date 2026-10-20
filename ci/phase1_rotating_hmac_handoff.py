@@ -42,6 +42,83 @@ def _fsync_json(path: Path, data: dict) -> None:
         os.fsync(f.fileno())
 
 
+async def handoff_one_sealed_segment(sd:Path, seal:dict, index:int)->dict:
+    """Research-only sealed-segment handoff under a separately held GLOBAL owner.
+
+    This method does NOT inspect the whole source root, claim global ownership,
+    or authorize a new socket. Caller must already own root and have fsynced
+    the source segment. Child recovery owns an additional O_EXCL segment fence.
+    """
+    if (sd.is_symlink() or not sd.is_dir() or (sd/".forward_producer.lock").exists()
+        or type(index) is not int or index<0 or sd.name!=f"{index:04d}"
+        or type(seal) is not dict or seal.get("index")!=index
+        or not isinstance(seal.get("session_id"),str)
+        or not seal["session_id"].startswith("rec_rot_")
+        or (sd/"postseal_hmac_receipts.json").exists()):
+        raise HandoffRefused("untrusted, unsealed or previously processed segment")
+    sid=seal["session_id"]
+    provider=lambda:QuantMode.SIMULATION
+    for name in ("forward_outbox.sqlite","derived.sqlite","research_audit.sqlite",
+                 "research_monitor.sqlite","forward_checkpoints.sqlite",
+                 "independent_receiver.sqlite"):
+        if (sd/name).exists():
+            raise HandoffRefused("old downstream evidence requires operator review")
+    # Verify complete originals before creating downstream ledgers.
+    from infrastructure.spot_ingress_capture import OfflineSpotCaptureJournal
+    raw=OfflineSpotCaptureJournal(sd/"original.sqlite",mode_provider=provider,
+                                  forward_capture_audit=True)
+    try:
+        items=raw.verify_forward_capture_inventory(sid,limit=1000)
+        with raw._connect() as db:
+            session=db.execute(
+                "SELECT closed_at_ms FROM offline_spot_capture_sessions WHERE session_id=?",
+                (sid,)).fetchone()
+        if session is None or session["closed_at_ms"] is None or len(items)!=seal["original_events"]:
+            raise HandoffRefused("unclosed or unexpected source original count")
+    finally:
+        raw.close()
+    OfflineForwardSpotOutbox(
+        sd/"forward_outbox.sqlite",session_id=sid,mode_provider=provider)
+    OfflineDerivedResearchReceiptLedger(sd/"derived.sqlite",mode_provider=provider)
+    for name in ("research_audit","research_monitor"):
+        OfflineNamedResearchSubscriber(
+            sd/(name+".sqlite"),name=name,
+            expected_source="verified_forward_spot_shadow",
+            mode_provider=provider,
+        )
+    OfflineForwardSessionCheckpoints(
+        sd/"forward_checkpoints.sqlite",session_id=sid,mode_provider=provider)
+    proof=await recover_staged_forward_spot(
+        root=sd,session_id=sid,max_envelopes=1000,
+        reconstruct_missing=True,max_book_staleness_ms=5000,
+        persistent_receiver=True,
+    )
+    if (not proof.source_session_closed
+        or not proof.original_eligibility_rescan_verified
+        or proof.staged_envelopes<=0
+        or proof.staged_envelopes!=proof.reconstructed_missing_intents
+        or proof.staged_envelopes!=proof.receiver_receipts
+        or proof.staged_envelopes!=proof.outbox_derived_acked
+        or proof.staged_envelopes!=proof.forward_checkpoints
+        or proof.primary_derived_receipts<=0
+        or proof.independent_named_receipts!=2*proof.primary_derived_receipts
+        or proof.session_certified or proof.source_coverage_certified):
+        raise HandoffRefused("sealed segment receiver/observer/checkpoint ACK divergence")
+    evidence={
+        "index":index,"session_id":sid,"raw_original_events":seal["original_events"],
+        "reconstructed_projections":proof.staged_envelopes,
+        "receiver_receipts":proof.receiver_receipts,
+        "primary_derived_receipts":proof.primary_derived_receipts,
+        "independent_named_receipts":proof.independent_named_receipts,
+        "forward_checkpoints":proof.forward_checkpoints,
+        "original_eligibility_rescan_verified":True,
+        "source_session_closed":True,"source_coverage_certified":False,
+        "session_certified":False,
+    }
+    _fsync_json(sd/"postseal_hmac_receipts.json",evidence)
+    return evidence
+
+
 async def reconcile_sealed_rotation(root: Path, *,
                                     explicit_operator_approval:bool=False,
                                     inject_after_segments:int|None=None)->dict:

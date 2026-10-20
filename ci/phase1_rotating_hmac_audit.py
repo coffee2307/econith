@@ -37,20 +37,20 @@ def _digest(prev:str,num:int,out:dict,receipt_id:str)->str:
     },sort_keys=True,separators=(",",":"),ensure_ascii=False)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
-def inspect(root:Path)->dict:
+def inspect(root:Path, *, co_run:bool=False)->dict:
     if not root.is_absolute() or root!=root.resolve() or root.is_symlink():
         raise ValueError("unsafe source root")
-    if (root/".forward_producer.lock").exists() or (root/"hmac_postseal_quarantine.json").exists():
+    if (root/".forward_producer.lock").exists() or (root/("hmac_corun_quarantine.json" if co_run else "hmac_postseal_quarantine.json")).exists():
         raise ValueError("handoff requires operator review")
     source=inspect_source(root)
     if source["verdict"]!="PASSED_BOUNDED_LOCAL_SOURCE_ROTATION_AUDIT_ONLY":
         raise ValueError("source journal rotation not independently verified")
-    path=root/"hmac_postseal_aggregate.json"
+    path=root/("hmac_corun_aggregate.json" if co_run else "hmac_postseal_aggregate.json")
     if path.is_symlink():
         raise ValueError("aliased HMAC handoff aggregate")
     report=json.loads(path.read_text(encoding="utf-8"))
-    if (report.get("schema")!="econith-phase1-rotating-hmac-postseal-handoff-v1"
-        or report.get("verdict")!="PASSED_BOUNDED_POSTSEAL_HMAC_HANDOFF_ONLY"):
+    if (report.get("schema")!=("econith-phase1-rotating-hmac-corun-v1" if co_run else "econith-phase1-rotating-hmac-postseal-handoff-v1")
+        or report.get("verdict")!=("PASSED_BOUNDED_CO_RUNNING_HMAC_SEGMENTS_RESEARCH_ONLY" if co_run else "PASSED_BOUNDED_POSTSEAL_HMAC_HANDOFF_ONLY")):
         raise ValueError("handoff did not finish normally")
     seg=report.get("segments")
     if type(seg) is not list or len(seg)!=source["original_journal_count"]:
@@ -144,8 +144,16 @@ def inspect(root:Path)->dict:
           ==report["independent_receiver_receipts"]==report["forward_checkpoints"],
         derived==report["derived_receipts"],
         named==report["named_subscriber_receipts"]==2*derived,
-        report.get("source_reader_attached_during_hmac") is False,
-        report.get("postseal_handoff_only") is True,
+        report.get("source_reader_attached_during_hmac") is co_run,
+        report.get("postseal_handoff_only") is (not co_run),
+        (not co_run or
+          (report.get("per_segment_postseal_delivery") is True
+           and 1<=report.get("concurrent_segments_completed",0)<=len(seg)
+           and 1<=report.get("segment_backlog_peak",3)<=2
+           and report.get("segment_queue_capacity")==2
+           and 0<report.get("segment_handoff_lag_max_ms",999999)<=30000
+           and report.get("sealed_segment_count")==len(seg))),
+
         report.get("HMAC_downstream_tested") is None,
         report.get("unobserved_venue_history_certified") is False,
         report.get("full_continuous_market_hmac_certified") is False,
@@ -156,7 +164,8 @@ def inspect(root:Path)->dict:
     ])):
         raise ValueError("global sealed handoff evidence incomplete")
     return {
-        "verdict":"PASSED_LOCAL_POSTSEAL_RECEIVER_CHECKPOINT_CHAIN_ONLY",
+        "verdict":("PASSED_LOCAL_CORUN_RECEIVER_CHECKPOINT_CHAIN_ONLY" if co_run
+                   else "PASSED_LOCAL_POSTSEAL_RECEIVER_CHECKPOINT_CHAIN_ONLY"),
         "segments":len(seg),"raw_original_events":originals,
         "source_projections":projections,"receiver_owned_receipts":received,
         "forward_checkpoints":checkpoints,

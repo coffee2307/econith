@@ -44,7 +44,9 @@ def roll_hash(prior: str, ordinal: int, raw: bytes) -> str:
 
 async def _capture_owned(root: Path, *,duration_s:float,max_frames_per_segment:int,
                          allow_network:bool,lease_factory,clock_preflight,
-                         _fixture:bool=False,terminal_silence_s:float=5.0):
+                         _fixture:bool=False,terminal_silence_s:float=5.0,
+                         _on_segment_sealed=None,
+                         _on_capture_complete=None):
     report={
         "schema":_SCHEMA,"verdict":"STARTED_NOT_CERTIFIED",
         "mode":"SIMULATION","source":"binance_public_data_only",
@@ -229,6 +231,11 @@ async def _capture_owned(root: Path, *,duration_s:float,max_frames_per_segment:i
                         "rotating journal exceeded private disk budget",
                         reason="ROTATING_STORAGE_CAP",
                     )
+                if _on_segment_sealed is not None:
+                    # Experimental callback fires ONLY after original journal
+                    # closure and fsynced per-segment seal. It must enqueue
+                    # without blocking the lifetime WebSocket reader.
+                    _on_segment_sealed(sd,seal)
                 # Yield CPU scheduling to the one uninterrupted upstream reader.
                 await asyncio.sleep(0)
             await reader
@@ -258,6 +265,13 @@ async def _capture_owned(root: Path, *,duration_s:float,max_frames_per_segment:i
             reader.cancel()
             await asyncio.gather(reader,return_exceptions=True)
         report["chain_end"]=current_chain
+        if _on_capture_complete is not None:
+            try:
+                await _on_capture_complete(report)
+            except Exception as exc:
+                report["verdict"]="FAILED_OR_QUARANTINED"
+                report["downstream_failure_class"]=type(exc).__name__
+                report["downstream_incomplete"]=True
         report["aggregate_elapsed_s"]=round(time.monotonic()-started,3) if started is not None else 0
         with report_path.open("x",encoding="utf-8") as f:
             json.dump(report,f,sort_keys=True,indent=2,allow_nan=False)
@@ -271,7 +285,9 @@ async def run_rotation(root:Path,*,allow_public_market_data:bool=False,
                        duration_s:float=120.,max_frames_per_segment:int=300,
                        lease_factory=open_pinned_public_spot_lease,
                        clock_preflight=measure_public_clock,_fixture:bool=False,
-                       terminal_silence_s:float=5.0)->dict:
+                       terminal_silence_s:float=5.0,
+                       _on_segment_sealed=None,
+                       _on_capture_complete=None)->dict:
     if allow_public_market_data is not True:
         raise PermissionError("read-only public source opt-in required")
     if (type(duration_s) not in (int,float) or not math.isfinite(duration_s)
@@ -281,7 +297,11 @@ async def run_rotation(root:Path,*,allow_public_market_data:bool=False,
                 else (160<=max_frames_per_segment<=800))
         or type(terminal_silence_s) not in (int,float)
         or not math.isfinite(terminal_silence_s)
-        or not .01<=terminal_silence_s<=5.0):
+        or not .01<=terminal_silence_s<=5.0
+        or (_on_segment_sealed is not None
+            and (not _fixture or not callable(_on_segment_sealed)))
+        or (_on_capture_complete is not None
+            and (not _fixture or not callable(_on_capture_complete)))):
         raise ValueError("strict experimental source rotation constraints")
     _fresh_private_root(root)
     with exclusive_forward_owner(root,role="CAPTURE"):
@@ -291,6 +311,8 @@ async def run_rotation(root:Path,*,allow_public_market_data:bool=False,
             allow_network=True,lease_factory=lease_factory,
             clock_preflight=clock_preflight,_fixture=_fixture,
             terminal_silence_s=terminal_silence_s,
+            _on_segment_sealed=_on_segment_sealed,
+            _on_capture_complete=_on_capture_complete,
         )
 
 
