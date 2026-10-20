@@ -30,7 +30,7 @@ async def clock(**kwargs):
 @asynccontextmanager
 async def stream_fixture(*,allow_public_market_data,segment_size:int=12):
     assert allow_public_market_data is True
-    state={"id":100,"snapshot_index":0}
+    state={"id":100,"snapshot_index":0,"snapshot_served":asyncio.Event()}
     class Lease:
         @property
         def stream(self):
@@ -44,6 +44,12 @@ async def stream_fixture(*,allow_public_market_data,segment_size:int=12):
                         "U":state["id"],"u":state["id"],
                         "b":[["100","2"]],"a":[]}}
                     yield json.dumps(body,separators=(",",":")).encode()
+                    # Fixture-only barrier: no second WS frame may overtake
+                    # the independently queued REST snapshot's receipt.
+                    if (state["id"]-101)%segment_size==0:
+                        await asyncio.wait_for(state["snapshot_served"].wait(),2.0)
+                        state["snapshot_served"].clear()
+                        await asyncio.sleep(.12)
             return source()
         async def snapshot(self,symbol,limit):
             assert symbol=="BTCUSDT" and limit==1000
@@ -52,6 +58,7 @@ async def stream_fixture(*,allow_public_market_data,segment_size:int=12):
             # the first buffered diff U of this exact source journal, even
             # under arbitrary scheduler delay.
             expected=101+segment_size*(state["snapshot_index"]-1)
+            state["snapshot_served"].set()
             return json.dumps({"lastUpdateId":expected,
                 "bids":[["100","2"],["99","2"]],
                 "asks":[["102","2"],["103","2"]]}).encode()
@@ -170,7 +177,7 @@ async def clock(**kwargs):
     return SimpleNamespace(round_trip_ms=7,measured_offset_ms=0)
 @asynccontextmanager
 async def lease(*,allow_public_market_data):
-    state={"id":100,"snapshot_index":0}
+    state={"id":100,"snapshot_index":0,"snapshot_served":asyncio.Event()}
     class Socket:
         @property
         def stream(self):
@@ -183,9 +190,14 @@ async def lease(*,allow_public_market_data):
                           "U":state["id"],"u":state["id"],
                           "b":[["100","2"]],"a":[]}
                     yield json.dumps({"stream":"btcusdt@depth@100ms","data":data}).encode()
+                    if (state["id"]-101)%12==0:
+                        await asyncio.wait_for(state["snapshot_served"].wait(),2.0)
+                        state["snapshot_served"].clear()
+                        await asyncio.sleep(.12)
             return ws()
         async def snapshot(self,symbol,limit):
             state["snapshot_index"]+=1
+            state["snapshot_served"].set()
             return json.dumps({"lastUpdateId":101+12*(state["snapshot_index"]-1),
                   "bids":[["100","2"]],"asks":[["102","2"]]}).encode()
     yield Socket()
