@@ -242,7 +242,7 @@ async def run_offline_epoch_restart(
             "unknown_begin_local_ms":boundary["unknown_begin_local_ms"],
             "unknown_end_first_fresh_receipt_ms":first_new,
             "new_epoch_source_session_ids_disjoint":True,
-            "new_epoch_fresh_snapshots":independent["snapshots"],
+            "new_epoch_fresh_snapshots":independent["segments"],
             "unknown_market_coverage_between_epochs":True,
             "gap_free_between_epochs_certified":False,
             "live_public_reconnection_tested":False,
