@@ -16,6 +16,7 @@ import math
 import os
 from pathlib import Path
 import secrets
+import sqlite3
 import sys
 import time
 
@@ -278,7 +279,7 @@ def main(argv=None):
             forensic=inspect_originals(args.output_dir)
             if forensic["verdict"]!=FORENSIC_PASS:
                 raise ValueError("forensic original evidence not accepted")
-        except (ValueError,TypeError,KeyError,OSError) as exc:
+        except (ValueError,TypeError,KeyError,OSError,sqlite3.Error) as exc:
             print(json.dumps({
                 "verdict":"REFUSED_INDEPENDENT_SOURCE_AUDIT",
                 "producer_verdict":report["verdict"],
