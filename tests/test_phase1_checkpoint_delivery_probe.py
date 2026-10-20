@@ -118,6 +118,7 @@ async def test_timing_requires_spool_and_authenticated_receiver_before_files(tmp
 @pytest.mark.parametrize("age", [-1, 1001, 3.5, None, True])
 def test_bounded_age_refuses_future_stale_and_noninteger_ms(tmp_path, age):
     root = (tmp_path / "raw_probes").resolve()
+    root.mkdir()
     tool = BoundedCheckpointAgeProbe(
         root / "checkpoint_delivery_ages.json", budget_ms=1000,
     )
@@ -143,6 +144,7 @@ def test_bounded_age_refuses_future_stale_and_noninteger_ms(tmp_path, age):
 
 def test_probe_cannot_rewrite_a_sealed_latency_report(tmp_path):
     root = (tmp_path / "one").resolve()
+    root.mkdir()
     tool = BoundedCheckpointAgeProbe(
         root / "checkpoint_delivery_ages.json", budget_ms=1000,
     )
@@ -162,6 +164,7 @@ def test_probe_cannot_rewrite_a_sealed_latency_report(tmp_path):
 
 def test_untrusted_timing_file_without_originals_cannot_self_certify(tmp_path):
     root = (tmp_path / "missing_ledgers").resolve()
+    root.mkdir()
     tool = BoundedCheckpointAgeProbe(
         root / "checkpoint_delivery_ages.json", budget_ms=1000,
     )
