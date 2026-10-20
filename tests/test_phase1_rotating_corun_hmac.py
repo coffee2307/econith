@@ -28,9 +28,9 @@ async def clock(**kwargs):
 
 
 @asynccontextmanager
-async def stream_fixture(*,allow_public_market_data):
+async def stream_fixture(*,allow_public_market_data,segment_size:int=12):
     assert allow_public_market_data is True
-    state={"id":100}
+    state={"id":100,"snapshot_index":0}
     class Lease:
         @property
         def stream(self):
@@ -47,10 +47,23 @@ async def stream_fixture(*,allow_public_market_data):
             return source()
         async def snapshot(self,symbol,limit):
             assert symbol=="BTCUSDT" and limit==1000
-            return json.dumps({"lastUpdateId":state["id"],
+            state["snapshot_index"]+=1
+            # Fixture-only Binance initial REST bridge: snapshot must cover
+            # the first buffered diff U of this exact source journal, even
+            # under arbitrary scheduler delay.
+            expected=101+segment_size*(state["snapshot_index"]-1)
+            return json.dumps({"lastUpdateId":expected,
                 "bids":[["100","2"],["99","2"]],
                 "asks":[["102","2"],["103","2"]]}).encode()
     yield Lease()
+
+
+@asynccontextmanager
+async def eight_frame_stream_fixture(*,allow_public_market_data):
+    async with stream_fixture(
+        allow_public_market_data=allow_public_market_data,segment_size=8
+    ) as lease:
+        yield lease
 
 
 @pytest.mark.asyncio
@@ -65,6 +78,12 @@ async def test_source_reader_and_real_child_receiver_overlap_with_ordinals_and_c
     assert result["concurrent_segments_completed"]>=1
     assert len(result["segments"])>=2
     assert result["segment_backlog_peak"]<=2
+    assert 1<=result["outstanding_hmac_segments_peak"]<=3
+    if sys.platform=="linux":
+        assert result["child_peak_rss_kib_linux"]>0
+        assert result["child_cpu_user_s"]>=0
+        assert result["child_cpu_system_s"]>=0
+        assert result["child_voluntary_context_switches"]>=0
     assert result["independent_local_audit_passed"] is True
     assert result["reconstructed_projections"]==result["forward_checkpoints"]
     assert result["reconstructed_projections"]==result["independent_receiver_receipts"]
@@ -110,7 +129,7 @@ async def test_injected_receiver_worker_failure_quarantines_without_global_pass(
     root=(tmp_path/"worker_fail").resolve()
     response=await co_run_rotating_hmac(
         root,duration_s=1.2,max_frames_per_segment=8,
-        lease_factory=stream_fixture,clock_preflight=clock,
+        lease_factory=eight_frame_stream_fixture,clock_preflight=clock,
         explicit_offline_fixture_approval=True,inject_segment_failure=0,
     )
     assert response["verdict"]=="FAILED_OR_QUARANTINED",response
@@ -166,7 +185,7 @@ async def lease(*,allow_public_market_data):
                     yield json.dumps({"stream":"btcusdt@depth@100ms","data":data}).encode()
             return ws()
         async def snapshot(self,symbol,limit):
-            return json.dumps({"lastUpdateId":state["id"],
+            return json.dumps({"lastUpdateId":101,
                   "bids":[["100","2"]],"asks":[["102","2"]]}).encode()
     yield Socket()
 asyncio.run(co_run_rotating_hmac(
@@ -256,3 +275,53 @@ async def test_invalid_or_unauthorized_research_batch_size_rejected(tmp_path):
             explicit_offline_fixture_approval=True,receiver_batch_size=33,
         )
     assert not root.exists()
+
+
+@pytest.mark.asyncio
+async def test_deliberately_slow_receiver_overflows_bounded_segment_queue_fail_closed(tmp_path):
+    """Stress producer faster than intentionally paused receiver: NO silent loss."""
+    root=(tmp_path/"saturated_receiver").resolve()
+    result=await co_run_rotating_hmac(
+        root,duration_s=2.65,max_frames_per_segment=8,
+        lease_factory=eight_frame_stream_fixture,clock_preflight=clock,
+        explicit_offline_fixture_approval=True,
+        receiver_batch_size=8,reuse_receiver_connection=True,
+        _offline_worker_delay_s=4.0,
+    )
+    assert result["verdict"]=="FAILED_OR_QUARANTINED",result
+    assert result["source_failure_code"]=="HMAC_SEGMENT_BACKPRESSURE",result
+    assert result["orders_submitted"]==0
+    assert not (root/"hmac_corun_aggregate.json").exists()
+    assert (root/"hmac_corun_quarantine.json").is_file()
+    with pytest.raises((ValueError,FileNotFoundError)):
+        inspect_hmac(root,co_run=True)
+
+
+@pytest.mark.asyncio
+async def test_delay_injection_invalid_without_nontrading_fixture_scope(tmp_path):
+    from ci.phase1_public_spot_acceptance import measure_public_clock
+    from infrastructure.spot_public_pinned_lease import open_pinned_public_spot_lease
+    root=(tmp_path/"rejected_public_delay").resolve()
+    with pytest.raises(ValueError):
+        await co_run_rotating_hmac(
+            root,duration_s=120,max_frames_per_segment=450,
+            lease_factory=open_pinned_public_spot_lease,
+            clock_preflight=measure_public_clock,
+            explicit_public_research_approval=True,
+            _offline_worker_delay_s=1.,
+        )
+    assert not root.exists()
+
+
+@pytest.mark.asyncio
+async def test_reject_nonfinite_or_negative_offline_receiver_delays(tmp_path):
+    for delay in (-1.,float("nan"),float("inf"),6.1):
+        root=(tmp_path/"invalid_delay").resolve()
+        with pytest.raises(ValueError):
+            await co_run_rotating_hmac(
+                root,duration_s=2.65,max_frames_per_segment=8,
+                lease_factory=stream_fixture,clock_preflight=clock,
+                explicit_offline_fixture_approval=True,
+                _offline_worker_delay_s=delay,
+            )
+        assert not root.exists()

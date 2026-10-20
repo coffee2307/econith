@@ -1,0 +1,92 @@
+name: ECONITH Phase1 offline HMAC pressure
+on:
+  push:
+    branches:
+      - 'experiment/phase1-hmac-pressure-child-metrics-*'
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  offline-pressure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    steps:
+      - name: Fetch exact offline test commit archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 2 -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_SHA}" \
+            -o "${RUNNER_TEMP}/econith-offline-source.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/econith-offline-source.tar.gz" --strip-components=1
+          test -f tests/test_phase1_rotating_corun_hmac.py
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install bounded research test dependencies
+        run: |
+          python -m pip install -q -r requirements.txt -r requirements-dev.txt
+          python -m pip install -q pytest==8.3.5 pytest-asyncio==0.26.0 httpx==0.28.1 websockets==14.2
+      - name: Two rounds normal ACK and negative overload/crash tests
+        run: |
+          set -euo pipefail
+          for pass in 1 2; do
+            python -m pytest -q --tb=short tests/test_phase1_rotating_corun_hmac.py
+          done
+
+  public-120s-child-resource:
+    needs: offline-pressure
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Download exact commit archive without unresolved submodules
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 2 -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_SHA}" \
+            -o "${RUNNER_TEMP}/econith-source.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/econith-source.tar.gz" --strip-components=1
+          test -f ci/phase1_public_corun_hmac_pilot.py
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install read-only market and HMAC receiver prerequisites
+        run: |
+          python -m pip install -q -r requirements.txt
+          python -m pip install -q httpx==0.28.1 websockets==14.2
+      - name: Public Spot source with independent HMAC child and resource audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP}/econith-hmac-resource-${GITHUB_RUN_ID}"
+          python -m ci.phase1_public_corun_hmac_pilot \
+            --allow-public-market-data --allow-hmac-research \
+            --acknowledge-not-24h-proof --duration-s 120 \
+            --frames-per-segment 450 --receiver-batch-size 8 \
+            --reuse-receiver-connection --output-dir "$root"
+          python -m ci.phase1_public_corun_hmac_audit --root "$root" \
+            | tee "${RUNNER_TEMP}/hmac-resource-independent-audit.json"
+      - name: Package aggregate metadata only
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="${RUNNER_TEMP}/econith-hmac-resource-aggregate"
+          root="${RUNNER_TEMP}/econith-hmac-resource-${GITHUB_RUN_ID}"
+          mkdir -p "$stage"
+          for name in aggregate_report.json hmac_corun_aggregate.json hmac_corun_quarantine.json; do
+            if [ -f "$root/$name" ]; then cp "$root/$name" "$stage/$name"; fi
+          done
+          if [ -f "${RUNNER_TEMP}/hmac-resource-independent-audit.json" ]; then
+            cp "${RUNNER_TEMP}/hmac-resource-independent-audit.json" "$stage/independent_audit.json"
+          fi
+      - name: Upload only aggregate, never raw originals or HMAC keys
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: econith-hmac-resource-${{ github.run_id }}
+          path: ${{ runner.temp }}/econith-hmac-resource-aggregate/
+          retention-days: 3
+          if-no-files-found: warn

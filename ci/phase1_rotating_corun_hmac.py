@@ -12,6 +12,7 @@ import json
 import math
 import os
 from pathlib import Path
+import sys
 import time
 
 from ci.phase1_rotating_hmac_handoff import handoff_one_sealed_segment, _fsync_json
@@ -34,6 +35,7 @@ async def co_run_rotating_hmac(
     inject_segment_failure:int|None=None,
     receiver_batch_size:int=1,
     reuse_receiver_connection:bool=False,
+    _offline_worker_delay_s:float=0.,
 ) -> dict:
     if ((explicit_offline_fixture_approval is True)
         == (explicit_public_research_approval is True)):
@@ -53,6 +55,10 @@ async def co_run_rotating_hmac(
         or type(receiver_batch_size) is not int
         or not 1<=receiver_batch_size<=8
         or type(reuse_receiver_connection) is not bool
+        or type(_offline_worker_delay_s) not in (float,int)
+        or not math.isfinite(_offline_worker_delay_s)
+        or not 0<=_offline_worker_delay_s<=6.
+        or (public and _offline_worker_delay_s!=0)
         or not isinstance(root,Path) or not root.is_absolute()
         or type(max_handoff_age_s) not in (int,float)
         or not math.isfinite(max_handoff_age_s)
@@ -65,7 +71,16 @@ async def co_run_rotating_hmac(
     lag_ms=[]
     failures=[]
     overlap=0
+    worker_inflight=0
     source_finished=asyncio.Event()
+    # Linux child resource counters are cumulative over reaped subprocesses.
+    # Capture a before/after sample to isolate THIS bounded research session.
+    def child_usage():
+        if not sys.platform.startswith("linux"):
+            return None
+        import resource
+        return resource.getrusage(resource.RUSAGE_CHILDREN)
+    baseline_child=child_usage()
     start_monotonic=time.monotonic()
     result={
         "schema":_SCHEMA,"verdict":"INCOMPLETE_NOT_CERTIFIED",
@@ -83,24 +98,38 @@ async def co_run_rotating_hmac(
         "concurrent_segments_completed":0,
         "segment_handoff_lag_max_ms":0,"segment_backlog_peak":0,
         "segment_queue_capacity":2,
+        "hmac_inflight_workers_capacity":1,
+        "outstanding_hmac_segments_peak":0,
+        "child_cpu_user_s":None,
+        "child_cpu_system_s":None,
+        "child_peak_rss_kib_linux":None,
+        "child_voluntary_context_switches":None,
         "receiver_batch_size":receiver_batch_size,
         "receiver_connection_reuse":reuse_receiver_connection,
         "segment_handoff_age_budget_ms":int(max_handoff_age_s*1000),
     }
 
     async def worker():
-        nonlocal overlap
+        nonlocal overlap,worker_inflight
         while True:
             batch=await pending.get()
             try:
                 if batch is None:
                     return
                 sd,seal,admitted_at=batch
+                worker_inflight=1
+                result["outstanding_hmac_segments_peak"]=max(
+                    result["outstanding_hmac_segments_peak"],pending.qsize()+worker_inflight
+                )
                 if failures:
                     continue
                 try:
                     if inject_segment_failure==seal["index"]:
                         raise RuntimeError("injected independent receiver outage")
+                    if _offline_worker_delay_s:
+                        # Strictly fixture-only: a deliberately slow receiver
+                        # must trigger bounded segment backpressure, not drops.
+                        await asyncio.sleep(_offline_worker_delay_s)
                     # Existing local child-process HMAC IPC / derived proof
                     # performs blocking SQLite and full replay. Move it OFF
                     # source reader's asyncio loop, rather than blocking WSS.
@@ -123,6 +152,7 @@ async def co_run_rotating_hmac(
                 except Exception as exc:
                     failures.append(type(exc).__name__)
             finally:
+                worker_inflight=0
                 pending.task_done()
 
     task=asyncio.create_task(worker(),name="phase1-rotating-hmac-consumer")
@@ -142,6 +172,9 @@ async def co_run_rotating_hmac(
             ) from exc
         result["segment_backlog_peak"]=max(
             result["segment_backlog_peak"],pending.qsize()
+        )
+        result["outstanding_hmac_segments_peak"]=max(
+            result["outstanding_hmac_segments_peak"],pending.qsize()+worker_inflight
         )
 
     async def on_source_complete(source_report:dict):
@@ -188,6 +221,20 @@ async def co_run_rotating_hmac(
             result["process_peak_rss_kib_linux"]=source_report.get("process_peak_rss_kib_linux")
             result["process_cpu_user_s"]=source_report.get("process_cpu_user_s")
             result["process_cpu_system_s"]=source_report.get("process_cpu_system_s")
+            end_child=child_usage()
+            if end_child is not None and baseline_child is not None:
+                result["child_cpu_user_s"]=round(
+                    max(0.,end_child.ru_utime-baseline_child.ru_utime),3
+                )
+                result["child_cpu_system_s"]=round(
+                    max(0.,end_child.ru_stime-baseline_child.ru_stime),3
+                )
+                # ru_maxrss is the MAX of reaped child process RSS peaks,
+                # never the SUM of simultaneous parent+child residents.
+                result["child_peak_rss_kib_linux"]=int(end_child.ru_maxrss)
+                result["child_voluntary_context_switches"]=int(
+                    max(0,end_child.ru_nvcsw-baseline_child.ru_nvcsw)
+                )
             result["verdict"]=_PASS
             _fsync_json(root/"hmac_corun_aggregate.json",result)
         except BaseException as exc:

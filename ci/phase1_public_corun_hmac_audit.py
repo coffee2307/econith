@@ -47,6 +47,17 @@ def inspect_public(root:Path)->dict:
         and type(co.get("receiver_batch_size")) is int
         and 1<=co["receiver_batch_size"]<=8
         and type(co.get("receiver_connection_reuse")) is bool
+        and co.get("hmac_inflight_workers_capacity")==1
+        and type(co.get("outstanding_hmac_segments_peak")) is int
+        and 1<=co["outstanding_hmac_segments_peak"]<=3
+        and type(co.get("child_peak_rss_kib_linux")) is int
+        and 0<co["child_peak_rss_kib_linux"]<1_000_000
+        and type(co.get("child_cpu_user_s")) in (float,int)
+        and co["child_cpu_user_s"]>=0
+        and type(co.get("child_cpu_system_s")) in (float,int)
+        and co["child_cpu_system_s"]>=0
+        and type(co.get("child_voluntary_context_switches")) is int
+        and co["child_voluntary_context_switches"]>=0
         and co.get("segment_handoff_age_budget_ms")==25000
         and 0<co.get("segment_handoff_lag_max_ms",999999)<=25000
         and 1<=co.get("segment_backlog_peak",3)<=2
@@ -83,6 +94,11 @@ def inspect_public(root:Path)->dict:
         "forward_checkpoints":proof["forward_checkpoints"],
         "segment_handoff_lag_max_ms":co["segment_handoff_lag_max_ms"],
         "segment_backlog_peak":co["segment_backlog_peak"],
+        "outstanding_hmac_segments_peak":co["outstanding_hmac_segments_peak"],
+        "child_peak_rss_kib_linux":co["child_peak_rss_kib_linux"],
+        "child_cpu_user_s":co["child_cpu_user_s"],
+        "child_cpu_system_s":co["child_cpu_system_s"],
+        "child_voluntary_context_switches":co["child_voluntary_context_switches"],
         "upstream_fifo_peak":source["source_queue_high_watermark"],
         "journal_disk_peak_bytes":source["journal_disk_bytes_peak"],
         "process_peak_rss_kib_linux":co["process_peak_rss_kib_linux"],
