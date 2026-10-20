@@ -65,6 +65,12 @@ async def test_source_reader_and_real_child_receiver_overlap_with_ordinals_and_c
     assert result["concurrent_segments_completed"]>=1
     assert len(result["segments"])>=2
     assert result["segment_backlog_peak"]<=2
+    assert 1<=result["outstanding_hmac_segments_peak"]<=3
+    if sys.platform=="linux":
+        assert result["child_peak_rss_kib_linux"]>0
+        assert result["child_cpu_user_s"]>=0
+        assert result["child_cpu_system_s"]>=0
+        assert result["child_voluntary_context_switches"]>=0
     assert result["independent_local_audit_passed"] is True
     assert result["reconstructed_projections"]==result["forward_checkpoints"]
     assert result["reconstructed_projections"]==result["independent_receiver_receipts"]
@@ -256,3 +262,53 @@ async def test_invalid_or_unauthorized_research_batch_size_rejected(tmp_path):
             explicit_offline_fixture_approval=True,receiver_batch_size=33,
         )
     assert not root.exists()
+
+
+@pytest.mark.asyncio
+async def test_deliberately_slow_receiver_overflows_bounded_segment_queue_fail_closed(tmp_path):
+    """Stress producer faster than intentionally paused receiver: NO silent loss."""
+    root=(tmp_path/"saturated_receiver").resolve()
+    result=await co_run_rotating_hmac(
+        root,duration_s=2.65,max_frames_per_segment=8,
+        lease_factory=stream_fixture,clock_preflight=clock,
+        explicit_offline_fixture_approval=True,
+        receiver_batch_size=8,reuse_receiver_connection=True,
+        _offline_worker_delay_s=4.0,
+    )
+    assert result["verdict"]=="FAILED_OR_QUARANTINED",result
+    assert result["source_failure_code"]=="HMAC_SEGMENT_BACKPRESSURE",result
+    assert result["orders_submitted"]==0
+    assert not (root/"hmac_corun_aggregate.json").exists()
+    assert (root/"hmac_corun_quarantine.json").is_file()
+    with pytest.raises((ValueError,FileNotFoundError)):
+        inspect_hmac(root,co_run=True)
+
+
+@pytest.mark.asyncio
+async def test_delay_injection_invalid_without_nontrading_fixture_scope(tmp_path):
+    from ci.phase1_public_spot_acceptance import measure_public_clock
+    from infrastructure.spot_public_pinned_lease import open_pinned_public_spot_lease
+    root=(tmp_path/"rejected_public_delay").resolve()
+    with pytest.raises(ValueError):
+        await co_run_rotating_hmac(
+            root,duration_s=120,max_frames_per_segment=450,
+            lease_factory=open_pinned_public_spot_lease,
+            clock_preflight=measure_public_clock,
+            explicit_public_research_approval=True,
+            _offline_worker_delay_s=1.,
+        )
+    assert not root.exists()
+
+
+@pytest.mark.asyncio
+async def test_reject_nonfinite_or_negative_offline_receiver_delays(tmp_path):
+    for delay in (-1.,float("nan"),float("inf"),6.1):
+        root=(tmp_path/"invalid_delay").resolve()
+        with pytest.raises(ValueError):
+            await co_run_rotating_hmac(
+                root,duration_s=2.65,max_frames_per_segment=8,
+                lease_factory=stream_fixture,clock_preflight=clock,
+                explicit_offline_fixture_approval=True,
+                _offline_worker_delay_s=delay,
+            )
+        assert not root.exists()

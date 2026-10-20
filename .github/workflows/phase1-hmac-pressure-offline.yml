@@ -1,0 +1,27 @@
+name: ECONITH Phase1 offline HMAC pressure
+on:
+  push:
+    branches:
+      - 'experiment/phase1-hmac-pressure-child-metrics-*'
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  offline-pressure:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install bounded research test dependencies
+        run: |
+          python -m pip install -q -r requirements.txt -r requirements-dev.txt
+          python -m pip install -q pytest==8.3.5 pytest-asyncio==0.26.0 httpx==0.28.1 websockets==14.2
+      - name: Two rounds normal ACK and negative overload/crash tests
+        run: |
+          set -euo pipefail
+          for pass in 1 2; do
+            python -m pytest -q --tb=short tests/test_phase1_rotating_corun_hmac.py
+          done
