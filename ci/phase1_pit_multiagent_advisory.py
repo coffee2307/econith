@@ -119,7 +119,7 @@ def verified_asof_evidence(
     return result
 
 
-def adjudicate_advisory(evidence:dict, reports:list[dict[str,Any]])->dict:
+def adjudicate_advisory(evidence:dict, reports:list[dict[str,Any]], *, source_root:Path)->dict:
     """Typed analyst/research/risk review; no economic execution side-effects.
 
     A veto or inconclusive research view is WITHHELD; approved conclusions
@@ -138,6 +138,16 @@ def adjudicate_advisory(evidence:dict, reports:list[dict[str,Any]])->dict:
         or evidence.get("historical_listing_vintage_certified") is not False
         or type(reports) is not list or len(reports)!=len(_ROLES)):
         raise ValueError("incomplete or altered evidence / structured agent quorum")
+    # A self-computed SHA-256 on an untrusted report proves no source
+    # authenticity. Re-open and independently re-audit the original private
+    # finite Spot dataset before accepting the analyst/portfolio quorum.
+    # No agent may supply its own evidence root or bypass this verification.
+    source_recheck=verified_asof_evidence(
+        source_root,symbol=evidence["symbol"],
+        interval=evidence["interval"],decision_ms=evidence["decision_ms"],
+    )
+    if source_recheck != evidence:
+        raise ValueError("forged source provenance: advisory evidence not bound to original files")
     by_role={}
     for item in reports:
         if (type(item) is not dict
