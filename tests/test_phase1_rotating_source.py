@@ -31,7 +31,7 @@ def lease_fixture(*, interval=.012, early_eof=False, invalid_payload=False,
     @asynccontextmanager
     async def lease(*,allow_public_market_data):
         assert allow_public_market_data
-        state={"id":100}
+        state={"id":100,"snapshot_index":0}
         class Socket:
             @property
             def stream(self):
@@ -42,7 +42,13 @@ def lease_fixture(*, interval=.012, early_eof=False, invalid_payload=False,
                         # positive fixtures: ~two sealed journals, not an
                         # arbitrary 150-frame stress sequence that eventually
                         # hits the intended BOOK_NOT_SYNCED quarantine gate.
-                        delay=(.33 if positive_run_slow_tail and i>=19 else interval)
+                        # A positive fixture covers precisely two journal
+                        # seals. The source remains open until the duration
+                        # deadline but does not fabricate unrelated third-book
+                        # replay evidence under an overloaded CI runner.
+                        if positive_run_slow_tail and i>=26:
+                            await asyncio.sleep(4)
+                        delay=(.12 if positive_run_slow_tail and i>=19 else interval)
                         await asyncio.sleep(0 if frame_burst else delay)
                         if early_eof and i>=14:
                             return
@@ -68,8 +74,15 @@ def lease_fixture(*, interval=.012, early_eof=False, invalid_payload=False,
                 if snapshot_fail:
                     raise OSError("test injected REST outage")
                 await asyncio.sleep(0)
+                if positive_run_slow_tail:
+                    state["snapshot_index"]+=1
+                    # Deterministic historical snapshot/diff bridge for the
+                    # 1st (U=101) and 2nd (U=117) original journals.
+                    snapshot_id=100+16*(state["snapshot_index"]-1)
+                else:
+                    snapshot_id=state["id"]
                 return json.dumps({
-                    "lastUpdateId":state["id"],
+                    "lastUpdateId":snapshot_id,
                     "bids":[["100","2"],["99","3"]],
                     "asks":[["102","2"],["103","4"]],
                 }).encode()
