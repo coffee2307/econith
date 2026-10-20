@@ -39,6 +39,7 @@ export interface Dictionary {
   nav: {
     overview: string;
     quant: string;
+    research: string;
     world: string;
     worldSubtitle: string;
     social: string;

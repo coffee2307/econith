@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faChartLine,
+  faFlask,
   faEarthAmericas,
   faCube,
 } from "@fortawesome/free-solid-svg-icons";
@@ -23,6 +24,7 @@ export function Navbar() {
   const nav = [
     { href: "/", label: t("nav.overview"), icon: faCube },
     { href: "/quant", label: t("nav.quant"), icon: faChartLine },
+    { href: "/research", label: t("nav.research"), icon: faFlask },
     { href: "/world", label: t("nav.world"), icon: faEarthAmericas },
   ];
 

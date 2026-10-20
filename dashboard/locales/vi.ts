@@ -110,6 +110,7 @@ export const vi: Dictionary = {
   nav: {
     overview: "Tổng quan",
     quant: "ECONITH Quant",
+    research: "Nghiên cứu",
     world: "ECONITH World",
     worldSubtitle: "Thử kịch bản kinh tế và xem các nhóm phản ứng",
     social: "ECONITH Social",
