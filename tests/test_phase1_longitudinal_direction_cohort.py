@@ -83,12 +83,6 @@ def make_manifest(tmp_path, entries):
     return path
 
 
-def test_multi_decision_exact_paired_denominators_and_split(originals_unused=None):
-    # Kept separate from collection fixtures; this function should not be
-    # used as a test entrypoint (pytest fixture below exercises it).
-    pass
-
-
 @pytest.fixture
 def cohort_sources(tmp_path):
     entries = [
@@ -196,6 +190,18 @@ def test_no_consent_and_nested_output_cannot_write(cohort_sources, tmp_path):
         "--manifest", str(path), "--output-dir", str(folder),
     ]) == 2  # manifest is in its own parent; cannot write under it
     assert not folder.exists()
+
+
+def test_cli_success_outside_input_workspace(cohort_sources, tmp_path):
+    path, entries = cohort_sources
+    output = (tmp_path.parent / f"{tmp_path.name}_cohort_export").resolve()
+    assert main([
+        "--allow-offline-research-cohort", "--acknowledge-no-executed-pnl",
+        "--manifest", str(path), "--output-dir", str(output),
+    ]) == 0
+    result = json.loads((output / "research_quality_cohort.json").read_text())
+    assert result["summary"]["decisions"] == len(entries)
+    assert result["orders_submitted"] == 0
 
 
 def test_output_requires_fresh_directory(cohort_sources, tmp_path):
