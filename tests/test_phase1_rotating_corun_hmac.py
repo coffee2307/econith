@@ -170,13 +170,13 @@ async def clock(**kwargs):
     return SimpleNamespace(round_trip_ms=7,measured_offset_ms=0)
 @asynccontextmanager
 async def lease(*,allow_public_market_data):
-    state={"id":100}
+    state={"id":100,"snapshot_index":0}
     class Socket:
         @property
         def stream(self):
             async def ws():
                 while True:
-                    await asyncio.sleep(.055)
+                    await asyncio.sleep(.012)
                     state["id"]+=1
                     ts=time.time_ns()//1_000_000
                     data={"e":"depthUpdate","E":ts,"s":"BTCUSDT",
@@ -185,11 +185,12 @@ async def lease(*,allow_public_market_data):
                     yield json.dumps({"stream":"btcusdt@depth@100ms","data":data}).encode()
             return ws()
         async def snapshot(self,symbol,limit):
-            return json.dumps({"lastUpdateId":101,
+            state["snapshot_index"]+=1
+            return json.dumps({"lastUpdateId":101+12*(state["snapshot_index"]-1),
                   "bids":[["100","2"]],"asks":[["102","2"]]}).encode()
     yield Socket()
 asyncio.run(co_run_rotating_hmac(
-    Path(sys.argv[1]),duration_s=3,max_frames_per_segment=12,
+    Path(sys.argv[1]),duration_s=3.8,max_frames_per_segment=12,
     explicit_offline_fixture_approval=True,
     receiver_batch_size=8,reuse_receiver_connection=True,
     lease_factory=lease,clock_preflight=clock))
