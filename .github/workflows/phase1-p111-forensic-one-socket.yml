@@ -30,3 +30,50 @@ jobs:
             tests/test_phase1_single_socket_forensic_acceptance.py \
             tests/test_phase1_single_socket_duration.py \
             tests/test_phase1_p106_adversarial_runtime_matrix.py
+
+  public-bounded-forensic:
+    needs: independently-reaudit-source
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install public-only Spot transport
+        run: python -m pip install "httpx==0.28.1" "websockets==14.2"
+      - name: One real Spot WSS 90s bounded capture and independent re-audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP}/econith-p111-spot-${GITHUB_RUN_ID}"
+          python -m ci.phase1_single_socket_duration_trial \
+            --allow-public-market-data \
+            --acknowledge-not-24h-proof \
+            --duration-s 90 \
+            --output-dir "$root"
+          python -m ci.phase1_single_socket_forensic_acceptance \
+            --root "$root" | tee "${RUNNER_TEMP}/p111_forensic.json"
+      - name: Stage only aggregate metadata, never raw SQLite
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="${RUNNER_TEMP}/p111_public_aggregate"
+          root="${RUNNER_TEMP}/econith-p111-spot-${GITHUB_RUN_ID}"
+          mkdir -p "$stage"
+          if [ -f "$root/aggregate_report.json" ]; then cp "$root/aggregate_report.json" "$stage/aggregate_report.json"; fi
+          if [ -f "${RUNNER_TEMP}/p111_forensic.json" ]; then cp "${RUNNER_TEMP}/p111_forensic.json" "$stage/forensic_audit.json"; fi
+      - name: Retain aggregate-only results for bounded review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: econith-p111-aggregate-${{ github.run_id }}
+          path: ${{ runner.temp }}/p111_public_aggregate/
+          retention-days: 3
+          if-no-files-found: warn
