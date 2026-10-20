@@ -181,6 +181,9 @@ def audit(*, kind: str, report_dir: Path, decision_root: Path,
         details = _audit_panel(payload, decision_root)
     else:
         details = _audit_scorecard(report_dir, payload, decision_root, followup_root)
+    # Refuse a report changed while the underlying original-source audit ran.
+    if (report_dir / name).read_bytes() != raw:
+        raise ValueError("report changed during original-source re-audit")
     return {
         "schema": SCHEMA,
         "verdict": VERDICT,
@@ -229,6 +232,11 @@ def main(argv=None) -> int:
     if not args.allow_offline_original_audit:
         p.error("explicit read-only original-data audit acknowledgement required")
     try:
+        roots = (args.report_dir, args.decision_root, args.followup_root)
+        if any(root is not None and (
+            args.output_dir == root or root in args.output_dir.parents
+        ) for root in roots):
+            raise ValueError("receipt destination cannot be inside private evidence roots")
         receipt = audit(
             kind=args.kind, report_dir=args.report_dir,
             decision_root=args.decision_root,
