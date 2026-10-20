@@ -1,0 +1,32 @@
+name: ECONITH P1-14 hard-exit crash triage and operator owner fence
+
+on:
+  pull_request:
+    paths:
+      - "ci/phase1_crash_gap_triage.py"
+      - "tests/test_phase1_crash_gap_triage.py"
+      - ".github/workflows/phase1-p114-crash-triage.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  local-hardkill-forensics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install offline test requirements
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: True OS hard exit and source-to-checkpoint crash audit (offline)
+        run: |
+          python -m pytest -q --tb=short \
+            tests/test_phase1_crash_gap_triage.py \
+            tests/test_spot_forward_checkpoints.py \
+            tests/test_spot_forward_eligibility_recovery.py \
+            tests/test_spot_forward_outbox.py \
+            tests/test_phase1_live_spool_projection.py
