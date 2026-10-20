@@ -32,7 +32,7 @@ _SIGN = {"Buy":1,"Overweight":1,"Hold":0,"Underweight":-1,"Sell":-1}
 
 
 def _is_safe_root(root:Path)->bool:
-    return (type(root) is Path and root.is_absolute() and root.is_dir()
+    return (isinstance(root,Path) and root.is_absolute() and root.is_dir()
             and not root.is_symlink() and root==root.resolve())
 
 
@@ -170,7 +170,7 @@ def write_sealed_evidence(
     observed_by_ms:int,
 )->dict:
     """Fresh output root, immutable report + explicit source-grounded receipt."""
-    if (type(output_dir) is not Path or not output_dir.is_absolute()
+    if (not isinstance(output_dir,Path) or not output_dir.is_absolute()
         or output_dir.exists() or output_dir.is_symlink()
         or output_dir!=output_dir.resolve()
         or output_dir.parent.is_symlink()):
