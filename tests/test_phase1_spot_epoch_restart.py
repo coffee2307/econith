@@ -15,6 +15,7 @@ from ci.phase1_spot_epoch_restart import (
     run_offline_epoch_restart,inspect_quarantined_prefix,
 )
 from ci.phase1_rotating_spot_source import run_rotation
+from ci.phase1_spot_epoch_audit import inspect as audit_epoch_transition
 
 
 async def clock(**kw):
@@ -93,6 +94,31 @@ async def test_failed_book_epoch_then_new_independently_audited_hmac_epoch(tmp_p
     assert first["verdict"]=="FAILED_OR_QUARANTINED"
     assert first["failure_code"] in ("FRAME_LIMIT_UNSYNCED","BOOK_NOT_SYNCED")
     assert second["verdict"]=="PASSED_BOUNDED_SOURCE_ROTATION_RESEARCH_ONLY"
+
+    independent=audit_epoch_transition(root)
+    assert independent["verdict"]=="PASSED_LOCAL_EPOCH_ISOLATION_WITH_UNKNOWN_COVERAGE_ONLY"
+    assert independent["previous_failed_source_prefix_frames_sha_verified"]==12
+    assert independent["new_epoch_receiver_receipts"]==result["new_epoch_receiver_receipts"]
+    assert independent["inter_epoch_gap_free"] is False
+    # The failed epoch remains UNKNOWN even after downstream becomes healthy.
+    marker=root/"unknown_boundary.json"
+    original=marker.read_text()
+    marker.write_text(original.replace(
+        '"verified_gap_free_between_epochs": false',
+        '"verified_gap_free_between_epochs": true'
+    ))
+    with pytest.raises(ValueError,match="UNKNOWN boundary"):
+        audit_epoch_transition(root)
+    marker.write_text(original)
+    assert audit_epoch_transition(root)["inter_epoch_gap_free"] is False
+    receipt=root/"offline_epoch_restart_evidence.json"
+    evidence=receipt.read_text()
+    receipt.write_text(evidence.replace(
+        '"gap_free_between_epochs_certified": false',
+        '"gap_free_between_epochs_certified": true'
+    ))
+    with pytest.raises(ValueError,match="aggregate changed"):
+        audit_epoch_transition(root)
 
 
 @pytest.mark.asyncio

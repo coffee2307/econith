@@ -5,11 +5,13 @@ on:
       - 'experiment/phase1-spot-explicit-epoch-recovery-*'
     paths:
       - 'ci/phase1_spot_epoch_restart.py'
+      - 'ci/phase1_spot_epoch_audit.py'
       - 'tests/test_phase1_spot_epoch_restart.py'
       - '.github/workflows/phase1-spot-epoch-restart.yml'
   pull_request:
     paths:
       - 'ci/phase1_spot_epoch_restart.py'
+      - 'ci/phase1_spot_epoch_audit.py'
       - 'tests/test_phase1_spot_epoch_restart.py'
       - '.github/workflows/phase1-spot-epoch-restart.yml'
 permissions:
@@ -40,4 +42,4 @@ jobs:
         run: |
           set -euo pipefail
           python -m pytest -q --tb=short tests/test_phase1_spot_epoch_restart.py
-          python -m py_compile ci/phase1_spot_epoch_restart.py
+          python -m py_compile ci/phase1_spot_epoch_restart.py ci/phase1_spot_epoch_audit.py
