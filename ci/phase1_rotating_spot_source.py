@@ -58,6 +58,9 @@ async def _capture_owned(root: Path, *,duration_s:float,max_frames_per_segment:i
         "segments":[],"first_global_frame":1,
         "produced_ws_frames":0,"committed_ws_frames":0,
         "source_queue_high_watermark":0,
+        "original_commit_age_ms_max":0,
+        "original_commit_age_ms_histogram":{"0_100":0,"101_500":0,"501_1000":0,"1001_5000":0},
+        "journal_disk_bytes_peak":0,
         "chain_start":_INITIAL_CHAIN,"chain_end":_INITIAL_CHAIN,
         "owner_fence_held":True,"orders_submitted":0,
         "HMAC_downstream_tested":False,"default_market_ingress_cutover":False,
@@ -173,6 +176,14 @@ async def _capture_owned(root: Path, *,duration_s:float,max_frames_per_segment:i
                 try:
                     async def source_commit_guard(rec):
                         diff=source_clock()-rec.received_at_ms
+                        if 0<=diff<=5000:
+                            report["original_commit_age_ms_max"]=max(
+                                report["original_commit_age_ms_max"],diff
+                            )
+                            group=("0_100" if diff<=100 else
+                                   "101_500" if diff<=500 else
+                                   "501_1000" if diff<=1000 else "1001_5000")
+                            report["original_commit_age_ms_histogram"][group]+=1
                         if diff<0 or diff>5000:
                             raise SpotTransportError(
                                 "stored source original aged beyond 5s",
@@ -226,6 +237,9 @@ async def _capture_owned(root: Path, *,duration_s:float,max_frames_per_segment:i
                 # Keep source original and WAL/index bytes inside strict bounds.
                 used=sum(f.stat().st_size for f in segments_root.rglob("*")
                          if f.is_file())
+                report["journal_disk_bytes_peak"]=max(
+                    report["journal_disk_bytes_peak"],used
+                )
                 if used>report["max_disk_bytes"]:
                     raise SpotTransportError(
                         "rotating journal exceeded private disk budget",
@@ -265,6 +279,16 @@ async def _capture_owned(root: Path, *,duration_s:float,max_frames_per_segment:i
             reader.cancel()
             await asyncio.gather(reader,return_exceptions=True)
         report["chain_end"]=current_chain
+        # Snapshot process metrics before the downstream completion hook
+        # builds and fsyncs its independently audited aggregate.
+        try:
+            import resource
+            usage=resource.getrusage(resource.RUSAGE_SELF)
+            report["process_cpu_user_s"]=round(usage.ru_utime,3)
+            report["process_cpu_system_s"]=round(usage.ru_stime,3)
+            report["process_peak_rss_kib_linux"]=int(usage.ru_maxrss) if sys.platform.startswith("linux") else None
+        except ImportError:
+            report["process_peak_rss_kib_linux"]=None
         if _on_capture_complete is not None:
             try:
                 await _on_capture_complete(report)
@@ -273,6 +297,14 @@ async def _capture_owned(root: Path, *,duration_s:float,max_frames_per_segment:i
                 report["downstream_failure_class"]=type(exc).__name__
                 report["downstream_incomplete"]=True
         report["aggregate_elapsed_s"]=round(time.monotonic()-started,3) if started is not None else 0
+        try:
+            import resource
+            usage=resource.getrusage(resource.RUSAGE_SELF)
+            report["process_cpu_user_s"]=round(usage.ru_utime,3)
+            report["process_cpu_system_s"]=round(usage.ru_stime,3)
+            report["process_peak_rss_kib_linux"]=int(usage.ru_maxrss) if sys.platform.startswith("linux") else None
+        except ImportError:
+            report["process_peak_rss_kib_linux"]=None
         with report_path.open("x",encoding="utf-8") as f:
             json.dump(report,f,sort_keys=True,indent=2,allow_nan=False)
             f.write("\n")
@@ -287,7 +319,8 @@ async def run_rotation(root:Path,*,allow_public_market_data:bool=False,
                        clock_preflight=measure_public_clock,_fixture:bool=False,
                        terminal_silence_s:float=5.0,
                        _on_segment_sealed=None,
-                       _on_capture_complete=None)->dict:
+                       _on_capture_complete=None,
+                       _public_corun_authorized:bool=False)->dict:
     if allow_public_market_data is not True:
         raise PermissionError("read-only public source opt-in required")
     if (type(duration_s) not in (int,float) or not math.isfinite(duration_s)
@@ -299,9 +332,18 @@ async def run_rotation(root:Path,*,allow_public_market_data:bool=False,
         or not math.isfinite(terminal_silence_s)
         or not .01<=terminal_silence_s<=5.0
         or (_on_segment_sealed is not None
-            and (not _fixture or not callable(_on_segment_sealed)))
+            and (not callable(_on_segment_sealed)
+                 or not (_fixture or
+                     (_public_corun_authorized is True
+                      and lease_factory is open_pinned_public_spot_lease))))
         or (_on_capture_complete is not None
-            and (not _fixture or not callable(_on_capture_complete)))):
+            and (not callable(_on_capture_complete)
+                 or not (_fixture or
+                     (_public_corun_authorized is True
+                      and lease_factory is open_pinned_public_spot_lease))))
+        or type(_public_corun_authorized) is not bool
+        or (_public_corun_authorized
+            and (_fixture or lease_factory is not open_pinned_public_spot_lease))):
         raise ValueError("strict experimental source rotation constraints")
     _fresh_private_root(root)
     with exclusive_forward_owner(root,role="CAPTURE"):

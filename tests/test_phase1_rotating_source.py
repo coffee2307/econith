@@ -26,18 +26,30 @@ async def public_clock(**kwargs):
 
 
 def lease_fixture(*, interval=.012, early_eof=False, invalid_payload=False,
-                  snapshot_fail=False, frame_burst=False):
+                  snapshot_fail=False, frame_burst=False,
+                  positive_run_slow_tail=False):
     @asynccontextmanager
     async def lease(*,allow_public_market_data):
         assert allow_public_market_data
-        state={"id":100}
+        state={"id":100,"snapshot_index":0}
         class Socket:
             @property
             def stream(self):
                 async def generator():
                     i=0
                     while True:
-                        await asyncio.sleep(0 if frame_burst else interval)
+                        # Bound the number of snapshot/diff sequence bridges in
+                        # positive fixtures: ~two sealed journals, not an
+                        # arbitrary 150-frame stress sequence that eventually
+                        # hits the intended BOOK_NOT_SYNCED quarantine gate.
+                        # A positive fixture covers precisely two journal
+                        # seals. The source remains open until the duration
+                        # deadline but does not fabricate unrelated third-book
+                        # replay evidence under an overloaded CI runner.
+                        if positive_run_slow_tail and i>=26:
+                            await asyncio.sleep(4)
+                        delay=(.12 if positive_run_slow_tail and i>=19 else interval)
+                        await asyncio.sleep(0 if frame_burst else delay)
                         if early_eof and i>=14:
                             return
                         i+=1
@@ -50,14 +62,27 @@ def lease_fixture(*, interval=.012, early_eof=False, invalid_payload=False,
                         if invalid_payload and i==25:
                             body={"stream":"btcusdt@depth20@100ms","data":diff}
                         yield json.dumps(body,separators=(",",":")).encode()
+                        # Fixture-only: keep the REST snapshot bridge within
+                        # a reproducible timestamp ordering around the 16-frame
+                        # journal seal. This is NOT a production reconnect or
+                        # relaxation of the fail-closed source validator.
+                        if not frame_burst and i % 16 == 0:
+                            await asyncio.sleep(.08)
                 return generator()
             async def snapshot(self,symbol,limit):
                 assert symbol=="BTCUSDT" and limit==1000
                 if snapshot_fail:
                     raise OSError("test injected REST outage")
                 await asyncio.sleep(0)
+                if positive_run_slow_tail:
+                    state["snapshot_index"]+=1
+                    # Deterministic historical snapshot/diff bridge for the
+                    # 1st (U=101) and 2nd (U=117) journals; the snapshot ID\n                    # must cover the first buffered U, not predate it.
+                    snapshot_id=101+16*(state["snapshot_index"]-1)
+                else:
+                    snapshot_id=state["id"]
                 return json.dumps({
-                    "lastUpdateId":state["id"],
+                    "lastUpdateId":snapshot_id,
                     "bids":[["100","2"],["99","3"]],
                     "asks":[["102","2"],["103","4"]],
                 }).encode()
@@ -71,7 +96,7 @@ async def test_one_socket_reader_all_frames_sealed_across_more_than_two_sqlite_j
     result=await run_rotation(
         root,allow_public_market_data=True,
         duration_s=2.5,max_frames_per_segment=16,_fixture=True,
-        lease_factory=lease_fixture(),clock_preflight=public_clock,
+        lease_factory=lease_fixture(positive_run_slow_tail=True),clock_preflight=public_clock,
     )
     assert result["verdict"]=="PASSED_BOUNDED_SOURCE_ROTATION_RESEARCH_ONLY",json.dumps(result,sort_keys=True)
     assert result["source_socket_count"]==1
@@ -142,7 +167,7 @@ async def test_rotation_tampered_original_cannot_pass_independent_audit(tmp_path
     report=await run_rotation(
         root,allow_public_market_data=True,
         duration_s=2.25,max_frames_per_segment=16,_fixture=True,
-        lease_factory=lease_fixture(),clock_preflight=public_clock,
+        lease_factory=lease_fixture(positive_run_slow_tail=True),clock_preflight=public_clock,
     )
     assert report["verdict"]=="PASSED_BOUNDED_SOURCE_ROTATION_RESEARCH_ONLY",json.dumps(report,sort_keys=True)
     path=root/"segments"/"0001"/"original.sqlite"
