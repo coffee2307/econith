@@ -28,9 +28,9 @@ async def clock(**kwargs):
 
 
 @asynccontextmanager
-async def stream_fixture(*,allow_public_market_data):
+async def stream_fixture(*,allow_public_market_data,segment_size:int=12):
     assert allow_public_market_data is True
-    state={"id":100}
+    state={"id":100,"snapshot_index":0}
     class Lease:
         @property
         def stream(self):
@@ -47,10 +47,23 @@ async def stream_fixture(*,allow_public_market_data):
             return source()
         async def snapshot(self,symbol,limit):
             assert symbol=="BTCUSDT" and limit==1000
-            return json.dumps({"lastUpdateId":state["id"],
+            state["snapshot_index"]+=1
+            # Fixture-only Binance initial REST bridge: snapshot must cover
+            # the first buffered diff U of this exact source journal, even
+            # under arbitrary scheduler delay.
+            expected=101+segment_size*(state["snapshot_index"]-1)
+            return json.dumps({"lastUpdateId":expected,
                 "bids":[["100","2"],["99","2"]],
                 "asks":[["102","2"],["103","2"]]}).encode()
     yield Lease()
+
+
+@asynccontextmanager
+async def eight_frame_stream_fixture(*,allow_public_market_data):
+    async with stream_fixture(
+        allow_public_market_data=allow_public_market_data,segment_size=8
+    ) as lease:
+        yield lease
 
 
 @pytest.mark.asyncio
@@ -116,7 +129,7 @@ async def test_injected_receiver_worker_failure_quarantines_without_global_pass(
     root=(tmp_path/"worker_fail").resolve()
     response=await co_run_rotating_hmac(
         root,duration_s=1.2,max_frames_per_segment=8,
-        lease_factory=stream_fixture,clock_preflight=clock,
+        lease_factory=eight_frame_stream_fixture,clock_preflight=clock,
         explicit_offline_fixture_approval=True,inject_segment_failure=0,
     )
     assert response["verdict"]=="FAILED_OR_QUARANTINED",response
@@ -172,7 +185,7 @@ async def lease(*,allow_public_market_data):
                     yield json.dumps({"stream":"btcusdt@depth@100ms","data":data}).encode()
             return ws()
         async def snapshot(self,symbol,limit):
-            return json.dumps({"lastUpdateId":state["id"],
+            return json.dumps({"lastUpdateId":101,
                   "bids":[["100","2"]],"asks":[["102","2"]]}).encode()
     yield Socket()
 asyncio.run(co_run_rotating_hmac(
@@ -270,7 +283,7 @@ async def test_deliberately_slow_receiver_overflows_bounded_segment_queue_fail_c
     root=(tmp_path/"saturated_receiver").resolve()
     result=await co_run_rotating_hmac(
         root,duration_s=2.65,max_frames_per_segment=8,
-        lease_factory=stream_fixture,clock_preflight=clock,
+        lease_factory=eight_frame_stream_fixture,clock_preflight=clock,
         explicit_offline_fixture_approval=True,
         receiver_batch_size=8,reuse_receiver_connection=True,
         _offline_worker_delay_s=4.0,
