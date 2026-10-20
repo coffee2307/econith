@@ -188,7 +188,7 @@ def test_different_historical_candle_on_followup_archive_refused_even_if_hash_up
     target=next(x for x in rows if x[6]==old_close)
     target[4]=str(int(target[4])+1)
     # Still inside OHLC geometry, so per-archive market-quality audit passes.
-    path.write_text(json.dumps(rows).encode())
+    path.write_bytes(json.dumps(rows).encode())
     report=new/"aggregate_report.json"
     data=json.loads(report.read_text())
     data["originals"][path.name]={"sha256":hashlib.sha256(path.read_bytes()).hexdigest(),
