@@ -32,10 +32,15 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          ref: ${{ github.sha }}
+      - name: Download exact commit archive without unresolved submodules
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 2 -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_SHA}" \
+            -o "${RUNNER_TEMP}/econith-source.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/econith-source.tar.gz" --strip-components=1
+          test -f ci/phase1_public_corun_hmac_pilot.py
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
