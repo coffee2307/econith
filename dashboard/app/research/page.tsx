@@ -34,6 +34,16 @@ type LoadedScore = {
   evidence: string;
 };
 type ResearchReport = LoadedPanel | LoadedScore;
+type AuditReceipt = {
+  kind: "panel" | "scorecard";
+  report_sha256: string;
+  evidence_sha256: string;
+  verdict: string;
+};
+
+const receiptSchema = "econith-p1-local-research-audit-receipt-v1";
+const receiptVerdict = "PASSED_LOCAL_PYTHON_ORIGINAL_REAUDIT_ONLY";
+const receiptMode = "offline-original-source-recomputation";
 
 const ROLES = ["technical", "bull", "bear", "risk", "portfolio"] as const;
 const schemaPanel = "econith-p1-openai-panel-optional-research-v1";
@@ -140,6 +150,49 @@ function readReport(value: unknown, filename: string): ResearchReport {
   throw new Error("Không nhận diện được schema báo cáo nghiên cứu ECONITH.");
 }
 
+function readAuditReceipt(
+  value: unknown, report: ResearchReport, originalHash: string,
+): AuditReceipt {
+  const item = record(value);
+  if (
+    !item ||
+    item.schema !== receiptSchema ||
+    item.verdict !== receiptVerdict ||
+    item.audit_mode !== receiptMode ||
+    item.kind !== report.type ||
+    item.report_sha256 !== originalHash ||
+    item.evidence_sha256 !== report.evidence ||
+    !digest(item.report_sha256) ||
+    !digest(item.evidence_sha256) ||
+    item.signed_by_trusted_authority !== false ||
+    item.exchange_origin_verified !== false ||
+    item.real_trading_results_proven !== false ||
+    item.orders_submitted !== 0
+  ) {
+    throw new Error("Receipt không khớp báo cáo hoặc thiếu giới hạn an toàn.");
+  }
+  if (report.type === "scorecard" &&
+      (item.symbol !== report.symbol || item.interval !== report.interval)) {
+    throw new Error("Receipt thuộc một tài sản hoặc khung thời gian khác.");
+  }
+  return {
+    kind: item.kind as AuditReceipt["kind"],
+    report_sha256: item.report_sha256 as string,
+    evidence_sha256: item.evidence_sha256 as string,
+    verdict: item.verdict as string,
+  };
+}
+
+async function sha256LocalFile(file: File): Promise<string> {
+  if (!globalThis.crypto?.subtle) {
+    throw new Error("Trình duyệt không hỗ trợ WebCrypto SHA-256.");
+  }
+  const bytes = await file.arrayBuffer();
+  const hash = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(hash), (b) =>
+    b.toString(16).padStart(2, "0")).join("");
+}
+
 function dateText(ms: number | null): string {
   return ms && ms > 0 ? new Date(ms).toLocaleString("vi-VN") : "—";
 }
@@ -154,7 +207,11 @@ export default function ResearchPage() {
   const { locale } = useLocale();
   const en = locale === "en";
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const auditRef = useRef<HTMLInputElement | null>(null);
   const [report, setReport] = useState<ResearchReport | null>(null);
+  const [sourceHash, setSourceHash] = useState("");
+  const [receipt, setReceipt] = useState<AuditReceipt | null>(null);
+  const [auditError, setAuditError] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -164,17 +221,40 @@ export default function ResearchPage() {
     if (!file) return;
     setBusy(true);
     setError("");
+    setAuditError("");
+    setReceipt(null);
+    setSourceHash("");
     setReport(null);
     try {
       if (file.size > 512 * 1024 || file.size === 0) {
         throw new Error("Chỉ cho phép báo cáo JSON từ 1 byte đến 512 KB.");
       }
       const decoded: unknown = JSON.parse(await file.text());
-      setReport(readReport(decoded, file.name));
+      const parsed = readReport(decoded, file.name);
+      const exactHash = await sha256LocalFile(file);
+      setReport(parsed);
+      setSourceHash(exactHash);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Không thể đọc JSON.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function selectReceipt(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file || !report || !sourceHash) return;
+    setReceipt(null);
+    setAuditError("");
+    try {
+      if (file.size === 0 || file.size > 8 * 1024) {
+        throw new Error("Receipt phải là JSON không rỗng, tối đa 8 KB.");
+      }
+      const raw: unknown = JSON.parse(await file.text());
+      setReceipt(readAuditReceipt(raw, report, sourceHash));
+    } catch (err) {
+      setAuditError(err instanceof Error ? err.message : "Receipt không hợp lệ.");
     }
   }
 
@@ -226,6 +306,14 @@ export default function ResearchPage() {
                   : "File chỉ được đọc trong trình duyệt, không tải lên server. Không chọn file dữ liệu thô hoặc API key."}
             </p>
             <input
+              ref={auditRef}
+              className="sr-only"
+              type="file"
+              accept=".json,application/json"
+              aria-label={en ? "Choose local offline audit receipt" : "Chọn receipt kiểm toán cục bộ"}
+              onChange={selectReceipt}
+            />
+            <input
               ref={fileRef}
               className="sr-only"
               type="file"
@@ -240,13 +328,33 @@ export default function ResearchPage() {
                 {busy ? "Đang đọc…" : en ? "Select JSON report" : "Chọn báo cáo JSON"}
               </button>
               {report && (
-                <button type="button" onClick={() => { setReport(null); setError(""); }}
+                <button type="button" onClick={() => auditRef.current?.click()}
+                  disabled={busy}
+                  className="rounded-xl border border-line bg-elevated px-5 py-2.5 text-sm font-semibold text-ink disabled:opacity-40">
+                  {en ? "Match audit receipt" : "Đối chiếu receipt kiểm toán"}
+                </button>
+              )}
+              {report && (
+                <button type="button" onClick={() => { setReport(null); setError(""); setReceipt(null); setSourceHash(""); setAuditError(""); }}
                   className="rounded-xl border border-line bg-elevated px-5 py-2.5 text-sm text-ink">
                   {en ? "Clear" : "Xóa khỏi màn hình"}
                 </button>
               )}
             </div>
             {error && <p role="alert" className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-500">{error}</p>}
+            {auditError && <p role="alert" className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-500">{auditError}</p>}
+            {receipt && (
+              <div role="status" className="mt-4 rounded-xl border border-line bg-elevated p-4 text-xs leading-6 text-muted">
+                <p className="font-semibold text-ink">
+                  {en ? "Receipt matches this report's SHA-256 and evidence digest." : "Receipt khớp SHA-256 của báo cáo và mã băm bằng chứng."}
+                </p>
+                <p>
+                  {en
+                    ? "The receipt states that a separate Python process re-audited the private originals. This unsigned, user-supplied file does not prove that the audit ran or establish trusted provenance. Confirm the CLI result on a trusted machine."
+                    : "Receipt tự khai báo đã được Python kiểm toán lại từ dữ liệu gốc. Vì chưa có chữ ký số, file do người dùng cung cấp không chứng minh cuộc kiểm toán đã diễn ra hoặc xác nhận nguồn tin cậy. Cần kiểm tra kết quả CLI trên máy đáng tin cậy."}
+                </p>
+              </div>
+            )}
           </div>
           <div className="rounded-2xl border border-line bg-surface p-6">
             <p className="text-[11px] font-semibold uppercase tracking-widest text-faint">
@@ -271,7 +379,9 @@ export default function ResearchPage() {
                 <h2 className="mt-1 text-xl font-semibold">{report.name}</h2>
               </div>
               <span className="rounded-full border border-amber-500/30 px-3 py-1 text-xs text-amber-500">
-                {en ? "Format checked · Source unaudited" : "Đã kiểm tra định dạng · Nguồn chưa xác minh"}
+                {receipt
+                  ? en ? "Local audit receipt matched · Unsigned" : "Receipt cục bộ khớp · Chưa ký"
+                  : en ? "Format checked · Source unaudited" : "Đã kiểm tra định dạng · Nguồn chưa xác minh"}
               </span>
             </div>
 
