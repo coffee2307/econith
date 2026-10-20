@@ -233,13 +233,17 @@ def inspect(root:Path, *, co_run:bool=False)->dict:
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root",type=Path,required=True)
+    parser.add_argument("--co-run",action="store_true",
+                        help="Audit rotating source and HMAC while source was active")
     a=parser.parse_args(argv)
-    try:r=inspect(a.root)
+    expected=("PASSED_LOCAL_CORUN_RECEIVER_CHECKPOINT_CHAIN_ONLY" if a.co_run
+              else "PASSED_LOCAL_POSTSEAL_RECEIVER_CHECKPOINT_CHAIN_ONLY")
+    try:r=inspect(a.root,co_run=a.co_run)
     except (OSError,sqlite3.Error,TypeError,KeyError,ValueError,IndexError) as exc:
         r={"verdict":"POSTSEAL_AUDIT_REFUSED","failure_class":type(exc).__name__,
            "orders_submitted":0}
     print(json.dumps(r,sort_keys=True))
-    return 0 if r["verdict"]=="PASSED_LOCAL_POSTSEAL_RECEIVER_CHECKPOINT_CHAIN_ONLY" else 2
+    return 0 if r["verdict"]==expected else 2
 
 if __name__=="__main__":
     raise SystemExit(main())
