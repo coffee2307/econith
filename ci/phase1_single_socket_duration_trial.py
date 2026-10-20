@@ -16,6 +16,7 @@ import math
 import os
 from pathlib import Path
 import secrets
+import sqlite3
 import sys
 import time
 
@@ -267,8 +268,38 @@ def main(argv=None):
         print(json.dumps({"verdict":"REFUSED","failure_class":type(exc).__name__,
                           "orders_submitted":0}))
         return 2
+    # The capture producer's self-reported success is NOT sufficient.
+    # Reopen the private journal independently after its owner lock releases.
+    # Never grant CLI acceptance to unaudited or forged source evidence.
+    if report["verdict"]=="PASSED_BOUNDED_SINGLE_SOCKET_RESEARCH_ONLY":
+        from ci.phase1_single_socket_forensic_acceptance import (
+            PASS as FORENSIC_PASS, inspect as inspect_originals,
+        )
+        try:
+            forensic=inspect_originals(args.output_dir)
+            if forensic["verdict"]!=FORENSIC_PASS:
+                raise ValueError("forensic original evidence not accepted")
+        except (ValueError,TypeError,KeyError,OSError,sqlite3.Error) as exc:
+            print(json.dumps({
+                "verdict":"REFUSED_INDEPENDENT_SOURCE_AUDIT",
+                "producer_verdict":report["verdict"],
+                "failure_class":type(exc).__name__,
+                "orders_submitted":0,
+            },sort_keys=True))
+            return 2
+        print(json.dumps({
+            "verdict":"PASSED_PRODUCER_AND_INDEPENDENT_SOURCE_AUDIT_ONLY",
+            "producer_verdict":report["verdict"],
+            "independent_verdict":forensic["verdict"],
+            "originals":forensic["originals"],
+            "websocket_frames":forensic["websocket_frames"],
+            "real_exchange_history_completeness_proven":False,
+            "continuous_hmac_delivery_proven":False,
+            "orders_submitted":0,
+        },sort_keys=True))
+        return 0
     print(json.dumps({k:v for k,v in report.items() if k!="session_id"},sort_keys=True))
-    return 0 if report["verdict"]=="PASSED_BOUNDED_SINGLE_SOCKET_RESEARCH_ONLY" else 2
+    return 2
 
 
 if __name__=="__main__":
