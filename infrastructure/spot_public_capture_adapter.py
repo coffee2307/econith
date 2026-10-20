@@ -36,6 +36,13 @@ class SpotTransportError(SpotCaptureError):
 
 
 @dataclass(frozen=True)
+class SourceStampedSpotFrame:
+    """Opt-in local first-receipt stamp; caller assertion, not signed venue data."""
+    raw: str | bytes
+    received_at_ms: int
+
+
+@dataclass(frozen=True)
 class SpotTransportResult:
     session_id: str
     symbol: str
@@ -71,6 +78,7 @@ class OptInSpotIngressAdapter:
         on_queue_depth: Callable[[int,int],None] | None = None,
         on_queue_event: Callable[[str,int,int,float | None],None] | None = None,
         cooperative_reader_yield: bool = False,
+        accept_source_stamped_frames: bool = False,
     ) -> None:
         if not isinstance(journal, OfflineSpotCaptureJournal):
             raise ValueError("an immutable offline Spot capture journal is required")
@@ -84,6 +92,8 @@ class OptInSpotIngressAdapter:
             raise ValueError("FIFO event diagnostic callback must be callable")
         if type(cooperative_reader_yield) is not bool:
             raise ValueError("reader scheduling experiment requires explicit bool")
+        if type(accept_source_stamped_frames) is not bool:
+            raise ValueError("source first-receipt stamp policy must be bool")
         if snapshot_limit not in (100, 500, 1000, 5000):
             raise ValueError("invalid explicit read-only depth snapshot limit")
         self.journal = journal
@@ -95,6 +105,7 @@ class OptInSpotIngressAdapter:
         self.on_queue_depth = on_queue_depth
         self.on_queue_event = on_queue_event
         self.cooperative_reader_yield = cooperative_reader_yield
+        self.accept_source_stamped_frames = accept_source_stamped_frames
 
     def _clock(self) -> int:
         value = self.clock()
@@ -124,6 +135,7 @@ class OptInSpotIngressAdapter:
         on_persisted: Callable[[CapturedSpotRecord], Awaitable[None]] | None = None,
         idle_timeout_s: float | None = None,
         require_frame_limit: bool = False,
+        source_opened_at_ms: int | None = None,
     ) -> SpotTransportResult:
         """No network is opened here; caller supplies an already-opened stream.
 
@@ -152,7 +164,21 @@ class OptInSpotIngressAdapter:
             raise TypeError("a read-only REST snapshot fetcher is required")
         if on_persisted is not None and not callable(on_persisted):
             raise TypeError("incremental committed-record verifier must be callable")
-        opened = self._clock()
+        actual_admission_ms=self._clock()
+        if source_opened_at_ms is not None:
+            if not self.accept_source_stamped_frames:
+                raise SpotTransportError(
+                    "external source session stamp requires opt-in",
+                    reason="STAMP_NOT_AUTHORIZED",
+                )
+            opened=self.journal._positive(source_opened_at_ms,"source original opened_at")
+            if opened>actual_admission_ms or actual_admission_ms-opened>self.journal.max_age_ms:
+                raise SpotTransportError(
+                    "source opened timestamp outside admission bounds",
+                    reason="STAMP_AGE_VIOLATION",
+                )
+        else:
+            opened=actual_admission_ms
         self.journal.start_session(
             session_id, symbol=self.symbol, source=source,
             ws_endpoint=ws_endpoint, opened_at_ms=opened,
@@ -217,9 +243,27 @@ class OptInSpotIngressAdapter:
                             "websocket stopped delivering market evidence",
                             reason="WS_IDLE_TIMEOUT",
                         ) from exc
-                    received = self._clock()
-                    count += 1
-                    await _queue("ws", raw, received)
+                    if isinstance(raw,SourceStampedSpotFrame):
+                        if not self.accept_source_stamped_frames:
+                            raise SpotTransportError(
+                                "supervised source first-receipt stamps require opt-in",
+                                reason="STAMP_NOT_AUTHORIZED",
+                            )
+                        received=self.journal._positive(
+                            raw.received_at_ms,"supervised original first receipt"
+                        )
+                        admission_ms=self._clock()
+                        if (received>admission_ms
+                            or admission_ms-received>self.journal.max_age_ms):
+                            raise SpotTransportError(
+                                "supervised first receipt stale or future",
+                                reason="STAMP_AGE_VIOLATION",
+                            )
+                        raw=raw.raw
+                    else:
+                        received=self._clock()
+                    count+=1
+                    await _queue("ws",raw,received)
                     # Experiment: let the FIFO writer run if the transport
                     # repeatedly yields already-buffered WS frames in one
                     # event-loop turn. Never await available queue capacity,
