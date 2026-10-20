@@ -45,5 +45,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m pytest -q --tb=short tests/test_phase1_rotating_corun_hmac.py
+          for pass in 1 2 3; do
+            echo "offline co-running qualification pass ${pass}/3"
+            python -m pytest -q --tb=short tests/test_phase1_rotating_corun_hmac.py
+          done
           python -m py_compile ci/phase1_rotating_corun_hmac.py ci/phase1_rotating_hmac_handoff.py ci/phase1_rotating_hmac_audit.py
