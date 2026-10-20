@@ -198,6 +198,19 @@ def test_missing_source_and_no_consent_cannot_export(originals, tmp_path):
     assert not out.exists()
 
 
+def test_cli_refuses_receipt_output_nested_inside_private_source(originals, tmp_path):
+    folder = make_panel(originals, tmp_path)
+    forbidden = originals[0] / "nested_receipt"
+    code = main([
+        "--allow-offline-original-audit", "--kind", "panel",
+        "--report-dir", str(folder),
+        "--decision-root", str(originals[0]),
+        "--output-dir", str(forbidden),
+    ])
+    assert code == 2
+    assert not forbidden.exists()
+
+
 def test_corrupt_private_original_refused(originals, tmp_path):
     folder = make_panel(originals, tmp_path)
     path = originals[0] / "klines_btcusdt_1m.json"
