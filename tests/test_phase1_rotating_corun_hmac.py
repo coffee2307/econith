@@ -190,6 +190,43 @@ asyncio.run(co_run_rotating_hmac(
     with pytest.raises(ValueError,match="operator review"):
         inspect_hmac(root,co_run=True)
 
+    # Verified OS subprocess death. This is a synthetic *operator-reviewed*
+    # local recovery only: production code never unlinks orphan markers.
+    child=root/"segments"/"0000"
+    with sqlite3.connect(recv.resolve().as_uri()+"?mode=ro",uri=True) as db:
+        prior={
+            (row[0],row[1]) for row in db.execute(
+                "SELECT ingest_id,receipt_id FROM offline_independent_projection_receipts"
+            )
+        }
+    assert len(prior)>=2, "must exercise multiple already-COMMITted batched ACKs"
+    (root/".forward_producer.lock").unlink()
+    (child/".forward_producer.lock").unlink()
+    from infrastructure.spot_forward_recovery import recover_staged_forward_spot
+    session=json.loads((child/"seal.json").read_text())["session_id"]
+    recovered=asyncio.run(recover_staged_forward_spot(
+        root=child,session_id=session,max_envelopes=1000,
+        reconstruct_missing=True,max_book_staleness_ms=5000,
+        persistent_receiver=True,receiver_batch_size=8,
+        reuse_receiver_connection=True,
+    ))
+    assert recovered.staged_envelopes==recovered.receiver_receipts==recovered.forward_checkpoints
+    assert recovered.source_coverage_certified is False
+    assert recovered.session_certified is False
+    with sqlite3.connect(recv.resolve().as_uri()+"?mode=ro",uri=True) as db:
+        after={
+            (row[0],row[1]) for row in db.execute(
+                "SELECT ingest_id,receipt_id FROM offline_independent_projection_receipts"
+            )
+        }
+    assert prior.issubset(after)
+    assert len(after)==recovered.receiver_receipts
+    assert len(after)==len({identity for identity,digest in after})
+    # Even though one sealed segment recovers correctly, the overall source
+    # was interrupted and must NOT become a globally certified source.
+    with pytest.raises((ValueError,FileNotFoundError)):
+        inspect_hmac(root,co_run=True)
+
 
 @pytest.mark.asyncio
 async def test_authenticated_eight_receipt_batch_with_receiver_connection_reuse(tmp_path):
