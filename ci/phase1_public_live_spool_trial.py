@@ -26,7 +26,8 @@ async def run(root:Path,*,frames:int,timeout_s:float,max_lag_ms:int,
               reuse_producer_connections:bool=False,
               reuse_receiver_connection:bool=False,
               reuse_original_connection:bool=False,
-              cooperative_reader_yield:bool=False)->dict:
+              cooperative_reader_yield:bool=False,
+              measure_checkpoint_completion:bool=False)->dict:
     await measure_public_clock(
         max_abs_offset_ms=3000,max_rtt_ms=2000,
     )
@@ -44,6 +45,7 @@ async def run(root:Path,*,frames:int,timeout_s:float,max_lag_ms:int,
         experiment_reuse_receiver_connection=reuse_receiver_connection,
         experiment_reuse_original_connection=reuse_original_connection,
         experiment_cooperative_reader_yield=cooperative_reader_yield,
+        experiment_checkpoint_completion_timing=measure_checkpoint_completion,
     )
     if (not result.session_complete or not result.publication_in_session
         or not result.all_receipts_independent or result.orders_submitted
@@ -55,9 +57,23 @@ async def run(root:Path,*,frames:int,timeout_s:float,max_lag_ms:int,
         or result.projector_min_headroom_ms is None
         or result.projector_min_headroom_ms<0):
         raise RuntimeError("bounded public spool research proof incomplete")
+    if measure_checkpoint_completion:
+        from infrastructure.spot_checkpoint_delivery_probe import inspect as inspect_times
+        timing = inspect_times(root)
+        if (timing["source_to_after_checkpoint_samples"]!=result.receiver_receipts
+            or timing["max_source_to_after_checkpoint_ms"]!=result.source_to_checkpoint_max_ms
+            or result.source_to_checkpoint_samples!=result.receiver_receipts):
+            raise RuntimeError("source-to-checkpoint forensic latency mismatch")
+    else:
+        timing = None
     return {
         **asdict(result),
         "verdict":"PASSED_FINITE_PUBLIC_IN_SESSION_SPOOL_RESEARCH_ONLY",
+        "checkpoint_completion_independently_reaudited":timing is not None,
+        "checkpoint_completion_p95_ms":(
+            timing["p95_source_to_after_checkpoint_ms"] if timing else None),
+        "checkpoint_completion_p99_ms":(
+            timing["p99_source_to_after_checkpoint_ms"] if timing else None),
         "history_gap_free_verified":False,
         "default_market_ingress_cutover":False,
         "institutional_phase1_complete":False,
@@ -74,6 +90,8 @@ def main(argv:list[str]|None=None)->int:
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--allow-public-market-data",action="store_true")
     p.add_argument("--accept-experimental-spool",action="store_true")
+    p.add_argument("--measure-checkpoint-completion",action="store_true",
+                   help="source receipt through AFTER durable checkpoint, new local ledger audit")
     p.add_argument("--cooperative-reader-yield",action="store_true",
                    help="full-cache-only experimental reader event-loop fairness")
     p.add_argument("--reuse-original-connection",action="store_true",
@@ -93,6 +111,7 @@ def main(argv:list[str]|None=None)->int:
     args=p.parse_args(argv)
     if (not args.allow_public_market_data
         or not args.accept_experimental_spool
+        or (args.measure_checkpoint_completion and not args.accept_experimental_spool)
         or (args.cooperative_reader_yield and not (
             args.reuse_original_connection and args.reuse_receiver_connection
             and args.reuse_producer_connections and args.reuse_derived_connections))
@@ -119,7 +138,8 @@ def main(argv:list[str]|None=None)->int:
                                reuse_producer_connections=args.reuse_producer_connections,
                                reuse_receiver_connection=args.reuse_receiver_connection,
                                reuse_original_connection=args.reuse_original_connection,
-                               cooperative_reader_yield=args.cooperative_reader_yield))
+                               cooperative_reader_yield=args.cooperative_reader_yield,
+                               measure_checkpoint_completion=args.measure_checkpoint_completion))
     except Exception as exc:
         print(json.dumps({
             "verdict":"FAILED_OR_QUARANTINED_SOURCE",
