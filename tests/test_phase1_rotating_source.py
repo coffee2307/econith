@@ -77,8 +77,8 @@ def lease_fixture(*, interval=.012, early_eof=False, invalid_payload=False,
                 if positive_run_slow_tail:
                     state["snapshot_index"]+=1
                     # Deterministic historical snapshot/diff bridge for the
-                    # 1st (U=101) and 2nd (U=117) original journals.
-                    snapshot_id=100+16*(state["snapshot_index"]-1)
+                    # 1st (U=101) and 2nd (U=117) journals; the snapshot ID\n                    # must cover the first buffered U, not predate it.
+                    snapshot_id=101+16*(state["snapshot_index"]-1)
                 else:
                     snapshot_id=state["id"]
                 return json.dumps({
