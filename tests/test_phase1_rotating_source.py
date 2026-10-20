@@ -26,7 +26,8 @@ async def public_clock(**kwargs):
 
 
 def lease_fixture(*, interval=.012, early_eof=False, invalid_payload=False,
-                  snapshot_fail=False, frame_burst=False):
+                  snapshot_fail=False, frame_burst=False,
+                  positive_run_slow_tail=False):
     @asynccontextmanager
     async def lease(*,allow_public_market_data):
         assert allow_public_market_data
@@ -37,7 +38,12 @@ def lease_fixture(*, interval=.012, early_eof=False, invalid_payload=False,
                 async def generator():
                     i=0
                     while True:
-                        await asyncio.sleep(0 if frame_burst else interval)
+                        # Bound the number of snapshot/diff sequence bridges in
+                        # positive fixtures: ~two sealed journals, not an
+                        # arbitrary 150-frame stress sequence that eventually
+                        # hits the intended BOOK_NOT_SYNCED quarantine gate.
+                        delay=(.33 if positive_run_slow_tail and i>=19 else interval)
+                        await asyncio.sleep(0 if frame_burst else delay)
                         if early_eof and i>=14:
                             return
                         i+=1
@@ -77,7 +83,7 @@ async def test_one_socket_reader_all_frames_sealed_across_more_than_two_sqlite_j
     result=await run_rotation(
         root,allow_public_market_data=True,
         duration_s=2.5,max_frames_per_segment=16,_fixture=True,
-        lease_factory=lease_fixture(),clock_preflight=public_clock,
+        lease_factory=lease_fixture(positive_run_slow_tail=True),clock_preflight=public_clock,
     )
     assert result["verdict"]=="PASSED_BOUNDED_SOURCE_ROTATION_RESEARCH_ONLY",json.dumps(result,sort_keys=True)
     assert result["source_socket_count"]==1
@@ -148,7 +154,7 @@ async def test_rotation_tampered_original_cannot_pass_independent_audit(tmp_path
     report=await run_rotation(
         root,allow_public_market_data=True,
         duration_s=2.25,max_frames_per_segment=16,_fixture=True,
-        lease_factory=lease_fixture(),clock_preflight=public_clock,
+        lease_factory=lease_fixture(positive_run_slow_tail=True),clock_preflight=public_clock,
     )
     assert report["verdict"]=="PASSED_BOUNDED_SOURCE_ROTATION_RESEARCH_ONLY",json.dumps(report,sort_keys=True)
     path=root/"segments"/"0001"/"original.sqlite"
