@@ -27,12 +27,19 @@ async def clock(**kwargs):
 @asynccontextmanager
 async def fake_lease(*,allow_public_market_data):
     assert allow_public_market_data
-    state={"last":100}
+    state={"last":100,"snapshot_index":0}
     class Socket:
         @property
         def stream(self):
             async def feed():
                 while True:
+                    # The HMAC post-seal unit fixture needs exactly two
+                    # 12-frame journals. After frame 24 it remains open and
+                    # idle until the time-bound source closes, avoiding a
+                    # non-deterministic third REST bridge in this ACK test.
+                    if state["last"]>=124:
+                        await asyncio.sleep(2)
+                        continue
                     await asyncio.sleep(.017)
                     state["last"]+=1
                     ts=time.time_ns()//1_000_000
@@ -44,7 +51,8 @@ async def fake_lease(*,allow_public_market_data):
             return feed()
         async def snapshot(self,symbol,limit):
             assert symbol=="BTCUSDT"
-            return json.dumps({"lastUpdateId":state["last"],
+            state["snapshot_index"]+=1
+            return json.dumps({"lastUpdateId":100+12*(state["snapshot_index"]-1),
                 "bids":[["100","2"]],"asks":[["102","2"]]}).encode()
     yield Socket()
 
