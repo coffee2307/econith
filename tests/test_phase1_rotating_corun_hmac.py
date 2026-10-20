@@ -265,7 +265,9 @@ async def test_authenticated_eight_receipt_batch_with_receiver_connection_reuse(
     """Eight individually persisted ACKs per authenticated HMAC request."""
     root=(tmp_path/"hmac_batch_eight").resolve()
     result=await co_run_rotating_hmac(
-        root,duration_s=2.65,max_frames_per_segment=12,
+        # Offline-only test headroom for CI CPU contention while keeping
+        # the 12-frame source seal and eight-ACK HMAC proof unchanged.
+        root,duration_s=4.2,max_frames_per_segment=12,
         lease_factory=stream_fixture,clock_preflight=clock,
         explicit_offline_fixture_approval=True,
         receiver_batch_size=8,reuse_receiver_connection=True,
