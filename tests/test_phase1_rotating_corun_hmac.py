@@ -295,7 +295,10 @@ async def test_deliberately_slow_receiver_overflows_bounded_segment_queue_fail_c
     """Stress producer faster than intentionally paused receiver: NO silent loss."""
     root=(tmp_path/"saturated_receiver").resolve()
     result=await co_run_rotating_hmac(
-        root,duration_s=2.65,max_frames_per_segment=8,
+        # Fixture-only longer window guarantees >=4 synthetic seals even if
+        # a contended CI host temporarily suspends the test event loop.
+        # The deliberately paused 4s worker must meet a FULL 2-slot queue.
+        root,duration_s=6.0,max_frames_per_segment=8,
         lease_factory=eight_frame_stream_fixture,clock_preflight=clock,
         explicit_offline_fixture_approval=True,
         receiver_batch_size=8,reuse_receiver_connection=True,
