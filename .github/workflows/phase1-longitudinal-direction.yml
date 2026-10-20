@@ -1,0 +1,31 @@
+name: ECONITH P1-09 longitudinal direction benchmark
+
+on:
+  pull_request:
+    paths:
+      - "ci/phase1_longitudinal_direction_cohort.py"
+      - "tests/test_phase1_longitudinal_direction_cohort.py"
+      - "dashboard/app/research/overview/page.tsx"
+      - "dashboard/app/research/page.tsx"
+      - ".github/workflows/phase1-longitudinal-direction.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  finite-direction-cohort:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install offline test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+      - name: Re-audit originals and verify paired benchmark safety (synthetic only)
+        run: python -m pytest tests/test_phase1_longitudinal_direction_cohort.py -q --tb=short

@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, type ChangeEvent } from "react";
+import Link from "next/link";
 import { useLocale } from "@/contexts/LocaleContext";
 
 type RecordValue = Record<string, unknown>;
@@ -280,6 +281,11 @@ export default function ResearchPage() {
             RESEARCH ONLY · NO ORDERS
           </div>
         </div>
+
+        <Link href="/research/overview"
+          className="mb-5 inline-flex items-center rounded-xl border border-line bg-surface px-5 py-3 text-sm font-semibold text-accent transition-opacity hover:opacity-80">
+          {en ? "Explore longitudinal AI vs baseline →" : "Xem hiệu quả dự báo AI so với baseline →"}
+        </Link>
 
         <div className="mb-5 rounded-2xl border border-amber-500/30 bg-amber-500/5 px-5 py-4 text-sm leading-6 text-muted">
           <strong className="text-ink">
