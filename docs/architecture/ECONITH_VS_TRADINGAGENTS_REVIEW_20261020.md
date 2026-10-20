@@ -42,3 +42,7 @@ Cả hai đều mô tả quy trình phân tích thị trường, quản trị r�
 Với dữ liệu hiện có, **TradingAgents tốt hơn như công cụ đồng nghiệp AI nghiên cứu quyết định**; **ECONITH phù hợp hơn làm nền móng một hệ thống định lượng crypto có dữ liệu xác minh, kiểm soát thực thi và bằng chứng crash**. Nhưng không thể bảo rằng ECONITH hoặc TradingAgents giao dịch live có tỷ lệ thắng, Sharpe hay lợi nhuận thực tế cao hơn. Muốn chấm đúng cần chạy thử cùng kỳ, phí, latency, vốn, độ biến động và áp dụng quy trình thống kê độc lập. Không gửi lệnh thật trước khi những cổng an toàn và nghiệm thu hoàn tất.
 
 _Thông tin upstream kiểm tra theo tag v0.7.0 phát hành 16/10/2026. Trình bày căn cứ tại đây không bao hàm bảo đảm lợi nhuận._
+
+### Gia cố sau kiểm toán mô hình đe dọa
+
+SHA-256 thuần chỉ là dấu vân tay nội dung, **không phải chữ ký xác thực nguồn**. `adjudicate_advisory` vì vậy **bắt buộc** có `source_root` của bộ bằng chứng riêng; trước khi xét đủ quorum AI, hàm mở lại toàn bộ raw Spot bằng bộ kiểm toán độc lập, tính lại bằng chứng PIT từ file và yêu cầu khớp chính xác với object do caller cung cấp. Bài negative test thay giá của nến và **tự tính lại SHA-256 cùng năm báo cáo role** vẫn phải bị từ chối. Cơ chế này chỉ ràng buộc các file gốc cục bộ đã được kiểm toán; **không phải chữ ký do Binance phát hành** hoặc bằng chứng venue-wide completeness.
