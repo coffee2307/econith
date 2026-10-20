@@ -146,3 +146,53 @@ asyncio.run(reconcile_sealed_rotation(
         independent_audit(root)
     with pytest.raises(HandoffRefused,match="owner"):
         await reconcile_sealed_rotation(root,explicit_operator_approval=True)
+    # Explicit OFFLINE operator-review simulation only. We have witnessed the
+    # subprocess exit and inspected both orphan markers. Production must NOT
+    # silently unlink orphan markers or continue without operator evidence.
+    child=root/"segments"/"0000"
+    with sqlite3.connect(raw.resolve().as_uri()+"?mode=ro",uri=True) as db:
+        prior=db.execute(
+            "SELECT ingest_id,receipt_id FROM offline_independent_projection_receipts "
+            "ORDER BY ingest_id LIMIT 1").fetchone()
+        assert prior is not None
+    (root/".forward_producer.lock").unlink()
+    (child/".forward_producer.lock").unlink()
+    from infrastructure.spot_forward_recovery import recover_staged_forward_spot
+    sid=json.loads((child/"seal.json").read_text())["session_id"]
+    repaired=await recover_staged_forward_spot(
+        root=child,session_id=sid,
+        max_envelopes=1000,reconstruct_missing=True,
+        max_book_staleness_ms=5000,persistent_receiver=True,
+    )
+    assert repaired.receiver_receipts==repaired.staged_envelopes
+    assert repaired.forward_checkpoints==repaired.staged_envelopes
+    assert repaired.checkpoint_suffix_repaired>=1
+    assert repaired.session_certified is False
+    assert repaired.source_coverage_certified is False
+    with sqlite3.connect(raw.resolve().as_uri()+"?mode=ro",uri=True) as db:
+        matched=db.execute(
+            "SELECT COUNT(*) FROM offline_independent_projection_receipts "
+            "WHERE ingest_id=? AND receipt_id=?",prior).fetchone()[0]
+        total=db.execute(
+            "SELECT COUNT(*) FROM offline_independent_projection_receipts").fetchone()[0]
+        assert matched==1
+        assert total==repaired.staged_envelopes
+    # A partial GLOBAL handoff remains quarantined even if one segment's
+    # original/HMAC/derived/checkpoint suffix has been fully restored.
+    with pytest.raises((ValueError,FileNotFoundError)):
+        independent_audit(root)
+
+
+@pytest.mark.asyncio
+async def test_mutated_checkpoint_chain_fails_independent_postseal_audit(tmp_path):
+    root=tmp_path/"checkpoint_tamper"
+    await capture(root)
+    result=await reconcile_sealed_rotation(root,explicit_operator_approval=True)
+    assert result["verdict"]=="PASSED_BOUNDED_POSTSEAL_HMAC_HANDOFF_ONLY"
+    assert independent_audit(root)["all_checkpoint_chain_hashes_verified"]
+    cp=root/"segments"/"0000"/"forward_checkpoints.sqlite"
+    with sqlite3.connect(cp) as db:
+        db.execute("UPDATE forward_checkpoint SET checkpoint_sha256=? WHERE ordinal=1",
+                   ("e"*64,))
+    with pytest.raises(ValueError,match="chain diverged"):
+        independent_audit(root)
