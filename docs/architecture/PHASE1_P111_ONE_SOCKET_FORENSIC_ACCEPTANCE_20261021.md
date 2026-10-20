@@ -55,8 +55,11 @@ python -m ci.phase1_single_socket_forensic_acceptance \
   --root /ABSOLUTE/PRIVATE/ONE_SOCKET_EVIDENCE
 ```
 
-Opt-in public *bounded* 90-second observation, **not automatically executed**
-by any CI job in this PR:
+Opt-in public *bounded* 90-second observation (also exercised by the
+dedicated GitHub PR gate **only for same-repository PR branches after its
+offline test job succeeds**, using public market data only, no credentials;
+all raw SQLite remains on the temporary runner and only aggregate JSON is
+uploaded):
 
 ```bash
 python -m ci.phase1_single_socket_duration_trial \
