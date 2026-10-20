@@ -108,8 +108,11 @@ async def lifespan(app: FastAPI):
             yield
         finally:
             app.state.verified_only_research = False
-            await preview.close()
-            components.clear()
+            try:
+                await preview.close()
+            finally:
+                # Never retain stale research components if close() raises.
+                components.clear()
         return
     if ingress_policy == "verified_only":
         # Dedicated finite, original-byte-backed SIMULATION research runtime.
@@ -130,8 +133,11 @@ async def lifespan(app: FastAPI):
             yield
         finally:
             app.state.verified_only_research = False
-            await research.close()
-            components.clear()
+            try:
+                await research.close()
+            finally:
+                # Never retain stale research components if close() raises.
+                components.clear()
         return
     env = get_environment()
     boot_locale = bootstrap_locale_from_env()
