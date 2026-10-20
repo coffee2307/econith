@@ -50,6 +50,12 @@ def lease_fixture(*, interval=.012, early_eof=False, invalid_payload=False,
                         if invalid_payload and i==25:
                             body={"stream":"btcusdt@depth20@100ms","data":diff}
                         yield json.dumps(body,separators=(",",":")).encode()
+                        # Fixture-only: keep the REST snapshot bridge within
+                        # a reproducible timestamp ordering around the 16-frame
+                        # journal seal. This is NOT a production reconnect or
+                        # relaxation of the fail-closed source validator.
+                        if not frame_burst and i % 16 == 0:
+                            await asyncio.sleep(.08)
                 return generator()
             async def snapshot(self,symbol,limit):
                 assert symbol=="BTCUSDT" and limit==1000
