@@ -1,0 +1,87 @@
+name: ECONITH P1-13 after-checkpoint delivery age for finite HMAC spool
+
+on:
+  pull_request:
+    paths:
+      - "infrastructure/spot_checkpoint_delivery_probe.py"
+      - "infrastructure/spot_forward_verified_research.py"
+      - "ci/phase1_checkpoint_delivery_audit.py"
+      - "ci/phase1_public_live_spool_trial.py"
+      - "tests/test_phase1_checkpoint_delivery_probe.py"
+      - ".github/workflows/phase1-p113-checkpoint-age.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-durable-checkpoint-ages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install offline test dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Recompute after-checkpoint ages and reject late/tampered source proofs
+        run: |
+          python -m pytest -q --tb=short \
+            tests/test_phase1_checkpoint_delivery_probe.py \
+            tests/test_phase1_live_spool_projection.py \
+            tests/test_phase1_projector_lag_histogram.py
+
+  public-finite-event-checkpoint:
+    needs: offline-durable-checkpoint-ages
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install approved public-only transport and local HMAC receiver dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: One bounded public source with 300 in-session HMAC/checkpoint events
+        shell: bash
+        run: |
+          set -euo pipefail
+          private="${RUNNER_TEMP}/econith-p113-source-${GITHUB_RUN_ID}"
+          python -m ci.phase1_public_live_spool_trial \
+            --allow-public-market-data \
+            --accept-experimental-spool \
+            --measure-checkpoint-completion \
+            --reuse-derived-connections \
+            --reuse-producer-connections \
+            --reuse-receiver-connection \
+            --reuse-original-connection \
+            --cooperative-reader-yield \
+            --frames 300 --timeout-s 120 \
+            --max-lag-ms 5000 \
+            --output-dir "$private"
+          python -m ci.phase1_checkpoint_delivery_audit --root "$private" \
+            | tee "${RUNNER_TEMP}/p113_public_audit.json"
+      - name: Export only bounded aggregate, never raw SQLite or event timing records
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="${RUNNER_TEMP}/econith-p113-aggregate"
+          mkdir -p "$stage"
+          if [ -f "${RUNNER_TEMP}/p113_public_audit.json" ]; then
+            cp "${RUNNER_TEMP}/p113_public_audit.json" "$stage/checkpoint_age_audit.json"
+          fi
+      - name: Upload aggregate-only 3-day record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: econith-p113-checkpoint-age-${{ github.run_id }}
+          path: ${{ runner.temp }}/econith-p113-aggregate/
+          retention-days: 3
+          if-no-files-found: warn

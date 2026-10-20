@@ -38,6 +38,7 @@ from infrastructure.spot_forward_owner import exclusive_forward_owner
 from infrastructure.spot_forward_stage_profile import BoundedStageProfiler
 from infrastructure.spot_projection_durable_cursor import OfflineSpotProjectionCursor
 from infrastructure.spot_projector_lag_histogram import BoundedProjectorLag
+from infrastructure.spot_checkpoint_delivery_probe import BoundedCheckpointAgeProbe
 from infrastructure.spot_spool_pressure_diagnostics import BoundedSpoolPressure
 from infrastructure.market_persistent_hmac_receiver import PersistentHmacResearchReceiver
 from infrastructure.market_derived_research_receipts import (
@@ -97,6 +98,8 @@ class ForwardSpotResearchStatus:
     projector_p95_admission_age_upper_ms: int | None = None
     projector_p99_admission_age_upper_ms: int | None = None
     projector_min_headroom_ms: int | None = None
+    source_to_checkpoint_samples: int = 0
+    source_to_checkpoint_max_ms: int | None = None
 
 
 async def observe_forward_spot_research(
@@ -121,6 +124,7 @@ async def observe_forward_spot_research(
     experiment_reuse_receiver_connection: bool = False,
     experiment_reuse_original_connection: bool = False,
     experiment_cooperative_reader_yield: bool = False,
+    experiment_checkpoint_completion_timing: bool = False,
 ) -> ForwardSpotResearchStatus:
     """One real *in-session* research pass (no default startup/auto retry).
 
@@ -206,6 +210,11 @@ async def observe_forward_spot_research(
         raise PermissionError("producer connection reuse requires separately opted-in bounded research profile")
     if diagnose_pressure and not spooled_in_session:
         raise PermissionError("pressure diagnostics require opt-in spool research")
+    if type(experiment_checkpoint_completion_timing) is not bool or (
+        experiment_checkpoint_completion_timing and
+        (not spooled_in_session or not persistent_receiver)
+    ):
+        raise PermissionError("checkpoint completion probe requires opted-in HMAC spool")
     if spooled_in_session and (
         queue_capacity != 128 or not persistent_receiver
     ):
@@ -234,6 +243,12 @@ async def observe_forward_spot_research(
         lag_diagnostic = (
             BoundedProjectorLag(root / 'projector_lag.json', age_budget_ms=max_projector_lag_ms)
             if spooled_in_session else None
+        )
+        delivery_probe = (
+            BoundedCheckpointAgeProbe(
+                root / "checkpoint_delivery_ages.json",
+                budget_ms=max_projector_lag_ms,
+            ) if experiment_checkpoint_completion_timing else None
         )
         provider = lambda: QuantMode.SIMULATION
         journal = OfflineSpotCaptureJournal(
@@ -456,10 +471,18 @@ async def observe_forward_spot_research(
             # The source session is STILL OPEN: durable independently tied
             # producer/receiver/derived ACK proof is checkpointed per event.
             with trace("checkpoint_commit"):
-                checkpoints.append_live(
+                checkpoint_state = checkpoints.append_live(
                     envelope,
                     completed_item=outbox.completed_item(envelope),
                     expected_ordinal=admitted+1,
+                )
+            if delivery_probe is not None:
+                # Time captured after FULL durable checkpoint COMMIT returns;
+                # the source ledger, HMAC child and derived receipts already
+                # exist. Exceeding the limit quarantines the whole session.
+                delivery_probe.observe(
+                    envelope, confirmations[0].receipt_id,
+                    checkpoint_state,
                 )
             if pressure is not None:
                 pressure.checkpoint()
@@ -602,6 +625,14 @@ async def observe_forward_spot_research(
                     pass
                 else:
                     raise ForwardSpotResearchError("protected forward EventBus bypass")
+            if delivery_probe is not None:
+                if len(delivery_probe.rows) != admitted:
+                    raise ForwardSpotResearchError(
+                        "checkpoint timing missing eligible events"
+                    )
+                completion_stats = delivery_probe.seal()
+            else:
+                completion_stats = None
             completed = True
             lag_stats = (lag_diagnostic.summary(source_complete=True)
                          if lag_diagnostic is not None else None)
@@ -641,6 +672,11 @@ async def observe_forward_spot_research(
                     lag_stats["p99_age_upper_ms"] if lag_stats else None),
                 projector_min_headroom_ms=(
                     lag_stats["minimum_observed_headroom_ms"] if lag_stats else None),
+                source_to_checkpoint_samples=(
+                    completion_stats["age_samples"] if completion_stats else 0),
+                source_to_checkpoint_max_ms=(
+                    completion_stats["max_source_to_checkpoint_completion_ms"]
+                    if completion_stats else None),
             )
         finally:
             if projector_task is not None and not projector_task.done():
