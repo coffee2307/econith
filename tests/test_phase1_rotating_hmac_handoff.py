@@ -27,7 +27,7 @@ async def clock(**kwargs):
 @asynccontextmanager
 async def fake_lease(*,allow_public_market_data):
     assert allow_public_market_data
-    state={"last":100,"snapshot_index":0}
+    state={"last":100,"snapshot_index":0,"snapshot_served":asyncio.Event()}
     class Socket:
         @property
         def stream(self):
@@ -48,10 +48,17 @@ async def fake_lease(*,allow_public_market_data):
                                   "U":state["last"],"u":state["last"],
                                   "b":[["100","2"]],"a":[]}}
                     yield json.dumps(body,separators=(",",":")).encode()
+                    # Do not let synthetic diff #2 overtake REST response.
+                    # Only the offline fixture sequence is delayed here.
+                    if (state["last"]-101)%12==0:
+                        await asyncio.wait_for(state["snapshot_served"].wait(),2.0)
+                        state["snapshot_served"].clear()
+                        await asyncio.sleep(.12)
             return feed()
         async def snapshot(self,symbol,limit):
             assert symbol=="BTCUSDT"
             state["snapshot_index"]+=1
+            state["snapshot_served"].set()
             return json.dumps({"lastUpdateId":101+12*(state["snapshot_index"]-1),
                 "bids":[["100","2"]],"asks":[["102","2"]]}).encode()
     yield Socket()
