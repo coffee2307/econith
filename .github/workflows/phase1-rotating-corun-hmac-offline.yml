@@ -1,0 +1,52 @@
+name: ECONITH Phase1 bounded co-running Spot reader and HMAC checkpoint offline
+on:
+  push:
+    branches:
+      - 'experiment/phase1-rotating-corun-hmac-*'
+    paths:
+      - 'ci/phase1_rotating_spot_source.py'
+      - 'ci/phase1_rotating_hmac_handoff.py'
+      - 'ci/phase1_rotating_hmac_audit.py'
+      - 'ci/phase1_rotating_corun_hmac.py'
+      - 'tests/test_phase1_rotating_corun_hmac.py'
+      - '.github/workflows/phase1-rotating-corun-hmac-offline.yml'
+  pull_request:
+    paths:
+      - 'ci/phase1_rotating_spot_source.py'
+      - 'ci/phase1_rotating_hmac_handoff.py'
+      - 'ci/phase1_rotating_hmac_audit.py'
+      - 'ci/phase1_rotating_corun_hmac.py'
+      - 'tests/test_phase1_rotating_corun_hmac.py'
+      - '.github/workflows/phase1-rotating-corun-hmac-offline.yml'
+permissions:
+  contents: read
+jobs:
+  offline-co-running-ack-and-crash:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    steps:
+      - name: Fetch tested immutable commit archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 2 -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_SHA}" \
+            -o "${RUNNER_TEMP}/source.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/source.tar.gz" --strip-components=1
+          test -f tests/test_phase1_rotating_corun_hmac.py
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install existing research runtime and deterministic offline test deps
+        run: |
+          python -m pip install -q -r requirements.txt -r requirements-dev.txt
+          python -m pip install -q pytest==8.3.5 pytest-asyncio==0.26.0 httpx==0.28.1 websockets==14.2
+      - name: Co-running source, bounded HMAC receiver, cross-ledger parity and real crash
+        shell: bash
+        run: |
+          set -euo pipefail
+          for pass in 1 2 3; do
+            echo "offline co-running qualification pass ${pass}/3"
+            python -m pytest -q --tb=short tests/test_phase1_rotating_corun_hmac.py
+          done
+          python -m py_compile ci/phase1_rotating_corun_hmac.py ci/phase1_rotating_hmac_handoff.py ci/phase1_rotating_hmac_audit.py

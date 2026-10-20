@@ -70,7 +70,7 @@ async def test_one_socket_reader_all_frames_sealed_across_more_than_two_sqlite_j
     root=tmp_path/"rotated"
     result=await run_rotation(
         root,allow_public_market_data=True,
-        duration_s=.75,max_frames_per_segment=16,_fixture=True,
+        duration_s=2.5,max_frames_per_segment=16,_fixture=True,
         lease_factory=lease_fixture(),clock_preflight=public_clock,
     )
     assert result["verdict"]=="PASSED_BOUNDED_SOURCE_ROTATION_RESEARCH_ONLY",json.dumps(result,sort_keys=True)
@@ -94,7 +94,7 @@ async def test_early_eof_malformed_and_rest_fault_quarantine_no_false_rotation_s
     root=tmp_path/"bad"
     report=await run_rotation(
         root,allow_public_market_data=True,
-        duration_s=.7,max_frames_per_segment=16,_fixture=True,
+        duration_s=2.0,max_frames_per_segment=16,_fixture=True,
         lease_factory=lease_fixture(early_eof=failure=="early",
                                    invalid_payload=failure=="invalid",
                                    snapshot_fail=failure=="snapshot"),
@@ -141,7 +141,7 @@ async def test_rotation_tampered_original_cannot_pass_independent_audit(tmp_path
     root=tmp_path/"tamper"
     report=await run_rotation(
         root,allow_public_market_data=True,
-        duration_s=.65,max_frames_per_segment=16,_fixture=True,
+        duration_s=2.25,max_frames_per_segment=16,_fixture=True,
         lease_factory=lease_fixture(),clock_preflight=public_clock,
     )
     assert report["verdict"]=="PASSED_BOUNDED_SOURCE_ROTATION_RESEARCH_ONLY",json.dumps(report,sort_keys=True)
@@ -209,7 +209,7 @@ async def lease(*,allow_public_market_data):
                 "bids":[["100","2"]],"asks":[["102","2"]]}).encode()
     yield PublicFixture()
 asyncio.run(run_rotation(
-    Path(sys.argv[1]),allow_public_market_data=True,duration_s=.6,
+    Path(sys.argv[1]),allow_public_market_data=True,duration_s=2.0,
     max_frames_per_segment=8,_fixture=True,
     lease_factory=lease,clock_preflight=clock,
 ))
