@@ -37,6 +37,45 @@ def _digest(prev:str,num:int,out:dict,receipt_id:str)->str:
     },sort_keys=True,separators=(",",":"),ensure_ascii=False)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
+
+def _audited_derived_rows(dbfile:Path, session_id:str)->list[dict]:
+    """Verify *actual* durable derived observer rows, ordinal and receipt SHA.
+
+    This does not establish EventBus-wide transactional delivery; it inspects
+    only the three explicitly named protected research topics.
+    """
+    receipts=_read(dbfile,
+        "SELECT * FROM offline_research_derived_receipts "
+        "ORDER BY consumer_topic,ordinal")
+    cursors=_read(dbfile,
+        "SELECT * FROM offline_research_derived_cursors ORDER BY consumer_topic")
+    topics={"md.ticker","indicator.volume_delta","indicator.obi"}
+    totals={}
+    for row in receipts:
+        topic=row["consumer_topic"]
+        if (row["session_id"]!=session_id or topic not in topics
+            or type(row["ordinal"]) is not int
+            or row["ordinal"]!=totals.get(topic,0)+1
+            or not row["source_record_id"].startswith(session_id+":")):
+            raise ValueError("derived research identity or ordinal corrupted")
+        payload=json.loads(row["projection_json"])
+        body=json.dumps(payload,sort_keys=True,separators=(",",":"),
+                        ensure_ascii=False,allow_nan=False)
+        digest=hashlib.sha256(body.encode("utf-8")).hexdigest()
+        identity=json.dumps([
+            session_id,topic,row["ordinal"],row["source_record_id"],
+            row["source_available_at_ms"],digest,
+        ],ensure_ascii=False,separators=(",",":"),allow_nan=False)
+        expected=hashlib.sha256(identity.encode("utf-8")).hexdigest()
+        if (body!=row["projection_json"] or digest!=row["projection_digest"]
+            or expected!=row["receipt_id"]):
+            raise ValueError("derived receipt JSON/fingerprint/identity tampered")
+        totals[topic]=row["ordinal"]
+    cursor_map={row["consumer_topic"]:row["last_ordinal"] for row in cursors}
+    if cursor_map!=totals or any(row["session_id"]!=session_id for row in cursors):
+        raise ValueError("derived receipt cursor divergence")
+    return receipts
+
 def inspect(root:Path, *, co_run:bool=False)->dict:
     if not root.is_absolute() or root!=root.resolve() or root.is_symlink():
         raise ValueError("unsafe source root")
@@ -128,11 +167,24 @@ def inspect(root:Path, *, co_run:bool=False)->dict:
                 or k["checkpoint_sha256"]!=_digest(prev,ordinal,o,receipt)):
                 raise ValueError("independent receiver/checkpoint chain diverged")
             prev=k["checkpoint_sha256"]
+        primary=_audited_derived_rows(sd/"derived.sqlite",sid)
+        if len(primary)!=one["primary_derived_receipts"] or not primary:
+            raise ValueError("primary derived receipts missing or unverified")
+        for name in ("research_audit","research_monitor"):
+            ledger=sd/(name+".sqlite")
+            names=_read(ledger,"SELECT name,expected_source FROM offline_named_research_identity")
+            if names!=[{"name":name,"expected_source":"verified_forward_spot_shadow"}]:
+                raise ValueError("independent named subscriber identity mismatch")
+            independently_saved=_audited_derived_rows(ledger,sid)
+            if independently_saved!=primary:
+                raise ValueError("named subscriber diverges from primary derived ledger")
+        if one["independent_named_receipts"]!=2*len(primary):
+            raise ValueError("named subscriber durable receipt count divergence")
         projections+=len(out)
         received+=len(recv)
         checkpoints+=len(cp)
-        derived+=one["primary_derived_receipts"]
-        named+=one["independent_named_receipts"]
+        derived+=len(primary)
+        named+=2*len(primary)
         tails.append(prev)
         if (one["index"]!=index or not one["original_eligibility_rescan_verified"]
             or not one["source_session_closed"]

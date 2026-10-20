@@ -74,6 +74,35 @@ async def test_source_reader_and_real_child_receiver_overlap_with_ordinals_and_c
     assert inspection["verdict"]=="PASSED_LOCAL_CORUN_RECEIVER_CHECKPOINT_CHAIN_ONLY"
     assert inspection["source_projections"]==result["reconstructed_projections"]
     assert inspection["continuous_live_hmac_verified"] is False
+    # Independent observer receipts must be read/rehashed from all three
+    # actual durable SQLite ledgers, never counted from the producer summary.
+    primary=root/"segments"/"0000"/"derived.sqlite"
+    with sqlite3.connect(primary) as db:
+        old=db.execute(
+            "SELECT receipt_id FROM offline_research_derived_receipts LIMIT 1"
+        ).fetchone()[0]
+        db.execute(
+            "UPDATE offline_research_derived_receipts SET receipt_id=? "
+            "WHERE rowid=(SELECT MIN(rowid) FROM offline_research_derived_receipts)",
+            ("f"*64,)
+        )
+    with pytest.raises(ValueError,match="derived receipt"):
+        inspect_hmac(root,co_run=True)
+    with sqlite3.connect(primary) as db:
+        db.execute(
+            "UPDATE offline_research_derived_receipts SET receipt_id=? "
+            "WHERE rowid=(SELECT MIN(rowid) FROM offline_research_derived_receipts)",
+            (old,)
+        )
+    named=root/"segments"/"0000"/"research_monitor.sqlite"
+    with sqlite3.connect(named) as db:
+        db.execute(
+            "UPDATE offline_research_derived_receipts SET projection_digest=? "
+            "WHERE rowid=(SELECT MIN(rowid) FROM offline_research_derived_receipts)",
+            ("e"*64,)
+        )
+    with pytest.raises(ValueError,match="derived receipt"):
+        inspect_hmac(root,co_run=True)
 
 
 @pytest.mark.asyncio
