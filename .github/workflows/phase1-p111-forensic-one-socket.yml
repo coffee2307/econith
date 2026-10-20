@@ -1,0 +1,32 @@
+name: ECONITH P1-11 single-socket independent source forensic gate
+
+on:
+  pull_request:
+    paths:
+      - "ci/phase1_single_socket_forensic_acceptance.py"
+      - "ci/phase1_single_socket_duration_trial.py"
+      - "tests/test_phase1_single_socket_forensic_acceptance.py"
+      - ".github/workflows/phase1-p111-forensic-one-socket.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  independently-reaudit-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test-only dependencies
+        run: |
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Closed-source source/intent/identity re-audit and attack tests
+        run: |
+          python -m pytest -q --tb=short \
+            tests/test_phase1_single_socket_forensic_acceptance.py \
+            tests/test_phase1_single_socket_duration.py \
+            tests/test_phase1_p106_adversarial_runtime_matrix.py
