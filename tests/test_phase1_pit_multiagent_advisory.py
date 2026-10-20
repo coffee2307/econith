@@ -75,7 +75,7 @@ def test_six_symbol_interval_combinations_pit_asof(qualified,symbol,interval):
     assert evidence["historical_listing_vintage_certified"] is False
     assert evidence["market_history_continuity_certified"] is False
     assert evidence["orders_submitted"]==0
-    result=adjudicate_advisory(evidence,approved_roles(evidence))
+    result=adjudicate_advisory(evidence,approved_roles(evidence),source_root=qualified)
     assert result["verdict"]=="RESEARCH_RATING_NON_EXECUTABLE"
     assert result["can_place_orders"] is False
     assert result["live_execution_authorized"] is False
@@ -120,7 +120,7 @@ def test_risk_veto_wins_without_execution(qualified):
                             decision_ms=BASE+1000)
     agents=approved_roles(e)
     agents[-2]["stance"]="VETO"
-    out=adjudicate_advisory(e,agents)
+    out=adjudicate_advisory(e,agents,source_root=qualified)
     assert out["verdict"]=="WITHHELD_RISK_VETO"
     assert out["portfolio_research_rating"]=="WITHHELD"
     assert out["orders_submitted"]==0
@@ -131,7 +131,7 @@ def test_hold_is_not_a_trade_and_conflicting_cases_are_retained(qualified):
                             decision_ms=BASE+1000)
     agents=approved_roles(e)
     agents[-1]["stance"]="Hold"
-    out=adjudicate_advisory(e,agents)
+    out=adjudicate_advisory(e,agents,source_root=qualified)
     assert out["verdict"]=="RESEARCH_HOLD_NO_ACTION"
     assert out["analyst_roles"]==["technical","bull","bear","risk","portfolio"]
 
@@ -155,7 +155,7 @@ def test_untrusted_llm_decision_schema_or_temporal_claim_denied(qualified,bad):
     elif bad=="empty_rationale":agents[0]["rationale"]=""
     elif bad=="wrong_technical_vote":agents[0]["stance"]="BUY_NOW"
     with pytest.raises(ValueError):
-        adjudicate_advisory(e,agents)
+        adjudicate_advisory(e,agents,source_root=qualified)
 
 
 def test_evidence_body_and_order_flag_cannot_be_forged(qualified):
@@ -165,11 +165,11 @@ def test_evidence_body_and_order_flag_cannot_be_forged(qualified):
     tampered=copy.deepcopy(e)
     tampered["last_closed_price"]="1000000"
     with pytest.raises(ValueError):
-        adjudicate_advisory(tampered,reports)
+        adjudicate_advisory(tampered,reports,source_root=qualified)
     tampered=copy.deepcopy(e)
     tampered["orders_submitted"]=1
     with pytest.raises(ValueError):
-        adjudicate_advisory(tampered,reports)
+        adjudicate_advisory(tampered,reports,source_root=qualified)
 
 
 def test_no_technical_market_data_or_no_quorum_refuses():
@@ -177,3 +177,15 @@ def test_no_technical_market_data_or_no_quorum_refuses():
         with pytest.raises(ValueError):
             verified_asof_evidence(Path(tmp),symbol="BTCUSDT",
                                   interval="1m",decision_ms=BASE+1000)
+
+
+def test_self_hashed_fake_candle_cannot_pass_against_original_root(qualified):
+    import hashlib
+    e=verified_asof_evidence(qualified,symbol="BTCUSDT",interval="1m",decision_ms=BASE+1000)
+    fake=copy.deepcopy(e)
+    fake["last_closed_price"]="99999999"
+    fake_body={k:v for k,v in fake.items() if k!="evidence_sha256"}
+    fake["evidence_sha256"]=hashlib.sha256(json.dumps(fake_body,ensure_ascii=False,sort_keys=True,separators=(",",":"),allow_nan=False).encode()).hexdigest()
+    agents=approved_roles(fake)
+    with pytest.raises(ValueError,match="forged source provenance"):
+        adjudicate_advisory(fake,agents,source_root=qualified)
