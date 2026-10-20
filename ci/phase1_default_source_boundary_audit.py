@@ -45,12 +45,119 @@ def _policy_test(node: ast.If, choice: str) -> bool:
     )
 
 
+
+def _audit_research_http_websocket_surface(module: ast.Module)->None:
+    """No opt-in research branch may expose existing legacy route handlers.
+
+    This is a structural regression check, NOT a production penetration test.
+    Actual ASGI route blacklisting has its own independent request tests.
+    """
+    middleware=next(
+        (fn for fn in module.body
+         if isinstance(fn,ast.AsyncFunctionDef)
+         and fn.name=="_verified_only_research_surface"),
+        None,
+    )
+    if middleware is None:
+        raise StartupBoundaryAuditError("protected research HTTP middleware missing")
+    recognized=any(
+        isinstance(d,ast.Call) and _node_name(d)=="middleware"
+        and len(d.args)==1 and isinstance(d.args[0],ast.Constant)
+        and d.args[0].value=="http"
+        for d in middleware.decorator_list
+    )
+    if not recognized:
+        raise StartupBoundaryAuditError("research HTTP middleware not registered")
+    if len(middleware.body)<2 or not isinstance(middleware.body[0],ast.If):
+        raise StartupBoundaryAuditError("research HTTP route guard moved or removed")
+    guard=middleware.body[0]
+    if not any(
+        isinstance(call,ast.Call) and _node_name(call)=="getattr"
+        and len(call.args)>=2 and isinstance(call.args[1],ast.Constant)
+        and call.args[1].value=="verified_only_research"
+        for call in ast.walk(guard.test)
+    ):
+        raise StartupBoundaryAuditError("research HTTP guard not bound to protected app state")
+    if not guard.body or not isinstance(guard.body[0],ast.Assign):
+        raise StartupBoundaryAuditError("research HTTP permitted status route missing")
+    expr=guard.body[0].value
+    if not (isinstance(expr,ast.JoinedStr)
+            and any(isinstance(x,ast.Constant)
+                    and x.value=="/market/verified/status"
+                    for x in expr.values)):
+        raise StartupBoundaryAuditError("research HTTP allowed endpoint expanded")
+    route_if=next((x for x in guard.body if isinstance(x,ast.If)),None)
+    if route_if is None or not isinstance(route_if.test,ast.BoolOp) or not isinstance(route_if.test.op,ast.Or):
+        raise StartupBoundaryAuditError("research HTTP must refuse wrong path OR method")
+    compares=[x for x in route_if.test.values if isinstance(x,ast.Compare)]
+    if len(compares)!=2:
+        raise StartupBoundaryAuditError("research HTTP route denial comparisons changed")
+    path_gate=any(
+        isinstance(x.left,ast.Attribute) and x.left.attr=="path"
+        and len(x.ops)==1 and isinstance(x.ops[0],ast.NotEq)
+        and len(x.comparators)==1 and isinstance(x.comparators[0],ast.Name)
+        and x.comparators[0].id=="permitted"
+        for x in compares
+    )
+    method_gate=any(
+        isinstance(x.left,ast.Attribute) and x.left.attr=="method"
+        and len(x.ops)==1 and isinstance(x.ops[0],ast.NotEq)
+        and len(x.comparators)==1
+        and isinstance(x.comparators[0],ast.Constant)
+        and x.comparators[0].value=="GET"
+        for x in compares
+    )
+    if not path_gate or not method_gate:
+        raise StartupBoundaryAuditError("research HTTP path/method fail-closed check removed")
+    response=route_if.body[0] if route_if.body else None
+    if (not isinstance(response,ast.Return)
+        or not isinstance(response.value,ast.Call)
+        or _node_name(response.value)!="JSONResponse"
+        or not any(k.arg=="status_code"
+                   and isinstance(k.value,ast.Constant)
+                   and k.value.value==404
+                   for k in response.value.keywords)):
+        raise StartupBoundaryAuditError("research HTTP refusal must remain 404")
+    if (len(middleware.body)<2 or not isinstance(middleware.body[-1],ast.Return)
+        or not isinstance(middleware.body[-1].value,ast.Await)
+        or not isinstance(middleware.body[-1].value.value,ast.Call)
+        or _node_name(middleware.body[-1].value.value)!="call_next"):
+        raise StartupBoundaryAuditError("research HTTP middleware downstream structure altered")
+
+    ws=next((fn for fn in module.body
+             if isinstance(fn,ast.AsyncFunctionDef)
+             and fn.name=="stream_metrics"),None)
+    if ws is None or not ws.body or not isinstance(ws.body[0],ast.If):
+        raise StartupBoundaryAuditError("protected research metrics WS guard missing")
+    ws_guard=ws.body[0]
+    if not any(
+        isinstance(call,ast.Call) and _node_name(call)=="getattr"
+        and len(call.args)>=2 and isinstance(call.args[1],ast.Constant)
+        and call.args[1].value=="verified_only_research"
+        for call in ast.walk(ws_guard.test)
+    ):
+        raise StartupBoundaryAuditError("protected research WS state guard removed")
+    if (len(ws_guard.body)<2
+        or not isinstance(ws_guard.body[0],ast.Expr)
+        or not isinstance(ws_guard.body[0].value,ast.Await)
+        or not isinstance(ws_guard.body[0].value.value,ast.Call)
+        or _node_name(ws_guard.body[0].value.value)!="close"
+        or not any(
+            k.arg=="code" and isinstance(k.value,ast.Constant)
+            and k.value.value==1008
+            for k in ws_guard.body[0].value.value.keywords
+        )
+        or not isinstance(ws_guard.body[1],ast.Return)):
+        raise StartupBoundaryAuditError("protected research metrics WS must close 1008 before accept")
+
+
 def audit_startup_boundaries(main_source: str, gate_source: str) -> dict:
     try:
         module=ast.parse(main_source)
         policy_module=ast.parse(gate_source)
     except SyntaxError as exc:
         raise StartupBoundaryAuditError("invalid source syntax") from exc
+    _audit_research_http_websocket_surface(module)
     fn=next((x for x in module.body if isinstance(x,ast.AsyncFunctionDef)
              and x.name=="lifespan"),None)
     if fn is None or len(fn.body)<4:
@@ -140,6 +247,8 @@ def audit_startup_boundaries(main_source: str, gate_source: str) -> dict:
             "verified_forward_preview","verified_only","legacy",
         ],
         "research_legacy_execution_singleton_calls":0,
+        "research_http_route_allowlist_covered_by_ast":True,
+        "research_legacy_metrics_websocket_close_guarded_by_ast":True,
         "legacy_unverified_source_remains_default":True,
         "default_verified_market_data_cutover_certified":False,
         "manual_security_review_still_required":True,
