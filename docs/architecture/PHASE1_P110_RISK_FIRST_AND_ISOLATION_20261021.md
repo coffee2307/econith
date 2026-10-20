@@ -65,7 +65,10 @@ functions replaced by local stubs to prevent network, DB/CCXT or order work.
 - Injected runtime-start fault fails closed and never falls back to legacy
   initialization. Missing opt-in credentials/consent fail preflight.
 - Test asserts no legacy engine/streamer/CCXT/world components appear and
-  no leftover runtime state after shutdown.
+  no leftover runtime state after shutdown. The actual isolated lifespan in
+  `main.py` now uses an inner `try/finally` to clear research components
+  **even when the runtime's `close()` raises**; an injected hard shutdown
+  exception is covered for both protected research modes.
 
 This strengthens P1-06 **test evidence**, not the actual frozen P1-06
 cutover requirement. The app's default is still `legacy`; it has NOT
