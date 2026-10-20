@@ -5,6 +5,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import json
 import sqlite3
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -162,3 +163,68 @@ async def test_capture_queue_overflow_quarantines_when_source_bursts(tmp_path):
     )
     assert report["verdict"]=="FAILED_OR_QUARANTINED",report
     assert report["orders_submitted"]==0
+
+
+@pytest.mark.skipif(sys.platform!="linux",reason="subprocess os._exit gate requires Linux")
+def test_real_process_death_at_rotation_preserves_sealed_original_and_orphan_owner(tmp_path):
+    root=(tmp_path/"hard_crash_during_rotation").resolve()
+    program=r'''
+import asyncio,json,os,sys,time
+from contextlib import asynccontextmanager
+from pathlib import Path
+from types import SimpleNamespace
+from ci.phase1_rotating_spot_source import run_rotation
+from infrastructure.spot_ingress_capture import OfflineSpotCaptureJournal
+
+source_start=OfflineSpotCaptureJournal.__init__
+def kill_on_second_segment(self,path,*args,**kwargs):
+    if Path(path).parent.name=="0001":
+        # First journal has completed source/REST sync and fsynced seal.
+        # Simulate abrupt whole-process termination BEFORE creating #2.
+        os._exit(49)
+    source_start(self,path,*args,**kwargs)
+OfflineSpotCaptureJournal.__init__=kill_on_second_segment
+
+async def clock(**kwargs):
+    return SimpleNamespace(round_trip_ms=1,measured_offset_ms=0)
+@asynccontextmanager
+async def lease(*,allow_public_market_data):
+    state={"id":100}
+    class PublicFixture:
+        @property
+        def stream(self):
+            async def frames():
+                while True:
+                    await asyncio.sleep(.008)
+                    state["id"]+=1
+                    ts=time.time_ns()//1_000_000
+                    data={"e":"depthUpdate","E":ts,"s":"BTCUSDT",
+                          "U":state["id"],"u":state["id"],
+                          "b":[["100","2"]],"a":[]}
+                    yield json.dumps({"stream":"btcusdt@depth@100ms",
+                                      "data":data}).encode()
+            return frames()
+        async def snapshot(self,symbol,limit):
+            return json.dumps({"lastUpdateId":state["id"],
+                "bids":[["100","2"]],"asks":[["102","2"]]}).encode()
+    yield PublicFixture()
+asyncio.run(run_rotation(
+    Path(sys.argv[1]),allow_public_market_data=True,duration_s=.6,
+    max_frames_per_segment=8,_fixture=True,
+    lease_factory=lease,clock_preflight=clock,
+))
+'''
+    result=subprocess.run([sys.executable,"-c",program,str(root)],
+        cwd=str(Path(__file__).resolve().parents[1]),
+        capture_output=True,text=True,timeout=30)
+    assert result.returncode==49,result.stderr[-1500:]
+    assert (root/".forward_producer.lock").is_file()
+    assert (root/"segments"/"0000"/"seal.json").is_file()
+    assert not (root/"segments"/"0001"/"seal.json").exists()
+    assert not (root/"aggregate_report.json").exists()
+    with sqlite3.connect((root/"segments"/"0000"/"original.sqlite").resolve().as_uri()+"?mode=ro",uri=True) as db:
+        assert db.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
+        assert db.execute("SELECT COUNT(*) FROM offline_forward_capture_intents").fetchone()[0]>=9
+        assert db.execute("SELECT COUNT(*) FROM offline_spot_capture_sessions WHERE closed_at_ms IS NOT NULL").fetchone()[0]==1
+    with pytest.raises(ValueError,match="owner marker"):
+        inspect(root)
