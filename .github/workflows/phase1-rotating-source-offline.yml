@@ -1,0 +1,43 @@
+name: ECONITH Phase1 one-reader rotating Spot originals offline
+on:
+  push:
+    branches:
+      - 'experiment/phase1-continuous-reader-rotation-*'
+    paths:
+      - 'infrastructure/spot_public_capture_adapter.py'
+      - 'ci/phase1_rotating_spot_source.py'
+      - 'ci/phase1_rotating_source_audit.py'
+      - 'tests/test_phase1_rotating_source.py'
+      - '.github/workflows/phase1-rotating-source-offline.yml'
+  pull_request:
+    paths:
+      - 'infrastructure/spot_public_capture_adapter.py'
+      - 'ci/phase1_rotating_spot_source.py'
+      - 'ci/phase1_rotating_source_audit.py'
+      - 'tests/test_phase1_rotating_source.py'
+      - '.github/workflows/phase1-rotating-source-offline.yml'
+permissions:
+  contents: read
+jobs:
+  bounded-offline-rotation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Source archive pinned to tested commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 2 -H 'Accept: application/vnd.github+json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/tarball/${GITHUB_SHA}" \
+            -o "${RUNNER_TEMP}/source.tar.gz"
+          tar -xzf "${RUNNER_TEMP}/source.tar.gz" --strip-components=1
+          test -f tests/test_phase1_rotating_source.py
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Pinned test-only library dependencies
+        run: python -m pip install -q pytest==8.3.5 pytest-asyncio==0.26.0 httpx==0.28.1 websockets==14.2
+      - name: One background reader, repeated seals, tamper refusal, and fault injection
+        run: |
+          python -m pytest -q --tb=short tests/test_phase1_rotating_source.py
+          python -m py_compile infrastructure/spot_public_capture_adapter.py ci/phase1_rotating_spot_source.py ci/phase1_rotating_source_audit.py
