@@ -1,0 +1,98 @@
+name: ECONITH P2-03 classical quant frozen multi-strategy challenge
+
+on:
+  pull_request:
+    paths:
+      - "configs/research/classical_quant_frozen_20261021.json"
+      - "econith/quant/classical_challengers.py"
+      - "econith/quant/paper_v1.py"
+      - "scripts/quant_classical_challenge.py"
+      - "tests/test_quant_classical_challengers.py"
+      - ".github/workflows/quant-classical-challengers.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-no-lookahead-frozen-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install offline dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Original engine remains invariant, frozen policy cannot peek, all trials persisted
+        run: |
+          python -m pytest -q --tb=short \
+            tests/test_quant_classical_challengers.py \
+            tests/test_paper_v1.py \
+            tests/test_paper_audit.py \
+            tests/test_paper_unfiltered_matrix.py
+
+  real-public-quant-comparison:
+    needs: offline-no-lookahead-frozen-audit
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install public Spot research deps
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Exactly 12 markets x 5 frozen models x 2 windows x 3 costs; losses NOT fail
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP}/econith-quant-p203-${GITHUB_RUN_ID}"
+          python -m scripts.quant_classical_challenge \
+            --allow-public-market-data --simulation-only \
+            --output-dir "$root" | tee "${RUNNER_TEMP}/p203_execution_log.jsonl"
+          python - "$root" <<'PY'
+          import json, sys
+          from pathlib import Path
+          data=json.loads((Path(sys.argv[1])/"unfiltered_challengers.json").read_text())
+          assert data["expected_market_timeframe_cases"]==12
+          assert data["completed_market_timeframe_cases"]==12
+          assert data["expected_strategy_market_timeframe_cases"]==60
+          assert len(data["results"])==12
+          assert data["capital_readiness"]=="REAL_CAPITAL_NOT_AUTHORIZED"
+          assert data["real_exchange_orders"]==0
+          for case in data["results"]:
+              assert case["status"]=="COMPLETE"
+              for family in data["strategies"]:
+                  for win in data["test_windows"]:
+                      for cost in data["frictions"]:
+                          metric=case["result"]["windows"][win][family][cost]
+                          assert metric["ledger_status"]=="SIMULATED_LEDGER_RECONCILED"
+          print("CANDIDATES_AUDITED_ALL_OUTCOMES_RETAINED_NOT_PROFIT_CERTIFIED")
+          PY
+      - name: Preserve ALL losses + input hash manifests, no account/secret data
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="${RUNNER_TEMP}/p203-public-evidence"
+          mkdir -p "$stage"
+          root="${RUNNER_TEMP}/econith-quant-p203-${GITHUB_RUN_ID}"
+          if [ -d "$root" ]; then cp -R "$root"/. "$stage"/; fi
+          if [ -f "${RUNNER_TEMP}/p203_execution_log.jsonl" ]; then
+            cp "${RUNNER_TEMP}/p203_execution_log.jsonl" "$stage/console.jsonl"
+          fi
+      - name: Upload complete public research report for independent reproduction
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: econith-quant-p203-public-${{ github.run_id }}
+          path: ${{ runner.temp }}/p203-public-evidence/
+          retention-days: 3
+          if-no-files-found: warn
