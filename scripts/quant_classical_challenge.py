@@ -104,7 +104,7 @@ def _report_market(snapshot: dict, family: str, stress: dict) -> dict:
         "max_drawdown_pct": round(100 * result.max_drawdown, 6),
         "simulated_fills": len(result.fills),
         "explicit_fees_usdt": audit["explicit_fees_paid"],
-        "audited_realized_pnl_usdt": audit["realized_pnl"],
+        "audited_realized_pnl_usdt": audit["realized_net_pnl"],
         "ending_cash_usdt": round(result.equity_curve[-1]["cash"], 8),
         "ending_exposure_usdt": round(result.equity_curve[-1]["exposure"], 8),
         "halted": result.halted,
