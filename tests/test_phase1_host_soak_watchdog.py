@@ -180,11 +180,6 @@ async def test_clock_or_progress_rollback_invalidates_hash_chained_trace(tmp_pat
         _state(1, "SOURCE_OPEN", n=2),
         _state(2, "CLOSED_LOCALLY_COHERENT_NOT_24H", n=4),
     ]
-    await observe(
-        source_root, watch_root, max_watch_s=10,
-        poll_s=.2, snapshot_fn=lambda *a, **k: points.pop(0),
-        metrics=host_metrics,
-    ) if False else None
     # Exercise independent trace verifier against a forged yet rehashed
     # sequence; source counters must not move backwards in local time.
     watch_root.mkdir()
@@ -208,3 +203,50 @@ def test_truncated_or_modified_watchdog_trace_fails_closed(tmp_path):
     trace.write_text('{"bad":"fake"}\n')
     with pytest.raises(HostWatchRefused):
         verify_trace(trace)
+
+
+@pytest.mark.asyncio
+async def test_independent_trace_failure_cannot_leave_persisted_false_pass(
+    tmp_path, monkeypatch,
+):
+    import ci.phase1_host_soak_watchdog as watchdog
+    root = (tmp_path / "input").resolve()
+    watch = (tmp_path / "watch").resolve()
+    points = [
+        _state(0, "SOURCE_OPEN", n=3),
+        _state(1, "CLOSED_LOCALLY_COHERENT_NOT_24H", n=3),
+    ]
+    def refuse_trace(path):
+        raise HostWatchRefused("injected re-audit mismatch")
+    monkeypatch.setattr(watchdog, "verify_trace", refuse_trace)
+    with pytest.raises(HostWatchRefused, match="re-audit"):
+        await watchdog.observe(
+            root, watch, max_watch_s=10, poll_s=.2,
+            snapshot_fn=lambda *a, **k: points.pop(0),
+            metrics=host_metrics,
+        )
+    report = json.loads((watch / "watch_result.json").read_text())
+    assert report["verdict"] == "PENDING_INDEPENDENT_TRACE_REAUDIT"
+    assert report["continuous_24h_qualified"] is False
+    assert not (watch / "watch_result.pending").exists()
+
+
+@pytest.mark.asyncio
+async def test_regressing_receiver_counter_quarantines_during_live_observation(
+    tmp_path,
+):
+    root = (tmp_path / "source").resolve()
+    watch = (tmp_path / "watch").resolve()
+    points = [
+        _state(0, "SOURCE_OPEN", n=5),
+        _state(1, "SOURCE_OPEN", n=3),
+    ]
+    with pytest.raises(HostWatchRefused, match="regressed"):
+        await observe(
+            root, watch, max_watch_s=10, poll_s=.2,
+            snapshot_fn=lambda *a, **k: points.pop(0),
+            metrics=host_metrics,
+        )
+    report = json.loads((watch / "watch_result.json").read_text())
+    assert report["verdict"] != FINITE_PASS
+    assert report["source_was_active"] is True
