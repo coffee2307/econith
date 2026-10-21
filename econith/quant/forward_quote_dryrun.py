@@ -108,6 +108,14 @@ def _init(db: sqlite3.Connection, symbol: str, strategy: str,
 def initialize(path: Path, *, symbol="BTCUSDT",
                strategy="trend_vol_v1", interval="1h",
                capital=100.) -> dict:
+    # Validate BEFORE opening the SQLite file: invalid symbol/strategy
+    # cannot leave a false partially initialized research ledger.
+    if (type(symbol) is not str or not symbol.endswith("USDT") or
+        not symbol.isascii() or not symbol.isalnum() or len(symbol) > 20
+        or strategy not in NAMES or interval not in PERIOD
+        or type(capital) not in (int, float) or not math.isfinite(capital)
+        or not 10 <= capital <= 1000):
+        raise PaperRefused("invalid one-pair, virtual-capital research scope")
     with _db_connect(path, create=True) as db:
         _init(db, symbol, strategy, interval, capital)
     return {"schema": SCHEMA, "status": "RESEARCH_LEDGER_INITIALIZED",
