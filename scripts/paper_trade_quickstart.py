@@ -24,13 +24,28 @@ from econith.quant.paper_v1 import (
     PaperConfig, SymbolRules, replay_spot, validated_candles,
 )
 from econith.quant.public_binance_data import (
-    capture_spot_hourly, load_snapshot, write_snapshot,
+    capture_spot_hourly, write_snapshot,
 )
+from ci.phase1_spot_multiasset_ohlcv import request_public
 
 INTERVALS = {"1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000}
 PASS = "SIMULATION_REPLAY_COMPLETE_NOT_LIVE_READY"
 CAPITAL_STATUS = "REAL_CAPITAL_NOT_AUTHORIZED"
 _MAX_SNAPSHOT = 1_000
+
+
+def _data_only_get(endpoint: str, params: dict) -> object:
+    # The explicitly allowlisted public data-only host has no account or
+    # order routes; avoids blocked account-host access on research runners.
+    if endpoint not in ("exchangeInfo", "klines"):
+        raise ValueError("unapproved market data endpoint")
+    return json.loads(request_public("/api/v3/" + endpoint, params))
+
+
+def _capture_exact_public_pair(symbols: list[str], *, limit: int, interval: str) -> dict:
+    return capture_spot_hourly(
+        symbols, limit=limit, interval=interval, get=_data_only_get,
+    )
 
 
 def _params(symbol: str, capital: float, interval: str,
@@ -115,7 +130,7 @@ def _simulate(snapshot: dict, *, capital: float, stress: int) -> dict:
 
 def run_one(symbol: str, *, capital: float, interval: str,
             candles: int, output: Path,
-            capture: Callable = capture_spot_hourly) -> dict:
+            capture: Callable = _capture_exact_public_pair) -> dict:
     """Single capture and two independent fee-stress replays. No trade loop."""
     _params(symbol, capital, interval, candles, output)
     # The captured symbol must really exist on *this* public Spot venue;
