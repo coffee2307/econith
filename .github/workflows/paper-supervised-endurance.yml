@@ -1,0 +1,103 @@
+name: ECONITH P2-06 bounded forward paper supervisor
+
+on:
+  pull_request:
+    paths:
+      - "scripts/paper_supervised_endurance.py"
+      - "tests/test_paper_supervised_endurance.py"
+      - ".github/workflows/paper-supervised-endurance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-supervisor-integrity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Never fake uptime, profits or completed source continuity
+        run: |
+          python -m pytest -q --tb=short \
+            tests/test_paper_supervised_endurance.py \
+            tests/test_paper_forward_cycle.py \
+            tests/test_forward_quote_dryrun.py \
+            tests/test_paper_audit.py
+
+  actual-public-single-cycle:
+    needs: offline-supervisor-integrity
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install bounded public-only research dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: One real Binance public Spot quote chain and audited PnL
+        shell: bash
+        run: |
+          set -euo pipefail
+          ledger="${RUNNER_TEMP}/p206_virtual_btc.sqlite"
+          evidence="${RUNNER_TEMP}/p206_supervisor_evidence"
+          python -m econith.quant.forward_quote_dryrun \
+            --action init --ledger "$ledger" \
+            --symbol BTCUSDT --strategy trend_vol_v1 \
+            --interval 1h --capital 100 --simulation-only
+          python -m scripts.paper_supervised_endurance \
+            --ledger "$ledger" --evidence-dir "$evidence" \
+            --cycles 1 --poll-seconds 120 \
+            --allow-public-market-data --simulation-only \
+            --acknowledge-foreground-only \
+            | tee "${RUNNER_TEMP}/p206_results.json"
+          python - "$ledger" "$evidence" <<'PY'
+          import json,sys
+          from pathlib import Path
+          from scripts.paper_supervised_endurance import audit_events,PASS
+          from econith.quant.forward_quote_dryrun import status
+          from econith.quant.paper_forward_monitor import report
+          ledger,root=Path(sys.argv[1]),Path(sys.argv[2])
+          r=json.loads((root/"summary.json").read_text(encoding="utf-8"))
+          assert r["verdict"]==PASS
+          assert r["completed_cycles"]==1
+          assert audit_events(root/"events.jsonl")==r["independent_evidence"]
+          state=status(ledger)
+          assert state["simulated_fills"]<=1 and state["pending_signals"]==0
+          assert state["real_orders"]==0
+          assert r["last_verified_performance"]==report(ledger)
+          assert r["continuous_24h_proven"] is False
+          assert r["prospective_profitable_strategy_proven"] is False
+          print("FINITE_REAL_PUBLIC_SUPERVISION_ACCEPTED_NOT_24H_NOT_PROFIT")
+          PY
+      - name: Retain only virtual results and private hash-chain events, never SQLite
+        if: always()
+        shell: bash
+        run: |
+          stage="${RUNNER_TEMP}/p206_public_aggregate"
+          mkdir -p "$stage"
+          source="${RUNNER_TEMP}/p206_supervisor_evidence"
+          if [ -d "$source" ]; then
+            for name in summary.json events.jsonl; do
+              test ! -f "$source/$name" || cp "$source/$name" "$stage/$name"
+            done
+          fi
+      - name: Archive aggregate outcome and exact local trace digests for reproducibility
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: econith-p206-supervisor-${{ github.run_id }}
+          path: ${{ runner.temp }}/p206_public_aggregate/
+          retention-days: 3
+          if-no-files-found: warn
