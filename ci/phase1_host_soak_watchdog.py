@@ -270,6 +270,7 @@ async def observe(source: Path, watch_dir: Path, *,
     seen_open = False
     prev_hash = GENESIS
     latest = None
+    last_progress = None
     reason = "WATCH_DURATION_EXPIRED_SOURCE_CONTINUITY_UNPROVEN"
     try:
         with trace.open("xb") as file:
@@ -289,6 +290,20 @@ async def observe(source: Path, watch_dir: Path, *,
                 prev_hash = digest
                 latest = point
                 state = point["state"]
+                if seen_open and state in ("WAITING_FOR_SOURCE", "INITIALIZING"):
+                    raise HostWatchRefused("observed source disappeared or reverted to startup")
+                if "source_identity_sha256" in point:
+                    if last_progress is not None:
+                        if point["source_identity_sha256"] != last_progress["source_identity_sha256"]:
+                            raise HostWatchRefused("source identity switched mid-watch")
+                        if point["local_observed_ms"] < last_progress["local_observed_ms"]:
+                            raise HostWatchRefused("local wall clock rolled backwards")
+                        for field in ("source_originals", "source_intents",
+                                      "receiver_receipts", "durable_checkpoints",
+                                      "source_projection_cursor"):
+                            if point[field] < last_progress[field]:
+                                raise HostWatchRefused("source/HMAC progress counter regressed")
+                    last_progress = point
                 if state == "SOURCE_OPEN":
                     seen_open = True
                 if state in ("WAITING_FOR_SOURCE", "INITIALIZING") and (
@@ -310,7 +325,9 @@ async def observe(source: Path, watch_dir: Path, *,
     finally:
         # A truncated/missing summary after os._exit is NOT a PASS.
         result = {
-            "schema": SCHEMA, "verdict": reason,
+            "schema": SCHEMA,
+            "verdict": ("PENDING_INDEPENDENT_TRACE_REAUDIT"
+                        if reason == FINITE_PASS else reason),
             "observed_wall_s": round(time.monotonic() - start, 3),
             "samples": count, "source_was_active": seen_open,
             "latest_state": latest.get("state") if latest else None,
@@ -325,8 +342,19 @@ async def observe(source: Path, watch_dir: Path, *,
                 file.flush()
                 os.fsync(file.fileno())
     check = verify_trace(trace)
-    if check["source_open_observations"] == 0 or latest is None:
-        raise HostWatchRefused("watchdog never witnessed source owner progress")
+    if (check["source_open_observations"] == 0 or latest is None
+        or latest["state"] != "CLOSED_LOCALLY_COHERENT_NOT_24H"
+        or reason != FINITE_PASS):
+        raise HostWatchRefused("watchdog did not pass source-closure + trace re-audit")
+    # Only AFTER independent trace re-audit may the durable summary become PASS.
+    result["verdict"] = FINITE_PASS
+    summary = watch_dir / "watch_result.json"
+    stage = watch_dir / "watch_result.pending"
+    with stage.open("xb") as f:
+        f.write(_canonical(result) + b"\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(stage, summary)
     return {**result, **check}
 
 
