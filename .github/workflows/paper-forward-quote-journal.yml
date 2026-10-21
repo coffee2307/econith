@@ -1,0 +1,86 @@
+name: ECONITH P2-04 read-only forward quote paper journal
+
+on:
+  pull_request:
+    paths:
+      - "econith/quant/forward_quote_dryrun.py"
+      - "ci/phase1_spot_multiasset_ohlcv.py"
+      - "tests/test_forward_quote_dryrun.py"
+      - ".github/workflows/paper-forward-quote-journal.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  paper-ledger-offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install offline dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Strict separate signal and quote, idempotent fills and fail-closed risk
+        run: |
+          python -m pytest -q --tb=short \
+            tests/test_forward_quote_dryrun.py \
+            tests/test_phase1_spot_multiasset_ohlcv.py \
+            tests/test_quant_classical_challengers.py \
+            tests/test_paper_v1.py
+
+  finite-public-source-smoke:
+    needs: paper-ledger-offline
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install bounded public data-only dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Exactly one real public BTCUSDT post-signal quote research cycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP}/p204_research"
+          mkdir -p "$root"
+          python -m econith.quant.forward_quote_dryrun \
+            --action init --ledger "$root/btc_quote.sqlite" \
+            --symbol BTCUSDT --interval 1h \
+            --strategy trend_vol_v1 --capital 100 --simulation-only
+          python -m econith.quant.forward_quote_dryrun \
+            --action observe --ledger "$root/btc_quote.sqlite" \
+            --allow-public-market-data --simulation-only
+          python -m econith.quant.forward_quote_dryrun \
+            --action fill --ledger "$root/btc_quote.sqlite" \
+            --allow-public-market-data --simulation-only
+          python -m econith.quant.forward_quote_dryrun \
+            --action status --ledger "$root/btc_quote.sqlite" \
+            --simulation-only | tee "${RUNNER_TEMP}/p204_status.json"
+          python - "${RUNNER_TEMP}/p204_status.json" <<'PY'
+          import json,sys
+          r=json.load(open(sys.argv[1],encoding="utf-8"))
+          assert r["execution_mode"]=="SIMULATION_PUBLIC_QUOTE_SHADOW_ONLY"
+          assert r["capital_readiness"]=="REAL_CAPITAL_NOT_AUTHORIZED"
+          assert r["real_orders"]==0
+          assert r["signal_count"]==1
+          assert r["pending_signals"]==0
+          print("FINITE_PUBLIC_QUOTE_SHADOW_PASSED_NOT_PROFIT_PROOF")
+          PY
+      - name: Upload scrubbed status only, no raw account/trade/source ledger
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: econith-p204-paper-status-${{ github.run_id }}
+          path: ${{ runner.temp }}/p204_status.json
+          retention-days: 3
+          if-no-files-found: warn

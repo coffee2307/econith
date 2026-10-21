@@ -84,7 +84,8 @@ def audit_klines(raw: bytes, *, interval: str, cutoff_ms: int, expected_rows=ROW
 
 
 def request_public(path: str, params: dict | None = None, *, timeout_s: float = 12) -> bytes:
-    if path not in ("/api/v3/time", "/api/v3/exchangeInfo", "/api/v3/klines"):
+    if path not in ("/api/v3/time", "/api/v3/exchangeInfo", "/api/v3/klines",
+                     "/api/v3/ticker/bookTicker"):
         raise ValueError("read-only public endpoint allowlist")
     url = BASE_URL + path + (("?"+urlencode(params)) if params else "")
     req = Request(url, headers={"Accept":"application/json","User-Agent":"ECONITH-Phase1-bounded-research/1.0"}, method="GET")
