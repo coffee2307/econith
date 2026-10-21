@@ -66,7 +66,6 @@ def _init(db: sqlite3.Connection, symbol: str, strategy: str,
         interval not in PERIOD or type(capital) not in (int, float) or
         not math.isfinite(capital) or not 10 <= capital <= 1000):
         raise PaperRefused("only bounded public Spot single-symbol virtual paper")
-    db.execute("BEGIN IMMEDIATE")
     try:
         db.executescript("""
             CREATE TABLE account (
@@ -93,8 +92,9 @@ def _init(db: sqlite3.Connection, symbol: str, strategy: str,
               post_cash REAL NOT NULL, post_quantity REAL NOT NULL
             );
         """)
+        db.execute("BEGIN IMMEDIATE")
         db.execute("""INSERT INTO account VALUES
-                   (1,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   (1,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                    (SCHEMA, symbol, strategy, interval, float(capital), 0.,
                     float(capital), float(capital), 0, None, None,
                     "[]", _sha([])))
@@ -165,7 +165,7 @@ def observe(path: Path, snapshot: dict, *, local_ms: int | None = None) -> dict:
                 opened = int(row[0])
                 if opened in by_time:
                     seen += 1
-                    if _sha(row) != _sha(by_time[opened]):
+                    if _sha(list(row[:7])) != _sha(by_time[opened]):
                         raise PaperRefused("previously recorded market candle revised")
             if originals and seen < 99:
                 raise PaperRefused("insufficient independently overlapping original candles")
