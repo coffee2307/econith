@@ -1,0 +1,91 @@
+name: ECONITH P2-05 prospective paper marks and bounded controller
+
+on:
+  pull_request:
+    paths:
+      - "econith/quant/paper_forward_monitor.py"
+      - "scripts/paper_forward_cycle.py"
+      - "tests/test_paper_forward_cycle.py"
+      - ".github/workflows/paper-prospective-controller.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-controller-and-ledger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Paper quote marks, passive controls, hash audit, restart recovery
+        run: |
+          python -m pytest -q --tb=short \
+            tests/test_paper_forward_cycle.py \
+            tests/test_forward_quote_dryrun.py \
+            tests/test_quant_classical_challengers.py \
+            tests/test_paper_v1.py
+
+  public-one-cycle-with-real-quote-pnl:
+    needs: deterministic-controller-and-ledger
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install bounded public-data dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: One public BTC Spot cycle with 100 virtual USDT and NO orders
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP}/econith_p205"
+          mkdir -p "$root"
+          python -m econith.quant.forward_quote_dryrun \
+            --action init --ledger "$root/research.sqlite" --symbol BTCUSDT \
+            --strategy trend_vol_v1 --interval 1h --capital 100 \
+            --simulation-only
+          python -m scripts.paper_forward_cycle \
+            --mode once --ledger "$root/research.sqlite" \
+            --allow-public-market-data --simulation-only \
+            | tee "${RUNNER_TEMP}/p205_once.json"
+          python -m scripts.paper_forward_cycle \
+            --mode report --ledger "$root/research.sqlite" \
+            --simulation-only | tee "${RUNNER_TEMP}/p205_report.json"
+          python - "$root/research.sqlite" "${RUNNER_TEMP}/p205_report.json" <<'PY'
+          import json,sys
+          from pathlib import Path
+          from econith.quant.forward_quote_dryrun import status
+          from econith.quant.paper_forward_monitor import report
+          old=json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+          fresh=report(Path(sys.argv[1]))
+          s=status(Path(sys.argv[1]))
+          assert old==fresh
+          assert old["verified_quote_marks"]>=2
+          assert old["real_orders"]==0
+          assert s["simulated_fills"]<=1
+          assert s["pending_signals"]==0
+          assert old["real_money_authorized"] is False
+          assert old["prospective_profit_proven"] is False
+          print("PROSPECTIVE_PAPER_OBSERVATION_RECONCILED_NOT_PROFIT_PROOF")
+          PY
+      - name: Keep only aggregate virtual account summary, no sqlite or original market data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: econith-p205-aggregate-${{ github.run_id }}
+          path: ${{ runner.temp }}/p205_report.json
+          retention-days: 3
+          if-no-files-found: warn
