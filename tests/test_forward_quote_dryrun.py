@@ -199,3 +199,25 @@ def test_invalid_state_and_unknown_strategy_refuse(tmp_path):
     with pytest.raises(PaperRefused):
         initialize(root, symbol="DOGUSDT", strategy="LLM_AUTO_TRADE", capital=100)
     assert not root.exists()
+
+
+@pytest.mark.parametrize("field,corrupt", [
+    ("cash", 100.),
+    ("qty", .99),
+])
+def test_forged_virtual_holdings_rejected_on_restart(ledger, field, corrupt):
+    snap, now, _ = _prepare(ledger)
+    fill(ledger, _quote(snap), _book(), quote_local_ms=now+100)
+    with sqlite3.connect(ledger) as db:
+        db.execute("UPDATE account SET " + field + "=? WHERE id=1", (corrupt,))
+    with pytest.raises(PaperRefused, match="diverged"):
+        status(ledger)
+
+
+def test_forged_fee_or_fill_economics_quarantined(ledger):
+    snap, now, _ = _prepare(ledger)
+    fill(ledger, _quote(snap), _book(), quote_local_ms=now+100)
+    with sqlite3.connect(ledger) as db:
+        db.execute("UPDATE paper_fills SET fee=fee+1 WHERE decision_id=1")
+    with pytest.raises(PaperRefused, match="economics"):
+        status(ledger)
