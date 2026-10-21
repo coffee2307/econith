@@ -1,0 +1,54 @@
+{
+  "schema": "econith-p2-matrix-frozen-v1",
+  "pre_registered_utc_date": "2026-10-21",
+  "reference_commit": "81c06edb50e2f311fd417c641f0927f554223901",
+  "purpose": "Disprove rather than guarantee a fixed strategy edge; publish all outcomes, including negative, no-fill, unavailable and execution failures.",
+  "mode": "READ_ONLY_SPOT_HISTORICAL_SIMULATION",
+  "venue": "Binance public data-only Spot",
+  "base_asset_note": "DOGEUSDT is Dogecoin, not DOG Bitcoin Runes; DOGUSDT not listed on Binance Spot on checked date.",
+  "symbols": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "DOGEUSDT"
+  ],
+  "intervals": [
+    "1h",
+    "4h",
+    "1d"
+  ],
+  "requested_candles_per_case": 500,
+  "virtual_capital_usdt": 100,
+  "fixed_strategy": {
+    "lookback_closed_bars": 24,
+    "entry_threshold": 0.01,
+    "max_asset_weight": 0.2,
+    "max_total_weight": 0.2,
+    "max_drawdown": 0.15,
+    "fill_convention": "next_historical_open",
+    "strategy_previously_inspected": true,
+    "retune_after_results": false
+  },
+  "cost_model": [
+    {
+      "name": "base",
+      "fee_bps": 10,
+      "slippage_bps": 2,
+      "half_spread_bps": 1
+    },
+    {
+      "name": "stress3x",
+      "fee_bps": 30,
+      "slippage_bps": 6,
+      "half_spread_bps": 3
+    }
+  ],
+  "windows": [
+    "full_approx_499_closed_candles",
+    "latest_30pct_chronological_with_25_previous_closed_bars_warmup"
+  ],
+  "benchmark": "cash=0%, 20pct single-buy-and-hold Spot at first eligible open, same simulated entry fee and spread; compare mark-to-market not liquidation",
+  "no_filtering": "ALL 12 market/timeframe combinations included; absent pairs or invalid data remain explicitly FAILED, never dropped",
+  "guard": "Positive backtest cannot certify prospective profitability; any realized loss retained; zero orders; no authorization for deposits",
+  "phase1_readiness_unchanged": "81/100 provisional OPEN"
+}
