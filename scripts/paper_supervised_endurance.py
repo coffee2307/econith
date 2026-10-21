@@ -193,6 +193,7 @@ def run(
         })
         good = 0
         reason = None
+        last_verified_performance = None
         for i in range(cycles):
             if i:
                 sleep(poll_seconds)
@@ -227,6 +228,7 @@ def run(
                 if (type(last_close) is not int or last_close > now
                     or now - last_close > PERIOD_MS[account["interval"]] + 60_000):
                     raise PaperRefused("source closed candle missing or stale")
+                last_verified_performance = verified
                 ev("STEP", now, {
                     "cycle": i + 1, "cycle_status": response["status"],
                     "last_closed_bar_ms": last_close,
@@ -255,6 +257,7 @@ def run(
             "verdict": PASS if reason is None else FAIL,
             "completed_cycles": good, "requested_cycles": cycles,
             "failure_reason": reason, "evidence_sha256": independent["tail_sha256"],
+            "last_verified_performance": last_verified_performance,
             "independent_evidence": independent,
             "local_elapsed_seconds": round(monotonic() - start, 3),
             "uninterrupted_exchange_history_proven": False,
