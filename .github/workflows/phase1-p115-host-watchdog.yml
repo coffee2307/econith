@@ -1,0 +1,97 @@
+name: ECONITH P1-15 independent host soak readiness watchdog
+
+on:
+  pull_request:
+    paths:
+      - "ci/phase1_host_soak_watchdog.py"
+      - "tests/test_phase1_host_soak_watchdog.py"
+      - ".github/workflows/phase1-p115-host-watchdog.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-resource-and-source-guards:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install finite offline test dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Host fault/recovery, source age, monotonic progress and chained log tests
+        run: |
+          python -m pytest -q --tb=short \
+            tests/test_phase1_host_soak_watchdog.py \
+            tests/test_phase1_checkpoint_delivery_probe.py \
+            tests/test_phase1_crash_gap_triage.py
+
+  public-spot-hmac-with-concurrent-watchdog:
+    needs: offline-resource-and-source-guards
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install public read-only source and local HMAC research deps
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Real 300-frame source and separate independent live host watchdog
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP}/econith-p115-source-${GITHUB_RUN_ID}"
+          watcher="${RUNNER_TEMP}/econith-p115-watch-${GITHUB_RUN_ID}"
+          python -m ci.phase1_public_live_spool_trial \
+            --allow-public-market-data \
+            --accept-experimental-spool \
+            --measure-checkpoint-completion \
+            --reuse-derived-connections \
+            --reuse-producer-connections \
+            --reuse-receiver-connection \
+            --reuse-original-connection \
+            --cooperative-reader-yield \
+            --frames 300 --timeout-s 120.0 --max-lag-ms 5000 \
+            --output-dir "$root" > "${RUNNER_TEMP}/p115_source_summary.json" &
+          producer_pid=$!
+          trap 'kill "$producer_pid" 2>/dev/null || true; wait "$producer_pid" 2>/dev/null || true' EXIT
+          python -m ci.phase1_host_soak_watchdog \
+            --observe-existing-research \
+            --acknowledge-not-24h-proof \
+            --source-dir "$root" --watch-dir "$watcher" \
+            --poll-s 1.0 --max-watch-s 180.0 \
+            | tee "${RUNNER_TEMP}/p115_watch_summary.json"
+          wait "$producer_pid"
+          python -m ci.phase1_checkpoint_delivery_audit --root "$root" \
+            | tee "${RUNNER_TEMP}/p115_checkpoint_audit.json"
+          python -m ci.phase1_crash_gap_triage --trial-dir "$root" \
+            | tee "${RUNNER_TEMP}/p115_crash_audit.json"
+          trap - EXIT
+      - name: Stage sanitized metadata only (never original SQLite or per-event trace)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="${RUNNER_TEMP}/p115_aggregate_only"
+          mkdir -p "$stage"
+          for name in watch_summary checkpoint_audit crash_audit; do
+            src="${RUNNER_TEMP}/p115_${name}.json"
+            if [ -f "$src" ]; then cp "$src" "$stage/${name}.json"; fi
+          done
+      - name: Upload limited aggregate-only evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: econith-p115-host-aggregate-${{ github.run_id }}
+          path: ${{ runner.temp }}/p115_aggregate_only/
+          retention-days: 3
+          if-no-files-found: warn
