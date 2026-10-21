@@ -132,8 +132,39 @@ def _account(db):
               "last_close_price", "history_json", "history_sha256")
     result = dict(zip(fields, row))
     if (_sha(json.loads(result["history_json"])) != result["history_sha256"]
-        or result["cash"] < -1e-8 or result["qty"] < -1e-12):
+        or result["cash"] < -1e-8 or result["qty"] < -1e-12
+        or result["initial"] <= 0 or result["highwater"] < result["initial"]
+        or result["halted"] not in (0, 1)):
         raise PaperRefused("research journal history/cash integrity invalid")
+    # Reconstruct every cash/asset transition from *persisted* hypothetical
+    # fills on EVERY restart/read. No trust in account counters alone.
+    cash, qty = result["initial"], 0.
+    receipts = db.execute(
+        """SELECT f.side, f.quantity, f.execution_price, f.fee,
+                  f.post_cash, f.post_quantity, d.status
+           FROM paper_fills f LEFT JOIN decisions d ON d.id=f.decision_id
+           ORDER BY f.decision_id"""
+    ).fetchall()
+    for side, amount, price, fee, saved_cash, saved_qty, decision_status in receipts:
+        if (decision_status != "SIMULATED_FILL_AT_POST_SIGNAL_QUOTE"
+            or side not in ("BUY", "SELL")
+            or not all(isinstance(v, (int, float)) and math.isfinite(v)
+                       for v in (amount, price, fee, saved_cash, saved_qty))
+            or amount <= 0 or price <= 0 or fee < 0
+            or abs(fee - amount * price * FEE_BPS / 10000.) > 1e-6):
+            raise PaperRefused("paper receipt/status/economics audit failed")
+        cash += (-1 if side == "BUY" else 1) * amount * price - fee
+        qty += amount if side == "BUY" else -amount
+        if (cash < -1e-6 or qty < -1e-9
+            or abs(cash - saved_cash) > 1e-6
+            or abs(qty - saved_qty) > 1e-9):
+            raise PaperRefused("paper receipt cash/asset sequence does not reconcile")
+    if abs(cash - result["cash"]) > 1e-6 or abs(qty - result["qty"]) > 1e-9:
+        raise PaperRefused("paper account holdings diverged from committed fills")
+    if db.execute(
+        "SELECT COUNT(*) FROM decisions WHERE status='PENDING_QUOTE'"
+    ).fetchone()[0] > 1:
+        raise PaperRefused("multiple outstanding signal intents forbidden")
     return result
 
 
