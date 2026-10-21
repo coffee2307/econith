@@ -147,9 +147,10 @@ def test_failed_post_decision_quote_keeps_persisted_pending_and_mark(ledger):
 
 def test_invalid_cash_reserve_does_not_make_fake_passive_trade(ledger):
     snap, at = _fixture_source()
+    observe(ledger, snap, local_ms=at)
     q = {"symbol":"BTCUSDT", "bidPrice":"10000", "askPrice":"10000.01"}
     with pytest.raises(PaperRefused, match="deviates"):
-        append_mark(ledger, q, _book(), received_local_ms=at)
+        append_mark(ledger, q, _book(), received_local_ms=at+1)
     assert report(ledger)["verified_quote_marks"] == 0
 
 
