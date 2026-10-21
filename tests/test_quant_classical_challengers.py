@@ -160,11 +160,11 @@ def test_legacy_default_engine_still_matches_explicit_frozen_momentum():
     rules = {"BTCUSDT": SymbolRules(step_size=".001", min_notional=5)}
     cfg = PaperConfig(
         initial_cash=100, timeframe_ms=14_400_000,
-        lookback=97, entry_threshold=.01, max_asset_weight=.2,
+        lookback=24, entry_threshold=.01, max_asset_weight=.2,
         max_total_weight=.2, max_drawdown=.15,
     )
     standard = replay_spot({"BTCUSDT": bars}, rules, cfg)
     with_callback = replay_spot({"BTCUSDT": bars}, rules, cfg,
                                 signal_policy=policy("frozen_momentum24"))
-    assert standard.to_dict() != with_callback.to_dict()  # standard uses 97, challenger frozen at 24
+    assert standard.to_dict() == with_callback.to_dict()
     assert all(x["execution_mode"] == "SIMULATION" for x in with_callback.to_dict()["fills"])
