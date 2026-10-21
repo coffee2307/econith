@@ -53,9 +53,12 @@ jobs:
             --interval 4h --candles 500 \
             --allow-public-market-data --simulation-only \
             --output-dir "$root" | tee "${RUNNER_TEMP}/paper_summary.json"
-          python -m econith.quant.paper_audit \
-            --report "$root/base_replay.json" \
-            --output "${RUNNER_TEMP}/paper_reaudit.json"
+          python - "$root/base_replay.json" <<'PY' | tee "${RUNNER_TEMP}/paper_reaudit.json"
+          import json, sys
+          from econith.quant.paper_audit import audit_paper_report
+          payload = json.load(open(sys.argv[1], encoding="utf-8"))
+          print(json.dumps(audit_paper_report(payload["report"]), sort_keys=True))
+          PY
       - name: Stage only summary metadata, not all market or trade data
         if: always()
         shell: bash
