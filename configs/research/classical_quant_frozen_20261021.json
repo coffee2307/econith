@@ -1,0 +1,99 @@
+{
+  "schema": "econith-classical-quant-challengers-20261021-v1",
+  "design_locked_before_first_public_benchmark_run": true,
+  "research_basis": "Public research: Moskowitz/Ooi/Pedersen time series momentum, Moreira/Muir volatility management, Gatev et al. relative-value mean-reversion (NOT same implementation). No proprietary fund strategies.",
+  "prior_information_contaminated": true,
+  "base_parent_pr": 53,
+  "universe": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "DOGEUSDT"
+  ],
+  "intervals": [
+    "1h",
+    "4h",
+    "1d"
+  ],
+  "requested_closed_candles": 500,
+  "virtual_capital_usdt": 100,
+  "compare": [
+    "frozen_momentum24",
+    "trend_vol_v1",
+    "donchian_v1",
+    "mean_revert_v1",
+    "deterministic_ensemble_v1"
+  ],
+  "evaluate_windows": [
+    "full",
+    "late30"
+  ],
+  "lookback_warmup": 97,
+  "rules": {
+    "frozen_momentum24": {
+      "momentum_bars": 24,
+      "positive_return_threshold": 0.01,
+      "target_weight": 0.2
+    },
+    "trend_vol_v1": {
+      "momentum_bars": 24,
+      "trend_bars": 72,
+      "volatility_bars": 24,
+      "volatility_target_per_bar": 0.025,
+      "target_weight_cap": 0.2,
+      "minimum_regime_return": 0
+    },
+    "donchian_v1": {
+      "channel_bars": 48,
+      "hold_sma_bars": 48,
+      "trend_bars": 72,
+      "volatility_bars": 24,
+      "volatility_target_per_bar": 0.025,
+      "target_weight_cap": 0.2
+    },
+    "mean_revert_v1": {
+      "zscore_bars": 20,
+      "entry_zscore": -1.5,
+      "trend_filter_bars": 96,
+      "min_96bar_return": -0.03,
+      "target_weight": 0.1
+    },
+    "deterministic_ensemble_v1": {
+      "trend_vol_weight": 0.5,
+      "donchian_weight": 0.3,
+      "mean_revert_weight": 0.2,
+      "max_exposure": 0.2
+    }
+  },
+  "frictions": [
+    {
+      "name": "base",
+      "multiplier": 1,
+      "fee_bps": 10,
+      "slippage_bps": 2,
+      "half_spread_bps": 1
+    },
+    {
+      "name": "stress3x",
+      "multiplier": 3,
+      "fee_bps": 30,
+      "slippage_bps": 6,
+      "half_spread_bps": 3
+    },
+    {
+      "name": "stress5x",
+      "multiplier": 5,
+      "fee_bps": 50,
+      "slippage_bps": 10,
+      "half_spread_bps": 5
+    }
+  ],
+  "max_asset_exposure": 0.2,
+  "max_total_exposure": 0.2,
+  "max_drawdown": 0.15,
+  "entry_fill": "next historical candle open after prior closed signal",
+  "no_short": true,
+  "benchmark": "zero-cost zero-return cash and passive 20%-exposure buy-hold with matched friction",
+  "evaluation_contract": "all 60 family-market-timeframe cells + 3 friction scenarios retained; no tuning after seeing results; losses accepted; archive original hashes",
+  "scientific_limits": "12 pre-inspected markets and overlapping windows, historical only; positive historical replay NOT prospective edge, no Sharpe claiming independent probabilities, 0 orders"
+}

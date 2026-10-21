@@ -12,6 +12,7 @@ import math
 from dataclasses import asdict, dataclass, field
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
+from typing import Callable
 
 
 @dataclass(frozen=True)
@@ -141,12 +142,16 @@ def _momentum(closes: list[float], lookback: int) -> float:
 def replay_spot(
     market: dict[str, list[Candle]], rules: dict[str, SymbolRules],
     cfg: PaperConfig = PaperConfig(),
+    *, signal_policy: Callable[[str, tuple[Candle, ...]], float] | None = None,
 ) -> PaperReport:
     """Synchronous portfolio replay. Positions are NEVER short or leveraged.
 
     At time t, previous candles [0..t-1] alone determine target exposure;
     fills are simulated at candle t open, with adverse spread/slippage and fees.
     Portfolio equity is recorded once per shared timestamp at t close.
+    Optional research policies see a defensive immutable tuple of ONLY prior
+    closed bars and return a desired nonnegative weight; the legacy strategy
+    remains unchanged by default.
     """
     names = sorted(market)
     if not names or set(names) != set(rules):
@@ -184,9 +189,25 @@ def replay_spot(
             # Exit existing positions before entries. Strictly previous-bar features.
             entries: list[str] = []
             exits: list[str] = []
+            requested: dict[str, float] = {}
             for s in names:
-                mom = _momentum([b.close for b in market[s][:i]], cfg.lookback)
-                (entries if mom > cfg.entry_threshold and not halted else exits).append(s)
+                if signal_policy is None:
+                    mom = _momentum([b.close for b in market[s][:i]], cfg.lookback)
+                    weight_request = cfg.max_asset_weight if mom > cfg.entry_threshold else 0.0
+                else:
+                    # LAST viewable close is before the fill bar OPEN.
+                    # Policy must not see today high/low, future close, other
+                    # market data or mutable references to market arrays.
+                    history = tuple(market[s][:i])
+                    if history[-1].close_ms >= current[s].open_ms:
+                        raise AssertionError("policy future bar boundary")
+                    weight_request = signal_policy(s, history)
+                    if (type(weight_request) not in (int, float)
+                        or not math.isfinite(weight_request)
+                        or not 0 <= weight_request <= cfg.max_asset_weight):
+                        raise ValueError("unbounded or nonfinite strategy target")
+                requested[s] = weight_request
+                (entries if weight_request > 0 and not halted else exits).append(s)
             for s in exits:
                 qty = rules[s].floor_qty(positions[s])
                 if qty <= 0:
@@ -204,7 +225,7 @@ def replay_spot(
             weight = min(cfg.max_asset_weight, cfg.max_total_weight / eligible) if eligible else 0.0
             for s in entries:
                 buy_px = current[s].open * (1.0 + friction)
-                target_value = prev_equity * weight
+                target_value = prev_equity * min(weight, requested[s])
                 current_value = positions[s] * current[s].open
                 desired_value = max(0.0, target_value - current_value)
                 purchase_budget = min(desired_value, cash / (1.0 + fee))
