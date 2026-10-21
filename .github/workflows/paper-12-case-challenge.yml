@@ -1,0 +1,92 @@
+name: ECONITH frozen 12-case no-cherry-pick paper challenge
+
+on:
+  pull_request:
+    paths:
+      - "scripts/paper_unfiltered_matrix.py"
+      - "tests/test_paper_unfiltered_matrix.py"
+      - "docs/research/P2_02_FROZEN_PAPER_MATRIX_20261021.json"
+      - ".github/workflows/paper-12-case-challenge.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-frozen-research-integrity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install offline Python test requirements
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Fixed strategy, all zero-profit cases, provenance, costs and fail-closed tests
+        run: |
+          python -m pytest -q --tb=short \
+            tests/test_paper_unfiltered_matrix.py \
+            tests/test_paper_trade_quickstart.py \
+            tests/test_paper_v1.py \
+            tests/test_paper_audit.py
+
+  public-12-case-preregistered:
+    needs: offline-frozen-research-integrity
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install simulation-only public data requirements
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: All 12 PREDECLARED public Spot sources, 100 virtual USDT each
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP}/econith-paper-frozen-${GITHUB_RUN_ID}"
+          python -m scripts.paper_unfiltered_matrix \
+            --allow-public-market-data --simulation-only \
+            --output-dir "$root" | tee "${RUNNER_TEMP}/frozen_matrix_console.jsonl"
+          python - "$root" <<'PY'
+          import json, sys
+          from pathlib import Path
+          path = Path(sys.argv[1]) / "unfiltered_matrix.json"
+          report = json.loads(path.read_text(encoding="utf-8"))
+          assert report["expected_cases"] == 12
+          assert report["successful_data_cases"] == 12
+          assert len(report["cases"]) == 12
+          assert report["real_exchange_orders"] == 0
+          assert report["model_parameter_retuning_performed"] is False
+          print("FULL_UNFILTERED_PAPER_MATRIX_FINISHED_NOT_ALPHA_PROOF")
+          print(json.dumps({k: v for k,v in report.items() if k != "cases"}, sort_keys=True))
+          PY
+      - name: Stage full public-only snapshots and honest positive/negative outcomes
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="${RUNNER_TEMP}/p2-paper-evidence"
+          mkdir -p "$stage"
+          root="${RUNNER_TEMP}/econith-paper-frozen-${GITHUB_RUN_ID}"
+          if [ -f "${RUNNER_TEMP}/frozen_matrix_console.jsonl" ]; then
+            cp "${RUNNER_TEMP}/frozen_matrix_console.jsonl" "$stage/console.jsonl"
+          fi
+          if [ -d "$root" ]; then
+            cp -R "$root"/. "$stage"/
+          fi
+      - name: Archive public candle source hashes, entire unfiltered result and preregistered plan
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: econith-paper-frozen-12case-${{ github.run_id }}
+          path: ${{ runner.temp }}/p2-paper-evidence/
+          retention-days: 3
+          if-no-files-found: warn
