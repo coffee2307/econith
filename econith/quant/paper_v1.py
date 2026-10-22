@@ -62,8 +62,17 @@ class PaperConfig:
     half_spread_bps: float = 1.0
     max_drawdown: float = 0.15
     timeframe_ms: int = 3600000
+    # Opt in: historical published runs keep the legacy entry/exit convention.
+    target_rebalance: bool = False
+    rebalance_band: float = 0.01
 
     def __post_init__(self) -> None:
+        if (type(self.target_rebalance) is not bool
+            or type(self.rebalance_band) not in (float, int)
+            or not math.isfinite(self.rebalance_band)
+            or not 0 <= self.rebalance_band <= 1
+            or (self.target_rebalance and self.rebalance_band > self.max_asset_weight)):
+            raise ValueError("invalid target rebalance configuration")
         if not math.isfinite(self.initial_cash) or self.initial_cash <= 0:
             raise ValueError("initial_cash must be positive")
         if self.lookback < 2 or self.timeframe_ms <= 0:
@@ -139,6 +148,56 @@ def _momentum(closes: list[float], lookback: int) -> float:
     return closes[-1] / closes[-1 - lookback] - 1.0
 
 
+def _rebalance(cash, positions, current, requested, rules, cfg, fills, rejected):
+    """Trade target deltas at the current open; only signals use prior closes.
+
+    A band is a turnover control, never a reason to suppress a zero-target
+    exit or a reduction above allocation caps. Untradeable dust is disclosed.
+    """
+    friction = (cfg.slippage_bps + cfg.half_spread_bps) / 10000
+    fee = cfg.fee_bps / 10000
+    opening_equity = cash + sum(positions[s] * current[s].open for s in positions)
+    total = sum(requested.values())
+    scale = min(1., cfg.max_total_weight / total) if total else 0.
+    targets = {s: opening_equity * w * scale for s, w in requested.items()}
+    gross = opening_equity - cash
+    over_total = gross > opening_equity * cfg.max_total_weight + 1e-8
+    # Sells first so rotations cannot borrow or keep the old risk allocation.
+    for side in ('SELL', 'BUY'):
+        for s in sorted(positions):
+            bar = current[s]
+            value = positions[s] * bar.open
+            delta = targets[s] - value
+            if (side == 'SELL' and delta >= 0) or (side == 'BUY' and delta <= 0):
+                continue
+            forced = (targets[s] == 0 or over_total
+                      or value > opening_equity * cfg.max_asset_weight + 1e-8)
+            if not forced and abs(delta) <= opening_equity * cfg.rebalance_band:
+                continue
+            px = bar.open * (1 - friction if side == 'SELL' else 1 + friction)
+            if side == 'SELL':
+                qty = rules[s].floor_qty(min(positions[s], -delta / bar.open))
+            else:
+                exposure = sum(positions[k] * current[k].open for k in positions)
+                budget = min(delta, cash,
+                             max(0., opening_equity * cfg.max_total_weight - exposure))
+                qty = rules[s].floor_qty(budget / (px * (1 + fee)))
+            notional = qty * px
+            if qty <= 0 or notional < rules[s].min_notional:
+                rejected.append({'time': bar.open_ms, 'symbol': s,
+                                 'reason': 'target_delta_below_lot_or_notional'})
+                continue
+            if side == 'SELL':
+                positions[s] = max(0., positions[s] - qty)
+                cash += notional * (1 - fee)
+            else:
+                cash -= notional * (1 + fee)
+                positions[s] += qty
+            fills.append(SimFill(bar.open_ms, s, side, qty, px, notional * fee,
+                                 'target_rebalance'))
+    return cash
+
+
 def replay_spot(
     market: dict[str, list[Candle]], rules: dict[str, SymbolRules],
     cfg: PaperConfig = PaperConfig(),
@@ -208,6 +267,11 @@ def replay_spot(
                         raise ValueError("unbounded or nonfinite strategy target")
                 requested[s] = weight_request
                 (entries if weight_request > 0 and not halted else exits).append(s)
+            if cfg.target_rebalance:
+                targets = {s: (0. if halted else requested[s]) for s in names}
+                cash = _rebalance(cash, positions, current, targets, rules,
+                                  cfg, fills, rejected)
+                entries, exits = [], []
             for s in exits:
                 qty = rules[s].floor_qty(positions[s])
                 if qty <= 0:
