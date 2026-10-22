@@ -1,0 +1,74 @@
+name: ECONITH P2-07 cost-aware walk-forward
+
+on:
+  pull_request:
+    paths:
+      - 'econith/quant/paper_v1.py'
+      - 'econith/quant/cost_aware_walkforward.py'
+      - 'scripts/quant_cost_aware_walkforward.py'
+      - 'tests/test_target_rebalance.py'
+      - 'tests/test_cost_aware_walkforward.py'
+      - '.github/workflows/quant-cost-aware-walkforward.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Deterministic causal selection and target reduction regressions
+        run: python -m unittest tests.test_target_rebalance tests.test_cost_aware_walkforward -v
+
+  public-matrix:
+    needs: offline
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Fixed 12 cases, all outcomes and transaction costs retained
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m scripts.quant_cost_aware_walkforward \
+            --allow-public-market-data --simulation-only \
+            --output-dir "${RUNNER_TEMP}/econith-p207-${GITHUB_RUN_ID}" \
+            | tee "${RUNNER_TEMP}/p207-console.jsonl"
+          python - "${RUNNER_TEMP}/econith-p207-${GITHUB_RUN_ID}" <<'PY'
+          import json, sys
+          from pathlib import Path
+          root = Path(sys.argv[1])
+          report = json.loads((root/'matrix.json').read_text())
+          assert report['expected_cases'] == report['completed_cases'] == 12
+          assert len(report['cases']) == 12
+          for case in report['cases']:
+              result = case['result']
+              assert sum(f['test_bars'] for f in result['folds']) == result['evaluated_bars']
+              for group in ('continuous', 'passive_buyhold', 'frozen_momentum_reference'):
+                  for cost in ('base', 'stress3x', 'stress5x'):
+                      assert result[group][cost]['ledger_status'] == 'SIMULATED_LEDGER_RECONCILED'
+          # No assertion requires a positive return. Integrity != profitability.
+          print(json.dumps(report['comparison'], sort_keys=True))
+          PY
+      - name: Preserve source hashes, full losses and incomplete cases
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: econith-p207-public-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/econith-p207-${{ github.run_id }}/
+            ${{ runner.temp }}/p207-console.jsonl
+          retention-days: 7
+          if-no-files-found: warn
